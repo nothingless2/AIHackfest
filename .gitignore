@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+
+workspace/
+node_modules/
+__pycache__/
+*.pyc
+openclaw-plugin/dist/
+.pytest_cache/

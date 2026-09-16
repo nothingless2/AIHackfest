@@ -1,0 +1,166 @@
+"""Fondasi bersama semua agent: path, state, logging, notifikasi Telegram, persona."""
+
+import json
+import os
+import traceback
+from datetime import datetime, timezone
+
+import requests
+from dotenv import load_dotenv
+
+# --- Root proyek dihitung dari lokasi file ini, bukan dari cwd pemanggil.
+# Ini penting: pipeline bisa dipanggil dari mana saja (plugin OpenClaw, cron, CLI)
+# tanpa path menjadi salah arah.
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
+
+RAW_DIR = os.path.join(PROJECT_ROOT, "workspace", "raw")
+DRAFTS_DIR = os.path.join(PROJECT_ROOT, "workspace", "drafts")
+STATE_DIR = os.path.join(PROJECT_ROOT, "workspace", "state")
+
+BRIEF_PATH = os.path.join(STATE_DIR, "creative_brief.json")
+TREND_REPORT_PATH = os.path.join(STATE_DIR, "trend_report.json")
+RENDER_STATUS_PATH = os.path.join(STATE_DIR, "render_status.json")
+PUBLISH_HISTORY_PATH = os.path.join(STATE_DIR, "publish_history.json")
+PERFORMANCE_PATH = os.path.join(STATE_DIR, "performance_summary.json")
+ERROR_LOG_PATH = os.path.join(STATE_DIR, "error.log")
+
+DRAFT_VIDEO_PATH = os.path.join(DRAFTS_DIR, "video_output.mp4")
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+# Tujuan pengiriman: utamakan chat asal pemanggil (diteruskan plugin OpenClaw),
+# baru jatuh ke TELEGRAM_CHAT_ID di .env untuk pemakaian CLI. Tanpa ini, hasil
+# selalu terkirim ke satu chat tetap walau yang memicu adalah akun/chat lain.
+TELEGRAM_CHAT_ID = os.getenv("CONTENT_FACTORY_CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID")
+
+# Persona sesuai agent yang terdaftar di OpenClaw (agents.entries).
+PERSONA = {
+    "trendanalysts": "🔍 TrendAnalysts",
+    "brainidea": "💡 BrainIdea",
+    "contentmakers": "✍️ ContentMakers",
+    "approvalpost": "✅ ApprovalPost",
+    "contentinsight": "📊 ContentInsight",
+    "pipeline": "⚙️ Pipeline",
+}
+
+MEDIA_EXTENSIONS = {
+    ".jpg", ".jpeg", ".png", ".webp", ".bmp",
+    ".mp4", ".mov", ".avi", ".mkv",
+}
+
+
+def ensure_dirs():
+    for path in (RAW_DIR, DRAFTS_DIR, STATE_DIR):
+        os.makedirs(path, exist_ok=True)
+
+
+def now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def log_error(context, exc):
+    """Catat error lengkap ke error.log tanpa menghentikan proses pemanggil."""
+    ensure_dirs()
+    entry = f"[{now_iso()}] {context}: {exc}\n{traceback.format_exc()}\n"
+    with open(ERROR_LOG_PATH, "a", encoding="utf-8") as f:
+        f.write(entry)
+
+
+def read_json(path, default=None):
+    if not os.path.exists(path):
+        return default
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def write_json(path, payload):
+    ensure_dirs()
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=4, ensure_ascii=False)
+
+
+def telegram_configured():
+    return bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
+
+
+def notify(agent_key, message, silent_fail=True):
+    """Kirim pesan berlabel persona ke Telegram. Selalu ikut dicetak ke stdout.
+
+    Kalau CONTENT_FACTORY_QUIET diset (mis. saat dijalankan lewat plugin OpenClaw),
+    pesan hanya dicetak — pengiriman ke chat diserahkan ke pemanggil supaya tidak dobel.
+    """
+    label = PERSONA.get(agent_key, agent_key)
+    text = f"{label}: {message}"
+    print(text)
+
+    if os.getenv("CONTENT_FACTORY_QUIET"):
+        return False
+
+    if not telegram_configured():
+        return False
+
+    try:
+        resp = requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+            data={"chat_id": TELEGRAM_CHAT_ID, "text": text},
+            timeout=15,
+        )
+        return resp.status_code == 200
+    except Exception as e:
+        if not silent_fail:
+            raise
+        log_error(f"notify({agent_key})", e)
+        return False
+
+
+def send_video(caption, video_path):
+    """Kirim file video ke Telegram. Return True kalau benar-benar terkirim."""
+    if not telegram_configured():
+        print(f"[warn] Telegram belum dikonfigurasi, video tidak dikirim: {video_path}")
+        return False
+
+    if not os.path.exists(video_path):
+        print(f"[warn] Video tidak ditemukan: {video_path}")
+        return False
+
+    try:
+        with open(video_path, "rb") as vf:
+            resp = requests.post(
+                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendVideo",
+                data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption},
+                files={"video": vf},
+                timeout=120,
+            )
+        if resp.status_code != 200:
+            print(f"[warn] Gagal kirim video ke Telegram: {resp.text}")
+            return False
+        return True
+    except Exception as e:
+        log_error("send_video", e)
+        return False
+
+
+def list_raw_assets():
+    """Semua bahan mentah yang benar-benar ada di workspace/raw/."""
+    ensure_dirs()
+    return sorted(
+        name
+        for name in os.listdir(RAW_DIR)
+        if os.path.splitext(name)[1].lower() in MEDIA_EXTENSIONS
+    )
+
+
+def resolve_assets(names):
+    """Ubah nama file jadi path absolut + pastikan semuanya benar-benar ada.
+
+    Zero Hallucination on Assets: kalau ada nama yang tidak ada di disk, gagal
+    terang-terangan alih-alih diam-diam melanjutkan dengan bahan karangan.
+    """
+    paths = [os.path.join(RAW_DIR, name) for name in names]
+    missing = [n for n, p in zip(names, paths) if not os.path.exists(p)]
+    if missing:
+        raise FileNotFoundError(f"Bahan mentah tidak ada di {RAW_DIR}: {missing}")
+    return paths

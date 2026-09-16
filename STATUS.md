@@ -1,0 +1,68 @@
+# Status Fitur — Content Factory 5 Agent
+
+Terakhir diverifikasi: 2026-09-16, terhadap kode di `scripts/`, `skills/`, dan
+`openclaw-plugin/` sebagaimana ada di disk saat ini. Lihat [ARCHITECTURE.md](ARCHITECTURE.md)
+untuk penjelasan alur & desain lengkap.
+
+## Sudah berfungsi (diverifikasi lewat tes nyata)
+
+| Fitur | Bukti verifikasi |
+|---|---|
+| Upload gambar/video di Telegram terbaca | File tersalin ke `workspace/raw/` dengan ukuran & dimensi asli utuh |
+| Riset tren + naskah oleh GPT-4o nyata | `creative_brief.json` berisi naskah koheren, bukan template |
+| Voice-over AI (edge-tts) | Audio track ada di output, `mean_volume` terukur, bukan silent |
+| Render 9:16, multi-asset (gambar+video campur) | `ffprobe` konsisten `1080x1920` di semua run tes |
+| Teks scene di safe-zone (tidak kepotong UI platform) | Diverifikasi visual lewat screenshot frame |
+| Render asinkron (tidak kena timeout tool) | Tool balas <1 detik, render lanjut di background, video valid |
+| Video dikirim ke chat pemanggil (bukan ID tetap) | `toolContext.nativeChannelId` diteruskan sebagai `CONTENT_FACTORY_CHAT_ID` |
+| Zero Hallucination on Assets | Nama file dipaksa dari Python; nama karangan → gagal eksplisit |
+| Pipeline berhenti saat tahap kritis gagal | Exit code diperiksa, tidak lanjut dengan data basi |
+| Data performa tidak selalu "HIGH_PERFORMING" | Hasil tes nyata: `MODERATE_PERFORMING` |
+| **Render cepat (ffmpeg-native)** | Profiling berlapis: 332,8s → 35,6s untuk render (~9x), lihat detail di bawah |
+
+### Optimasi performa render (2026-09-16)
+
+Render awalnya berbasis moviepy (Python per-frame) — untuk 2 klip video pendek
+butuh **332,8 detik**. Diprofilkan per-lapis untuk cari bottleneck sebenarnya:
+
+| Operasi | moviepy (Python) | ffmpeg native (C) |
+|---|---|---|
+| Resize+Crop ke 1080x1920 (1 klip) | 32,1s | 3,6s |
+| Concatenate 2 klip + crossfade | 99,1s | 8,7s (hard-cut, tanpa crossfade) |
+| Text overlay | +45s | +5,9s (`drawtext`) |
+
+`skills/video_generator/auto_render.py` ditulis ulang: moviepy hanya dipakai untuk
+membaca durasi audio (operasi ringan); semua scale/crop/loop/concat/teks sekarang
+lewat subprocess `ffmpeg` native. Hasil akhir: **35,6 detik** untuk kasus yang sama.
+
+## Belum ada / masih stub — sengaja tidak disembunyikan
+
+### Gap arsitektur (mempengaruhi keandalan)
+
+| Gap | Detail | Risiko |
+|---|---|---|
+| **APPROVE/REVISI tidak pernah ditangkap** | `agent4_approval.py` punya logika polling `getUpdates`, tapi **tidak dipanggil** oleh jalur plugin (`run_and_deliver.py`). Tidak ada kode yang bereaksi terhadap balasan APPROVE. | Human-in-the-loop yang dijanjikan di caption Telegram **tidak ditegakkan** sistem. Untungnya juga tidak ada auto-publish, jadi tidak berbahaya — tapi fiturnya memang belum ada. |
+| **Path output video tetap (bukan per-run)** | `DRAFT_VIDEO_PATH = workspace/drafts/video_output.mp4` — sama untuk semua run. | Dua permintaan bersamaan (dari 2 chat berbeda) akan **saling menimpa** file draft. |
+| **Tidak ada pembatasan akses per-pengirim** | `tools.toolsBySender` belum diset di config OpenClaw. | Semua akun Telegram yang sudah *paired* bisa memicu pipeline dan memakai kredit OpenAI Anda. |
+| `publish_to_platforms()` | Stub, `return None`. Butuh kredensial Meta Graph API / TikTok / YouTube Data API. | Publish otomatis tidak ada; user diminta upload manual. |
+| `fetch_real_analytics()` | Stub, `return None`, fallback ke estimasi acak. | Angka performa bukan data asli platform. |
+| `agents/*.md`, `skills/*.md`, `openclaw.config.json` (AIHackfest) | Tidak dibaca kode apa pun. `agents.entries` di OpenClaw tidak menunjuk ke file `.md` ini. | Dokumen desain murni, tidak mempengaruhi perilaku sistem. |
+| Tidak ada SOUL.md | — | Guardrail hanya hidup sebagai kode (validasi, try/except), tidak ada dokumen kebijakan terpisah. |
+
+### Gap kualitas konten (dikonfirmasi 2026-09-16, terverifikasi via code inspection)
+
+| Gap | Detail | Dampak |
+|---|---|---|
+| **TrendAnalysts & BrainIdea "buta" terhadap isi bahan** | `agent1_2_brief.py` kirim ke GPT-4o cuma **nama file**, bukan isi gambar/video (tidak ada panggilan vision/multimodal). | Naskah & konsep konten tidak benar-benar sesuai apa yang ada di foto/video user — cuma nebak dari nama file. |
+| **Tanpa musik latar** | Tidak ada satu baris kode pun yang mencampur BGM. Audio final cuma voice-over polos. | Konten terasa sepi/kering dibanding video sejenis di platform. |
+| **Tanpa animasi teks** | Teks muncul & hilang instan di posisi tetap (`drawtext` statis). | Terasa kaku dibanding caption bergaya TikTok/Reels modern. |
+| **Voice-over terdengar kaku** | `edge-tts` (Microsoft neural TTS pihak ketiga) tanpa tuning SSML/prosodi. | Keterbatasan teknologi yang dipilih, belum tentu bisa dihilangkan total. |
+
+Belum dikerjakan — menunggu giliran setelah optimasi performa selesai (lihat riwayat percakapan).
+
+## Riwayat tes nyata di Telegram
+
+- 14 Sept 11:15 — 4 gambar, **gagal** (race condition: `workspace/raw` sempat kosong saat Agent 1&2 baca; tidak terulang di tes berikutnya).
+- 14 Sept 11:29 — 5 gambar, **berhasil**, terkirim (~jalur lama, moviepy).
+- 14 Sept — 4 video, **berhasil** tapi 87 menit (kombinasi duplikasi run + moviepy lambat untuk video).
+- 16 Sept — profiling & rewrite render engine ke ffmpeg-native, diverifikasi lokal (video-only & campuran gambar+video), **belum dites ulang lewat Telegram**.

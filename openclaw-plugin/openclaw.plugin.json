@@ -1,0 +1,28 @@
+{
+  "id": "content-factory",
+  "name": "Content Factory",
+  "description": "Susun gambar/video mentah yang diupload user jadi satu konten vertikal 9:16 lewat pipeline 5 agent (TrendAnalysts, BrainIdea, ContentMakers, ApprovalPost, ContentInsight).",
+  "version": "0.1.0",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "projectRoot": {
+        "type": "string",
+        "description": "Path absolut root proyek AIHackfest (berisi folder scripts/ dan workspace/). Kalau kosong, dibaca dari env CONTENT_FACTORY_ROOT."
+      }
+    }
+  },
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": [
+      "content_factory_run"
+    ]
+  },
+  "toolMetadata": {
+    "content_factory_run": {
+      "optional": true
+    }
+  }
+}

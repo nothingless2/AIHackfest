@@ -1,0 +1,27 @@
+{
+  "gateway": {
+    "port": 18789,
+    "mode": "standalone"
+  },
+  "models": {
+    "default": "gemini",
+    "providers": {
+      "openai": {
+        "apiKey": "${OPENAI_API_KEY}",
+        "model": "gpt-4o"
+      }
+    }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "botToken": "${TELEGRAM_BOT_TOKEN}",
+      "allowedUserIds": []
+    }
+  },
+  "agents": {
+    "storagePath": "./workspace",
+    "definitions": "./agents"
+  }
+}
+
