@@ -18,6 +18,7 @@ load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 RAW_DIR = os.path.join(PROJECT_ROOT, "workspace", "raw")
 DRAFTS_DIR = os.path.join(PROJECT_ROOT, "workspace", "drafts")
 STATE_DIR = os.path.join(PROJECT_ROOT, "workspace", "state")
+PUBLISHED_DIR = os.path.join(PROJECT_ROOT, "workspace", "published")  # dipakai mulai 1b
 
 BRIEF_PATH = os.path.join(STATE_DIR, "creative_brief.json")
 TREND_REPORT_PATH = os.path.join(STATE_DIR, "trend_report.json")
@@ -25,8 +26,26 @@ RENDER_STATUS_PATH = os.path.join(STATE_DIR, "render_status.json")
 PUBLISH_HISTORY_PATH = os.path.join(STATE_DIR, "publish_history.json")
 PERFORMANCE_PATH = os.path.join(STATE_DIR, "performance_summary.json")
 ERROR_LOG_PATH = os.path.join(STATE_DIR, "error.log")
+RUN_LOG_PATH = os.path.join(STATE_DIR, "run_log.jsonl")
 
 DRAFT_VIDEO_PATH = os.path.join(DRAFTS_DIR, "video_output.mp4")
+
+
+def draft_video_path_for_run(run_id):
+    """Path video hasil akhir milik satu run spesifik — dibaca oleh apa pun
+    yang berjalan SETELAH lock render dilepas (delivery, approval-wait),
+    supaya tidak pernah membaca file yang bisa tertimpa run berikutnya.
+    Fallback ke path tetap kalau run_id kosong (pemakaian standalone lama)."""
+    if not run_id:
+        return DRAFT_VIDEO_PATH
+    return os.path.join(DRAFTS_DIR, f"video_{run_id}.mp4")
+
+
+def brief_path_for_run(run_id):
+    """Padanan draft_video_path_for_run() untuk creative_brief.json."""
+    if not run_id:
+        return BRIEF_PATH
+    return os.path.join(STATE_DIR, f"creative_brief_{run_id}.json")
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -53,7 +72,7 @@ MEDIA_EXTENSIONS = {
 
 
 def ensure_dirs():
-    for path in (RAW_DIR, DRAFTS_DIR, STATE_DIR):
+    for path in (RAW_DIR, DRAFTS_DIR, STATE_DIR, PUBLISHED_DIR):
         os.makedirs(path, exist_ok=True)
 
 
