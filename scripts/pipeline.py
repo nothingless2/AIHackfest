@@ -7,13 +7,10 @@ diperiksa exit code-nya dan pipeline BERHENTI kalau ada tahap kritis yang gagal,
 supaya tidak lanjut memproses data basi.
 """
 
-import os
-import subprocess
 import sys
 
-from common import PROJECT_ROOT, ensure_dirs, log_error, notify
-
-SCRIPTS_DIR = os.path.join(PROJECT_ROOT, "scripts")
+from common import ensure_dirs, log_error, notify
+from orchestrator import run_stages
 
 # (file, label, kritis?) — tahap non-kritis boleh gagal tanpa menghentikan pipeline.
 STAGES = [
@@ -24,12 +21,8 @@ STAGES = [
 ]
 
 
-def run_stage(script_name):
-    """Jalankan satu tahap sebagai subprocess, kembalikan exit code-nya."""
-    return subprocess.run(
-        [sys.executable, os.path.join(SCRIPTS_DIR, script_name)],
-        cwd=PROJECT_ROOT,
-    ).returncode
+def _on_noncritical_failure(label, code):
+    print(f"⚠️ {label} gagal (exit {code}), tahap ini tidak kritis — pipeline lanjut.")
 
 
 def main():
@@ -38,20 +31,18 @@ def main():
     print("🚀 PIPELINE 5 AGENT CONTENT FACTORY")
     print("=" * 60)
 
-    for script_name, label, critical in STAGES:
-        print(f"\n▶ {label}")
-        code = run_stage(script_name)
-
-        if code == 0:
-            continue
-
-        if critical:
-            message = f"Pipeline dihentikan: {label} gagal (exit code {code})."
-            print(f"\n❌ {message}")
-            notify("pipeline", message)
-            return code
-
-        print(f"⚠️ {label} gagal (exit {code}), tahap ini tidak kritis — pipeline lanjut.")
+    code, failure = run_stages(
+        STAGES,
+        capture_output=False,
+        on_noncritical_failure=_on_noncritical_failure,
+        on_stage_start=lambda label: print(f"\n▶ {label}"),
+    )
+    if code != 0:
+        label, _output = failure
+        message = f"Pipeline dihentikan: {label} gagal (exit code {code})."
+        print(f"\n❌ {message}")
+        notify("pipeline", message)
+        return code
 
     print("\n" + "=" * 60)
     print("✅ SIKLUS SELESAI.")

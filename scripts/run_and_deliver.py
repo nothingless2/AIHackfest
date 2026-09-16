@@ -9,21 +9,18 @@ oleh gateway OpenClaw di chat, jadi tidak ada rebutan antrian update Telegram.
 """
 
 import os
-import subprocess
 import sys
 
 from common import (
     BRIEF_PATH,
     DRAFT_VIDEO_PATH,
-    PROJECT_ROOT,
     ensure_dirs,
     log_error,
     notify,
     read_json,
     send_video,
 )
-
-SCRIPTS_DIR = os.path.join(PROJECT_ROOT, "scripts")
+from orchestrator import run_stages
 
 STAGES = [
     ("agent5_insight.py", "ContentInsight", False),
@@ -32,14 +29,8 @@ STAGES = [
 ]
 
 
-def run_stage(script_name):
-    result = subprocess.run(
-        [sys.executable, os.path.join(SCRIPTS_DIR, script_name)],
-        cwd=PROJECT_ROOT,
-        capture_output=True,
-        text=True,
-    )
-    return result.returncode, (result.stderr or result.stdout or "").strip()
+def _on_noncritical_failure(label, code):
+    print(f"[warn] {label} gagal (exit {code}), tahap non-kritis — lanjut.")
 
 
 def main():
@@ -49,17 +40,14 @@ def main():
     if os.path.exists(DRAFT_VIDEO_PATH):
         os.remove(DRAFT_VIDEO_PATH)
 
-    for script_name, label, critical in STAGES:
-        code, output = run_stage(script_name)
-        if code == 0:
-            continue
-
-        if critical:
-            tail = "\n".join(output.splitlines()[-4:])
-            notify("pipeline", f"gagal di tahap {label}.\n{tail}")
-            return code
-
-        print(f"[warn] {label} gagal (exit {code}), tahap non-kritis — lanjut.")
+    code, failure = run_stages(
+        STAGES, capture_output=True, on_noncritical_failure=_on_noncritical_failure
+    )
+    if code != 0:
+        label, output = failure
+        tail = "\n".join(output.splitlines()[-4:])
+        notify("pipeline", f"gagal di tahap {label}.\n{tail}")
+        return code
 
     if not os.path.exists(DRAFT_VIDEO_PATH):
         notify("pipeline", "render selesai tapi file video tidak ditemukan.")
