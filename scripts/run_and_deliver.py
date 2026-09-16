@@ -4,56 +4,36 @@ Dipakai untuk mode asinkron: plugin OpenClaw memanggil script ini secara detache
 lalu langsung kembali, supaya render panjang (2-4 menit) tidak dibunuh oleh batas
 waktu eksekusi tool. Progress dan video dikirim langsung dari sini.
 
-Sengaja TIDAK melakukan polling getUpdates: balasan APPROVE/REVISI user ditangani
-oleh gateway OpenClaw di chat, jadi tidak ada rebutan antrian update Telegram.
+Sengaja TIDAK melakukan polling getUpdates: balasan APPROVE/REVISI user belum
+punya handler di jalur ini sama sekali (lihat STATUS.md) -- caption di bawah
+sekadar instruksi untuk user, bukan janji fungsional. File per-run
+(video_{run_id}.mp4, creative_brief_{run_id}.json) sengaja TIDAK dihapus
+langsung setelah terkirim, supaya jadi fondasi siap pakai kalau/ketika handler
+APPROVE untuk jalur plugin ini dibangun -- dibersihkan lewat sweep retensi
+(ditambahkan di Commit 1b), bukan di sini.
 """
 
 import os
 import sys
 
 from common import (
-    BRIEF_PATH,
-    DRAFT_VIDEO_PATH,
+    TELEGRAM_CHAT_ID,
+    brief_path_for_run,
+    draft_video_path_for_run,
     ensure_dirs,
     log_error,
     notify,
     read_json,
     send_video,
 )
-from orchestrator import run_stages
-
-STAGES = [
-    ("agent5_insight.py", "ContentInsight", False),
-    ("agent1_2_brief.py", "TrendAnalysts & BrainIdea", True),
-    ("agent3_render.py", "ContentMakers", True),
-]
+from orchestrator import install_signal_handlers, run_core_stages_locked
+from run_lock import FileLockBusyError, RUN_LOCK_STALE_SECONDS, generate_run_id, sanitize_run_id
+from run_log import log_event
 
 
-def _on_noncritical_failure(label, code):
-    print(f"[warn] {label} gagal (exit {code}), tahap non-kritis — lanjut.")
-
-
-def main():
-    ensure_dirs()
-
-    # Buang sisa file rusak dari run sebelumnya supaya tidak terkirim tidak sengaja.
-    if os.path.exists(DRAFT_VIDEO_PATH):
-        os.remove(DRAFT_VIDEO_PATH)
-
-    code, failure = run_stages(
-        STAGES, capture_output=True, on_noncritical_failure=_on_noncritical_failure
-    )
-    if code != 0:
-        label, output = failure
-        tail = "\n".join(output.splitlines()[-4:])
-        notify("pipeline", f"gagal di tahap {label}.\n{tail}")
-        return code
-
-    if not os.path.exists(DRAFT_VIDEO_PATH):
-        notify("pipeline", "render selesai tapi file video tidak ditemukan.")
-        return 1
-
-    brief = read_json(BRIEF_PATH, {}) or {}
+def deliver_plugin(run_id):
+    video_path = draft_video_path_for_run(run_id)
+    brief = read_json(brief_path_for_run(run_id), {}) or {}
     judul = brief.get("judul", "Untitled")
     hashtags = " ".join(brief.get("hashtags", []))
 
@@ -65,11 +45,49 @@ def main():
         "Balas APPROVE untuk menyetujui atau REVISI untuk perbaikan."
     )
 
-    if not send_video(caption, DRAFT_VIDEO_PATH):
-        notify("pipeline", f"video selesai tapi gagal dikirim. File ada di {DRAFT_VIDEO_PATH}")
+    ok = send_video(caption, video_path)
+    log_event("delivered" if ok else "delivery_failed", run_id, chat_id=TELEGRAM_CHAT_ID)
+    if not ok:
+        notify("pipeline", f"video selesai tapi gagal dikirim. File ada di {video_path}")
         return 1
-
     return 0
+
+
+def _on_noncritical_failure(label, code):
+    print(f"[warn] {label} gagal (exit {code}), tahap non-kritis — lanjut.")
+
+
+def main():
+    install_signal_handlers()
+    ensure_dirs()
+    run_id = sanitize_run_id(os.getenv("CONTENT_FACTORY_RUN_ID") or generate_run_id())
+
+    try:
+        status, detail = run_core_stages_locked(
+            run_id, capture_output=True, on_noncritical_failure=_on_noncritical_failure
+        )
+    except FileLockBusyError as e:
+        log_event(
+            "run_rejected", run_id, chat_id=TELEGRAM_CHAT_ID,
+            holder=e.holder, elapsed_seconds=e.elapsed_seconds,
+        )
+        if e.elapsed_seconds > RUN_LOCK_STALE_SECONDS:
+            msg = (
+                f"masih ada render berjalan, TAPI sudah {e.elapsed_seconds:.0f} detik "
+                f"(lebih lama dari wajar ~{RUN_LOCK_STALE_SECONDS}s) — mungkin proses macet, cek manual."
+            )
+        else:
+            msg = f"masih ada render yang berjalan ({e.elapsed_seconds:.0f} detik lalu). Coba lagi setelah selesai."
+        notify("pipeline", msg)
+        return os.EX_TEMPFAIL
+
+    if status == "FAILED":
+        code, (label, output) = detail
+        tail = ("\n" + "\n".join(output.splitlines()[-4:])) if output else ""
+        notify("pipeline", f"gagal di tahap {label}.{tail}")
+        return code
+
+    return deliver_plugin(run_id)
 
 
 if __name__ == "__main__":

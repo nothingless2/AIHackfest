@@ -1,70 +1,162 @@
-"""Orkestrasi bersama: jalankan daftar tahap sebagai subprocess, tangani
-kritis/non-kritis. Dipakai scripts/pipeline.py dan scripts/run_and_deliver.py —
-diekstrak dari duplikasi identik di kedua file.
-
-Refactor murni (Commit 0, Fase 1 reliability/ops): tidak ada perubahan
-perilaku dari versi sebelum file ini ada. Pesan/wording tetap milik masing-
-masing caller (beda antara pipeline.py dan run_and_deliver.py), supaya output
-CLI/Telegram tidak berubah sedikit pun dibanding sebelum refactor.
+"""Orkestrasi bersama pipeline: jalankan tahap sebagai subprocess dengan batas
+waktu proses-grup (killpg saat timeout/sinyal), lock render eksklusif, dan
+event log siklus-hidup run. Dipakai scripts/pipeline.py dan
+scripts/run_and_deliver.py.
 """
 
 import os
+import shutil
+import signal
 import subprocess
 import sys
+import time
 
-from common import PROJECT_ROOT
+from common import (
+    BRIEF_PATH,
+    DRAFT_VIDEO_PATH,
+    PROJECT_ROOT,
+    TELEGRAM_CHAT_ID,
+    brief_path_for_run,
+    draft_video_path_for_run,
+)
+from run_lock import acquire_render_lock
+from run_log import log_event
 
 SCRIPTS_DIR = os.path.join(PROJECT_ROOT, "scripts")
 
+# (script, label, kritis?, timeout_detik). Timeout dihitung dari rumus:
+#   timeout_tahap > max_attempts x timeout_per_percobaan + total_backoff_terburuk + margin
+# (lihat plan Fase 1). agent1_2_brief/agent3_render sudah diberi headroom untuk
+# retry yang ditambahkan di Commit 2 (belum ada di 1a, tapi angka sudah konsisten
+# supaya tidak perlu direvisi lagi nanti).
+CORE_STAGES = [
+    ("agent5_insight.py", "ContentInsight", False, 30),
+    ("agent1_2_brief.py", "TrendAnalysts & BrainIdea", True, 255),
+    ("agent3_render.py", "ContentMakers", True, 300),
+]
 
-def run_stage(script_name, *, capture_output):
-    """Jalankan satu tahap sebagai subprocess, kembalikan (exit_code, output).
+_active_proc = None  # ditulis run_stage() tepat setelah Popen; dibaca signal handler
 
-    capture_output=True: tangkap stdout/stderr, `output` = stderr atau stdout
-    (mana yang ada), dipotong whitespace — dipakai run_and_deliver.py untuk
-    membangun tail pesan Telegram.
-    capture_output=False: output streaming langsung ke terminal (perilaku CLI
-    interaktif pipeline.py tidak berubah), `output` selalu string kosong.
+
+def _handle_terminate(signum, frame):
+    """SIGINT (Ctrl+C) / SIGTERM (`kill` biasa) -> bunuh process group tahap
+    yang sedang aktif supaya ffmpeg/edge-tts cucu tidak jadi yatim.
+
+    kill -9 (SIGKILL) TIDAK bisa ditangkap handler apa pun (batasan OS, bukan
+    kode ini) -- risiko sisa yang didokumentasikan di plan, bukan bug yang
+    belum diperbaiki. flock tetap ter-auto-release dengan benar walau begitu.
     """
+    if _active_proc is not None and _active_proc.poll() is None:
+        try:
+            os.killpg(os.getpgid(_active_proc.pid), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    sys.exit(128 + signum)
+
+
+def install_signal_handlers():
+    signal.signal(signal.SIGINT, _handle_terminate)
+    signal.signal(signal.SIGTERM, _handle_terminate)
+
+
+def run_stage(script_name, *, run_id, capture_output, timeout=None):
+    """Jalankan satu tahap sebagai subprocess dalam process group baru sendiri
+    (start_new_session=True), kembalikan (exit_code, output).
+
+    timeout=None: tunggu sampai selesai tanpa batas (dipakai untuk
+    agent4_approval.py -- lock/timeout approval sendiri ada di 1b).
+    timeout=N: proses DAN SELURUH process group-nya (termasuk ffmpeg/edge-tts
+    yang di-spawn di dalamnya) dibunuh paksa kalau melebihi N detik --
+    diverifikasi langsung bahwa os.killpg benar-benar menjangkau proses cucu.
+    """
+    global _active_proc
+    env = {**os.environ, "CONTENT_FACTORY_RUN_ID": run_id}
+    kwargs = dict(cwd=PROJECT_ROOT, env=env, start_new_session=True)
     if capture_output:
-        result = subprocess.run(
-            [sys.executable, os.path.join(SCRIPTS_DIR, script_name)],
-            cwd=PROJECT_ROOT,
-            capture_output=True,
-            text=True,
-        )
-        output = (result.stderr or result.stdout or "").strip()
-    else:
-        result = subprocess.run(
-            [sys.executable, os.path.join(SCRIPTS_DIR, script_name)],
-            cwd=PROJECT_ROOT,
-        )
-        output = ""
-    return result.returncode, output
+        kwargs.update(stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+    proc = subprocess.Popen([sys.executable, os.path.join(SCRIPTS_DIR, script_name)], **kwargs)
+    _active_proc = proc
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)  # bunuh SELURUH process group
+        proc.communicate()  # reap, kuras pipe sisa
+        return 124, f"[timeout] tahap melebihi {timeout} detik, proses & anak-anaknya dihentikan paksa."
+    finally:
+        _active_proc = None
+
+    output = (stderr or stdout or "").strip() if capture_output else ""
+    return proc.returncode, output
 
 
-def run_stages(stages, *, capture_output, on_noncritical_failure, on_stage_start=None):
-    """Jalankan `stages` (list of (script_name, label, critical)) berurutan.
+def run_stages(stages, *, run_id, capture_output, on_noncritical_failure, on_stage_start=None):
+    """Jalankan `stages` (list of (script_name, label, critical, timeout))
+    berurutan.
 
     on_stage_start(label), kalau diberikan, dipanggil TEPAT SEBELUM tiap tahap
-    dijalankan (perlu untuk pipeline.py: cetak "▶ {label}" interleaved dengan
+    dijalankan (perlu untuk pipeline.py: cetak "> {label}" interleaved dengan
     output live tahap itu, bukan semua header dicetak di depan).
 
     Tahap non-kritis yang gagal memanggil on_noncritical_failure(label, code)
-    lalu lanjut — pesan persis pemanggilan ini sengaja diserahkan ke caller
-    (beda wording antara pipeline.py dan run_and_deliver.py di kode asli,
-    dipertahankan di sini demi "tanpa perubahan perilaku").
+    lalu lanjut -- pesan persis pemanggilan ini sengaja diserahkan ke caller.
 
     Return (0, None) kalau semua tahap kritis sukses.
     Return (code, (label, output)) di tahap kritis pertama yang gagal.
     """
-    for script_name, label, critical in stages:
+    for script_name, label, critical, timeout in stages:
         if on_stage_start:
             on_stage_start(label)
-        code, output = run_stage(script_name, capture_output=capture_output)
+        code, output = run_stage(script_name, run_id=run_id, capture_output=capture_output, timeout=timeout)
         if code == 0:
             continue
         if critical:
             return code, (label, output)
         on_noncritical_failure(label, code)
     return 0, None
+
+
+def run_core_stages_locked(
+    run_id, *, capture_output, on_stage_start=None, on_noncritical_failure=None
+):
+    """Jalankan CORE_STAGES di dalam lock render. Kalau sukses, salin
+    DRAFT_VIDEO_PATH/BRIEF_PATH ke path ber-run_id SEBELUM lock dilepas --
+    supaya apa pun yang membaca setelah lock lepas (delivery, approval-wait)
+    tidak pernah membaca file yang bisa tertimpa run berikutnya.
+
+    Return ("SUCCESS", None) atau ("FAILED", (code, (label, output))).
+    run_lock.FileLockBusyError menjalar ke pemanggil (TIDAK ditangkap di sini)
+    kalau lock sedang dipegang proses lain -- caller yang memutuskan pesan &
+    exit code untuk kasus itu.
+    """
+    if on_noncritical_failure is None:
+        def on_noncritical_failure(label, code):
+            print(f"[warn] {label} gagal (exit {code}), tahap non-kritis — lanjut.")
+
+    with acquire_render_lock(run_id):
+        log_event("run_started", run_id, chat_id=TELEGRAM_CHAT_ID)
+        t0 = time.time()
+        status = "ERROR"
+        try:
+            code, failure = run_stages(
+                CORE_STAGES,
+                run_id=run_id,
+                capture_output=capture_output,
+                on_noncritical_failure=on_noncritical_failure,
+                on_stage_start=on_stage_start,
+            )
+            if code == 0:
+                shutil.copy2(DRAFT_VIDEO_PATH, draft_video_path_for_run(run_id))
+                shutil.copy2(BRIEF_PATH, brief_path_for_run(run_id))
+                status = "SUCCESS"
+                return status, None
+            status = "FAILED"
+            return status, (code, failure)
+        finally:
+            log_event(
+                "run_finished",
+                run_id,
+                chat_id=TELEGRAM_CHAT_ID,
+                status=status,
+                duration_seconds=time.time() - t0,
+            )

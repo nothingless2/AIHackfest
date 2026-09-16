@@ -1,24 +1,25 @@
-"""Orkestrator pipeline 5 agent.
+"""Orkestrator pipeline 5 agent (jalur CLI).
 
-Urutan: ContentInsight (konteks) -> TrendAnalysts + BrainIdea -> ContentMakers -> ApprovalPost.
+Urutan: ContentInsight (konteks) -> TrendAnalysts + BrainIdea -> ContentMakers
+-> ApprovalPost.
 
-Berbeda dari versi lama yang memakai os.system tanpa cek hasil: di sini setiap tahap
-diperiksa exit code-nya dan pipeline BERHENTI kalau ada tahap kritis yang gagal,
-supaya tidak lanjut memproses data basi.
+1a: tahap render (3 pertama) dilindungi lock eksklusif + timeout proses-grup.
+Fase 3 (ApprovalPost) BELUM pakai lock approval/guard gateway sendiri -- itu
+ditambahkan di Commit 1b. Untuk sekarang aman dipakai selama tidak ada 2 mode
+approval CLI berjalan bersamaan (risiko itu yang ditutup 1b).
 """
 
+import os
 import sys
 
 from common import ensure_dirs, log_error, notify
-from orchestrator import run_stages
+from orchestrator import install_signal_handlers, run_core_stages_locked, run_stage
+from run_lock import FileLockBusyError, RUN_LOCK_STALE_SECONDS, generate_run_id, sanitize_run_id
+from run_log import log_event
 
-# (file, label, kritis?) — tahap non-kritis boleh gagal tanpa menghentikan pipeline.
-STAGES = [
-    ("agent5_insight.py", "Fase 0 — ContentInsight (konteks performa)", False),
-    ("agent1_2_brief.py", "Fase 1 — TrendAnalysts + BrainIdea (riset & brief)", True),
-    ("agent3_render.py", "Fase 2 — ContentMakers (render video)", True),
-    ("agent4_approval.py", "Fase 3 — ApprovalPost (approval user)", True),
-]
+
+def _on_stage_start(label):
+    print(f"\n▶ {label}")
 
 
 def _on_noncritical_failure(label, code):
@@ -26,20 +27,49 @@ def _on_noncritical_failure(label, code):
 
 
 def main():
+    install_signal_handlers()
     ensure_dirs()
     print("=" * 60)
     print("🚀 PIPELINE 5 AGENT CONTENT FACTORY")
     print("=" * 60)
 
-    code, failure = run_stages(
-        STAGES,
-        capture_output=False,
-        on_noncritical_failure=_on_noncritical_failure,
-        on_stage_start=lambda label: print(f"\n▶ {label}"),
+    run_id = sanitize_run_id(os.getenv("CONTENT_FACTORY_RUN_ID") or generate_run_id())
+
+    try:
+        status, detail = run_core_stages_locked(
+            run_id,
+            capture_output=False,
+            on_stage_start=_on_stage_start,
+            on_noncritical_failure=_on_noncritical_failure,
+        )
+    except FileLockBusyError as e:
+        log_event(
+            "run_rejected", run_id, holder=e.holder, elapsed_seconds=e.elapsed_seconds
+        )
+        if e.elapsed_seconds > RUN_LOCK_STALE_SECONDS:
+            msg = (
+                f"masih ada render berjalan, TAPI sudah {e.elapsed_seconds:.0f} detik "
+                f"(lebih lama dari wajar ~{RUN_LOCK_STALE_SECONDS}s) — mungkin proses macet, cek manual."
+            )
+        else:
+            msg = f"masih ada render yang berjalan ({e.elapsed_seconds:.0f} detik lalu). Coba lagi setelah selesai."
+        print(f"\n❌ {msg}")
+        notify("pipeline", msg)
+        return os.EX_TEMPFAIL
+
+    if status == "FAILED":
+        code, (label, _output) = detail
+        message = f"Pipeline dihentikan: {label} gagal (exit code {code})."
+        print(f"\n❌ {message}")
+        notify("pipeline", message)
+        return code
+
+    print("\n▶ Fase 3 — ApprovalPost (approval user)")
+    code, _output = run_stage(
+        "agent4_approval.py", run_id=run_id, capture_output=False, timeout=None
     )
     if code != 0:
-        label, _output = failure
-        message = f"Pipeline dihentikan: {label} gagal (exit code {code})."
+        message = f"Pipeline dihentikan: Fase 3 — ApprovalPost (approval user) gagal (exit code {code})."
         print(f"\n❌ {message}")
         notify("pipeline", message)
         return code

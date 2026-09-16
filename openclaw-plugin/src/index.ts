@@ -172,6 +172,10 @@ export default defineToolPlugin({
             const originChatId = toolContext.nativeChannelId;
             const pipelineEnv: Record<string, string> = {
               CONTENT_FACTORY_ASSETS: copiedNames.join(","),
+              // Diteruskan apa adanya (BUKAN runPrefix yang sudah dipotong 8 char) --
+              // Python-side run_lock.sanitize_run_id() yang menangani sanitasi/
+              // pemendekan aman (prefix+hash) kalau toolCallId ternyata panjang.
+              CONTENT_FACTORY_RUN_ID: toolCallId,
             };
             if (originChatId) {
               pipelineEnv.CONTENT_FACTORY_CHAT_ID = String(originChatId);
