@@ -140,9 +140,18 @@ def pilih_tren(pool, trend_index):
     return items[idx]
 
 
-def build_prompt(asset_names, performance, *, jumlah_gambar, pool=None):
+def build_prompt(asset_names, performance, *, jumlah_gambar, pool=None, konteks=""):
     performance_note = build_performance_note(performance)
     trend_note, _ = build_trend_note(pool)
+    konteks_note = (
+        f'PERMINTAAN USER (apa adanya): "{konteks}"\n'
+        "Ini yang user benar-benar inginkan. Judul, sudut, dan naskah WAJIB melayani\n"
+        "permintaan ini. Kalau bertentangan dengan tren mana pun di daftar, MENANGKAN\n"
+        "permintaan user dan set trend_index = null."
+        if konteks else
+        "PERMINTAAN USER: tidak ada — user hanya mengirim file tanpa menjelaskan maunya.\n"
+        "Tentukan sudut dari isi gambar saja, dan jangan mengarang maksud user."
+    )
 
     bagian_visual = (
         f"Kamu DIBERI {jumlah_gambar} gambar/frame dari bahan mentah user di pesan ini. "
@@ -167,6 +176,8 @@ BATAS PENGETAHUANMU (penting, jangan dilanggar):
 - DILARANG mengarang statistik, jumlah view, "sedang viral", "menurut riset",
   nama tren terkini, atau sentimen publik seolah-olah kamu mengukurnya.
 - "content_angle" adalah usulanmu berdasarkan isi bahan, BUKAN hasil riset tren.
+
+{konteks_note}
 
 Data performa konten sebelumnya:
 {performance_note}
@@ -243,8 +254,11 @@ def run():
     performance = read_json(PERFORMANCE_PATH)
 
     pool = read_json(TREND_POOL_PATH, {}) or {}
+    konteks = (os.getenv("CONTENT_FACTORY_USER_CONTEXT") or "").strip()
+    if konteks:
+        print(f"[info] konteks user dipakai -> {konteks[:80]!r}")
     prompt_text = build_prompt(
-        asset_names, performance, jumlah_gambar=len(image_parts), pool=pool
+        asset_names, performance, jumlah_gambar=len(image_parts), pool=pool, konteks=konteks
     )
     response = client.chat.completions.create(
         model=MODEL,

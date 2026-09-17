@@ -47,6 +47,16 @@ const runParams = Type.Object({
         "yang harus disusun jadi satu konten.",
     },
   ),
+  userContext: Type.Optional(
+    Type.String({
+      maxLength: 2000,
+      description:
+        "Permintaan user apa adanya untuk konten ini: topik, produk, target audiens, " +
+        "gaya, atau pesan yang ingin disampaikan. Salin maksud user dari pesan chat " +
+        "ini; JANGAN mengarang atau menambah detail yang tidak disebut user. " +
+        "Kosongkan kalau user benar-benar tidak menyebutkan apa pun selain mengirim file.",
+    }),
+  ),
 });
 
 /**
@@ -154,7 +164,10 @@ export default defineToolPlugin({
           label: "Content Factory Run",
           description: "Jalankan pipeline content factory atas bahan yang diupload user.",
           parameters: runParams,
-          async execute(toolCallId: string, params: { mediaPaths: string[] }) {
+          async execute(
+            toolCallId: string,
+            params: { mediaPaths: string[]; userContext?: string },
+          ) {
             const fail = (text: string, details: Record<string, unknown>) => ({
               content: [{ type: "text" as const, text }],
               details: { status: "error", ...details },
@@ -171,7 +184,7 @@ export default defineToolPlugin({
               });
             }
 
-            const { mediaPaths } = params;
+            const { mediaPaths, userContext } = params;
 
             // Dicatat SEBELUM validasi apa pun, supaya tetap ada bukti walau
             // permintaan nanti ditolak (file hilang / format tidak didukung).
@@ -187,6 +200,7 @@ export default defineToolPlugin({
               messageChannel: toolContext.messageChannel ?? null,
               sessionKey: toolContext.sessionKey ?? null,
               mediaCount: mediaPaths.length,
+              hasUserContext: Boolean((userContext ?? "").trim()),
             });
 
             const missing = mediaPaths.filter((p) => !existsSync(p));
@@ -245,6 +259,14 @@ export default defineToolPlugin({
               // workspace/raw/ yang kini menampung materi lebih dari satu user.
               CONTENT_FACTORY_RUN_PREFIX: runPrefix,
             };
+
+            // Kalimat user adalah sinyal paling langsung tentang MAKSUD konten --
+            // topik, audiens, gaya. Sebelumnya dibuang sama sekali, sehingga
+            // pipeline harus menebak semuanya dari piksel.
+            const konteks = (userContext ?? "").trim();
+            if (konteks) {
+              pipelineEnv.CONTENT_FACTORY_USER_CONTEXT = konteks;
+            }
 
             const pid = startPipelineDetached(projectRoot, pipelineEnv);
 

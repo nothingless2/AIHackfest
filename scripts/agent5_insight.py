@@ -80,26 +80,44 @@ def _asset_paths():
         return []
 
 
-def derive_queries(asset_paths):
+def user_context():
+    """Kalimat user apa adanya, diteruskan plugin. Sinyal paling langsung soal
+    MAKSUD konten (topik, audiens, gaya) -- sebelumnya dibuang sama sekali."""
+    return (os.getenv("CONTENT_FACTORY_USER_CONTEXT") or "").strip()
+
+
+def derive_queries(asset_paths, konteks=""):
     """Turunkan kata kunci pencarian DARI ISI bahan, bukan dari nama file.
 
     Tanpa ini tren yang diambil cuma tren harian umum -- sepak bola dan berita --
     yang hampir tidak pernah berhubungan dengan materi user. Panggilan ini sengaja
     kecil: maksimal 3 gambar, hanya diminta mengembalikan kata kunci.
     """
-    if not asset_paths or not OPENAI_API_KEY:
+    if not OPENAI_API_KEY:
+        return []
+    if not asset_paths and not konteks:
         return []
 
-    parts = build_image_parts(asset_paths, max_assets=KEYWORD_MAX_ASSETS)
-    if not parts:
+    parts = build_image_parts(asset_paths, max_assets=KEYWORD_MAX_ASSETS) if asset_paths else []
+    if not parts and not konteks:
         return []
 
     from openai import OpenAI
 
+    bagian_konteks = (
+        f"\nPermintaan user apa adanya: \"{konteks}\"\n"
+        "Maksud user ini LEBIH MENENTUKAN daripada tebakanmu atas gambar — "
+        "kata kunci harus mencerminkan apa yang user minta.\n"
+        if konteks else
+        "\n(User tidak menuliskan permintaan apa pun, hanya mengirim file.)\n"
+    )
     prompt = (
-        "Lihat gambar-gambar ini. Sebutkan 2-3 kata kunci pencarian Bahasa Indonesia "
-        "yang menggambarkan TOPIK materi ini, untuk mencari video sejenis di YouTube. "
-        "Deskripsikan hanya yang benar-benar terlihat. Jangan menambah topik yang tidak ada.\n"
+        ("Lihat gambar-gambar ini. " if parts else "")
+        + "Sebutkan 2-3 kata kunci pencarian Bahasa Indonesia yang menggambarkan TOPIK "
+        "materi ini, untuk mencari video dan berita sejenis."
+        + bagian_konteks
+        + "Hanya sebutkan yang benar-benar terlihat atau benar-benar diminta user. "
+        "Jangan menambah topik yang tidak ada.\n"
         'Balas HANYA JSON: {"queries": ["kata kunci 1", "kata kunci 2"]}'
     )
     try:
@@ -162,8 +180,12 @@ def run():
     # Sesuai agents/05_contentinsight.md: Agent 5 yang menyiapkan bahan strategi
     # bagi TRENDANALYSTS. Modul ini hanya MELAPORKAN apa yang dikembalikan server;
     # penilaian relevansi dilakukan Fase 1 dan diverifikasi kode.
-    queries = derive_queries(_asset_paths())
+    konteks = user_context()
+    if konteks:
+        print(f'[info] Agent 5: konteks user -> {konteks[:80]!r}')
+    queries = derive_queries(_asset_paths(), konteks)
     pool = gather(queries)
+    pool["user_context"] = konteks
     write_json(TREND_POOL_PATH, pool)
     print(
         f"[info] Agent 5: {len(pool['items'])} sinyal tren dari {pool['sources_ok'] or 'tidak ada sumber'}"

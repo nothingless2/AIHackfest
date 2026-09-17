@@ -17,9 +17,14 @@ Sumber:
                       tidak bisa ditanya per topik, jadi sering tidak relevan
                       dengan bahan user. Dipakai sebagai pelengkap.
 
+- GOOGLE_NEWS_ID    : berita Indonesia untuk satu topik (tanpa key). Ini pengganti
+                      DuckDuckGo: sama-sama bisa ditanya per topik, tapi benar-benar
+                      mengembalikan hasil.
+
 DuckDuckGo TIDAK diimplementasikan: Instant Answer API hanya melayani entitas
 ensiklopedis (query konten biasa mengembalikan kosong) dan endpoint HTML-nya
-membalas halaman anti-bot (202) dari server. Keduanya diverifikasi langsung.
+membalas halaman anti-bot (202) dari server. Wikipedia full-text search juga
+ditolak setelah diuji: query "kolaborasi bisnis" mengembalikan "Friedrich Engels".
 Antarmuka di bawah sengaja dibuat per-sumber supaya penyedia lain mudah
 ditambahkan tanpa mengubah pemanggil.
 """
@@ -174,6 +179,44 @@ def fetch_google_trends(*, geo=None, limit=10):
     return hasil
 
 
+# ------------------------------------------------- Google News (per topik)
+
+def search_news(query, *, limit=5, geo=None):
+    """Berita Indonesia terkini untuk satu topik. Tanpa API key.
+
+    Pengganti DuckDuckGo: sama-sama pencarian per topik, tapi mengembalikan hasil
+    nyata. Berguna untuk menangkap sudut yang sedang dibicarakan media tentang
+    topik bahan user -- sesuatu yang tidak tertangkap tren pencarian harian.
+    """
+    wilayah = geo or TRENDS_GEO
+    q = urllib.parse.urlencode({
+        "q": query, "hl": "id", "gl": wilayah, "ceid": f"{wilayah}:id",
+    })
+    raw = _get(f"https://news.google.com/rss/search?{q}")
+    if not raw:
+        return []
+
+    try:
+        root = ET.fromstring(raw)
+    except ET.ParseError as e:
+        print(f"[warn] search_trends: RSS Google News tidak bisa diurai: {e}")
+        return []
+
+    hasil = []
+    for item in root.findall(".//item")[:limit]:
+        judul = (item.findtext("title") or "").strip()
+        if not judul:
+            continue
+        hasil.append({
+            "source": "GOOGLE_NEWS_ID",
+            "term": html.unescape(judul),
+            "query": query,
+            "url": (item.findtext("link") or "").strip() or None,
+            "metric": (item.findtext("pubDate") or "").strip() or None,
+        })
+    return hasil
+
+
 # ---------------------------------------------------------------- gabungan
 
 def gather(queries=(), *, include_daily=True, per_query=5):
@@ -188,13 +231,18 @@ def gather(queries=(), *, include_daily=True, per_query=5):
     items, sumber_aktif, sumber_gagal = [], [], []
 
     for q in queries:
-        hasil = search_youtube(q, limit=per_query)
-        if hasil:
-            items.extend(hasil)
-            if "YOUTUBE_ID_30D" not in sumber_aktif:
-                sumber_aktif.append("YOUTUBE_ID_30D")
-    if queries and "YOUTUBE_ID_30D" not in sumber_aktif:
-        sumber_gagal.append("YOUTUBE_ID_30D" if YOUTUBE_API_KEY else "YOUTUBE_ID_30D(tanpa_key)")
+        for nama, fn in (("YOUTUBE_ID_30D", search_youtube), ("GOOGLE_NEWS_ID", search_news)):
+            hasil = fn(q, limit=per_query)
+            if hasil:
+                items.extend(hasil)
+                if nama not in sumber_aktif:
+                    sumber_aktif.append(nama)
+
+    if queries:
+        if "YOUTUBE_ID_30D" not in sumber_aktif:
+            sumber_gagal.append("YOUTUBE_ID_30D" if YOUTUBE_API_KEY else "YOUTUBE_ID_30D(tanpa_key)")
+        if "GOOGLE_NEWS_ID" not in sumber_aktif:
+            sumber_gagal.append("GOOGLE_NEWS_ID")
 
     if include_daily:
         harian = fetch_google_trends()

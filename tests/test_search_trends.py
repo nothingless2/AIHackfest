@@ -157,3 +157,71 @@ def test_prompt_melarang_menulis_tren_di_luar_daftar():
     assert "HANYA boleh memilih dari daftar" in p
     assert "DILARANG menulis nama tren lain" in p
     assert "Video Nyata A" in p, "kolam nyata harus ikut dikirim"
+
+
+# ---------- Google News (pengganti DuckDuckGo) ----------
+
+NEWS_RSS = b"""<?xml version="1.0"?><rss version="2.0"><channel>
+<item><title>Kolaborasi UMKM &amp; Bank - Media A</title>
+  <link>https://contoh/1</link><pubDate>Wed, 17 Sep 2026 01:00:00 GMT</pubDate></item>
+<item><title>Warung Go Digital - Media B</title>
+  <link>https://contoh/2</link><pubDate>Tue, 16 Sep 2026 02:00:00 GMT</pubDate></item>
+</channel></rss>"""
+
+
+def test_news_diurai_dan_bisa_ditanya_per_topik(monkeypatch):
+    dilihat = {}
+
+    def fake_get(url, **k):
+        dilihat["url"] = url
+        return NEWS_RSS
+
+    monkeypatch.setattr(fetch_trends, "_get", fake_get)
+    hasil = fetch_trends.search_news("umkm digital", limit=5)
+
+    assert [h["term"] for h in hasil] == [
+        "Kolaborasi UMKM & Bank - Media A",  # entitas HTML sudah dibersihkan
+        "Warung Go Digital - Media B",
+    ]
+    assert all(h["source"] == "GOOGLE_NEWS_ID" for h in hasil)
+    assert hasil[0]["url"] == "https://contoh/1"
+    assert "umkm+digital" in dilihat["url"] or "umkm%20digital" in dilihat["url"]
+    assert "hl=id" in dilihat["url"]
+
+
+def test_news_gagal_tidak_melempar(monkeypatch):
+    monkeypatch.setattr(fetch_trends, "_get", lambda url, **k: None)
+    assert fetch_trends.search_news("apa saja") == []
+
+
+def test_gather_mencatat_news_sebagai_sumber(monkeypatch):
+    monkeypatch.setattr(fetch_trends, "search_youtube", lambda q, **k: [])
+    monkeypatch.setattr(
+        fetch_trends, "search_news",
+        lambda q, **k: [{"source": "GOOGLE_NEWS_ID", "term": "x", "query": q,
+                          "url": None, "metric": None}],
+    )
+    monkeypatch.setattr(fetch_trends, "fetch_google_trends", lambda **k: [])
+
+    hasil = fetch_trends.gather(["topik"])
+
+    assert "GOOGLE_NEWS_ID" in hasil["sources_ok"]
+    assert "YOUTUBE_ID_30D" in " ".join(hasil["sources_failed"])
+
+
+# ---------- konteks user tidak lagi dibuang ----------
+
+def test_prompt_memakai_permintaan_user_dan_memenangkannya_atas_tren():
+    p = brief.build_prompt(
+        ["a.jpg"], None, jumlah_gambar=1, pool=KOLAM,
+        konteks="konten promo untuk pemilik warung kecil",
+    )
+    assert "konten promo untuk pemilik warung kecil" in p
+    assert "WAJIB melayani" in p
+    assert "MENANGKAN" in p, "permintaan user harus mengalahkan tren yang bertentangan"
+
+
+def test_prompt_tanpa_konteks_melarang_mengarang_maksud_user():
+    p = brief.build_prompt(["a.jpg"], None, jumlah_gambar=1, pool=KOLAM)
+    assert "tidak ada" in p
+    assert "jangan mengarang maksud user" in p
