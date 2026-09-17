@@ -21,6 +21,12 @@ import traceback
 from datetime import datetime, timezone
 
 import edge_tts
+
+sys.path.insert(
+    0,
+    os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "scripts"),
+)
+from retry import with_retry_async  # noqa: E402
 from moviepy import AudioFileClip
 
 TARGET_W, TARGET_H = 1080, 1920
@@ -67,9 +73,30 @@ def run_ffmpeg(args, context):
         raise RuntimeError(f"ffmpeg gagal ({context}):\n{result.stderr[-2000:]}")
 
 
+TTS_ATTEMPT_TIMEOUT = int(os.getenv("TTS_ATTEMPT_TIMEOUT_SECONDS", "30"))
+
+
+def _tts_retriable(exc):
+    """edge-tts memakai layanan Microsoft tanpa autentikasi: tidak ada kategori
+    kegagalan permanen yang jelas selain bug pemakaian. Kegagalan jaringan/protokol
+    diperlakukan sementara; TypeError/ValueError (salah pakai API) tidak."""
+    return not isinstance(exc, (TypeError, ValueError, KeyError))
+
+
 async def generate_voice(text, output_audio):
-    communicate = edge_tts.Communicate(text, voice="id-ID-GadisNeural", rate="+5%")
-    await communicate.save(output_audio)
+    """TTS dgn retry. Instance Communicate DIBUAT BARU tiap percobaan -- objek
+    yang sudah gagal menyimpan state koneksi dan tidak aman dipakai ulang."""
+
+    async def sekali():
+        communicate = edge_tts.Communicate(text, voice="id-ID-GadisNeural", rate="+5%")
+        await communicate.save(output_audio)
+
+    await with_retry_async(
+        sekali,
+        is_retriable=_tts_retriable,
+        attempt_timeout=TTS_ATTEMPT_TIMEOUT,
+        label="voice-over edge-tts",
+    )
 
 
 def scale_crop_filter():

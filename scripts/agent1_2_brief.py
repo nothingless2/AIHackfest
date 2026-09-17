@@ -8,7 +8,6 @@ import json
 import os
 import sys
 
-from openai import OpenAI
 from vision import build_image_parts
 
 from common import (
@@ -20,6 +19,7 @@ from common import (
     now_iso,
     OPENAI_API_KEY,
     PERFORMANCE_PATH,
+    chat_json,
     TREND_POOL_PATH,
     read_json,
     resolve_assets,
@@ -250,7 +250,6 @@ def run():
     else:
         print(f"[info] {len(image_parts)} gambar/frame dikirim ke {MODEL} untuk diamati.")
 
-    client = OpenAI(api_key=OPENAI_API_KEY)
     performance = read_json(PERFORMANCE_PATH)
 
     pool = read_json(TREND_POOL_PATH, {}) or {}
@@ -260,15 +259,12 @@ def run():
     prompt_text = build_prompt(
         asset_names, performance, jumlah_gambar=len(image_parts), pool=pool, konteks=konteks
     )
-    response = client.chat.completions.create(
+    result = chat_json(
+        [{"role": "user",
+          "content": [{"type": "text", "text": prompt_text}, *image_parts]}],
         model=MODEL,
-        messages=[{
-            "role": "user",
-            "content": [{"type": "text", "text": prompt_text}, *image_parts],
-        }],
-        response_format={"type": "json_object"},
+        label="brief TrendAnalysts & BrainIdea",
     )
-    result = json.loads(response.choices[0].message.content)
 
     trend_report = result["trend_report"]
     brief = result["creative_brief"]

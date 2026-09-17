@@ -264,3 +264,73 @@ def resolve_assets(names):
     if missing:
         raise FileNotFoundError(f"Bahan mentah tidak ada di {RAW_DIR}: {missing}")
     return paths
+
+# ---------------------------------------------------------------- OpenAI
+
+# Timeout per percobaan. Default SDK adalah read=600 detik -- satu panggilan yang
+# menggantung akan menahan tahapnya selama 10 menit dan baru dibunuh paksa oleh
+# timeout orchestrator. 45 detik jauh di atas latensi normal GPT-4o (termasuk
+# dengan gambar), tapi cukup pendek untuk gagal cepat dan mencoba lagi.
+OPENAI_TIMEOUT_SECONDS = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "45"))
+
+
+def openai_is_retriable(exc):
+    """Kegagalan sementara vs permanen.
+
+    URUTAN PENTING: AuthenticationError/BadRequestError dsb adalah TURUNAN dari
+    APIStatusError, jadi kelas permanen harus diperiksa SEBELUM aturan 5xx --
+    kalau dibalik, kunci API yang salah akan diulang tiga kali sia-sia.
+    """
+    import openai
+
+    if isinstance(exc, (openai.RateLimitError, openai.InternalServerError,
+                        openai.APIConnectionError)):
+        return True  # APITimeoutError turunan APIConnectionError, ikut tercakup
+    if isinstance(exc, (openai.AuthenticationError, openai.BadRequestError,
+                        openai.PermissionDeniedError, openai.NotFoundError,
+                        openai.UnprocessableEntityError)):
+        return False
+    if isinstance(exc, openai.APIStatusError):
+        return (getattr(exc, "status_code", 0) or 0) >= 500
+    return False
+
+
+def openai_retry_after(exc):
+    """Detik yang diminta server lewat header Retry-After, kalau ada."""
+    resp = getattr(exc, "response", None)
+    nilai = getattr(resp, "headers", {}).get("Retry-After") if resp is not None else None
+    try:
+        return float(nilai) if nilai else None
+    except (TypeError, ValueError):
+        return None
+
+
+def chat_json(messages, *, model, label="panggilan LLM"):
+    """Panggil chat completion yang mengembalikan JSON, dengan retry.
+
+    max_retries=0 mematikan retry BAWAAN SDK (defaultnya 2). Tanpa itu, retry
+    bersarang: SDK mencoba 3x di dalam tiap percobaan kita, jadi total 9 kali
+    dengan jeda yang tidak kita kendalikan dan melewati timeout tahap.
+    """
+    import json as _json
+
+    from openai import OpenAI
+
+    from retry import with_retry
+
+    client = OpenAI(api_key=OPENAI_API_KEY, max_retries=0,
+                    timeout=OPENAI_TIMEOUT_SECONDS)
+
+    def sekali():
+        resp = client.chat.completions.create(
+            model=model, messages=messages,
+            response_format={"type": "json_object"},
+        )
+        return _json.loads(resp.choices[0].message.content)
+
+    return with_retry(
+        sekali,
+        is_retriable=openai_is_retriable,
+        extract_retry_after=openai_retry_after,
+        label=label,
+    )

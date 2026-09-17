@@ -23,6 +23,7 @@ from common import (
     PERFORMANCE_PATH,
     PUBLISH_HISTORY_PATH,
     read_json,
+    chat_json,
     resolve_assets,
     resolve_chat_id,
     write_json,
@@ -102,8 +103,6 @@ def derive_queries(asset_paths, konteks=""):
     if not parts and not konteks:
         return []
 
-    from openai import OpenAI
-
     bagian_konteks = (
         f"\nPermintaan user apa adanya: \"{konteks}\"\n"
         "Maksud user ini LEBIH MENENTUKAN daripada tebakanmu atas gambar — "
@@ -121,14 +120,13 @@ def derive_queries(asset_paths, konteks=""):
         'Balas HANYA JSON: {"queries": ["kata kunci 1", "kata kunci 2"]}'
     )
     try:
-        client = OpenAI(api_key=OPENAI_API_KEY)
-        resp = client.chat.completions.create(
+        hasil = chat_json(
+            [{"role": "user",
+              "content": [{"type": "text", "text": prompt}, *parts]}],
             model=KEYWORD_MODEL,
-            messages=[{"role": "user",
-                       "content": [{"type": "text", "text": prompt}, *parts]}],
-            response_format={"type": "json_object"},
+            label="kata kunci ContentInsight",
         )
-        queries = json.loads(resp.choices[0].message.content).get("queries") or []
+        queries = hasil.get("queries") or []
     except Exception as e:
         print(f"[warn] Agent 5: gagal menurunkan kata kunci dari bahan: {e}")
         return []

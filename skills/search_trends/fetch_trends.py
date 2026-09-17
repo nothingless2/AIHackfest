@@ -31,6 +31,7 @@ ditambahkan tanpa mengubah pemanggil.
 
 import html
 import os
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -44,6 +45,31 @@ YOUTUBE_WINDOW_DAYS = int(os.getenv("YOUTUBE_WINDOW_DAYS", "30"))
 
 _RSS_NS = {"ht": "https://trends.google.com/trending/rss"}
 
+sys.path.insert(
+    0,
+    os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "scripts"),
+)
+from retry import with_retry  # noqa: E402
+
+TRENDS_MAX_ATTEMPTS = int(os.getenv("TRENDS_MAX_ATTEMPTS", "2"))
+
+
+def _http_retriable(exc):
+    """5xx dan 429 layak diulang; 4xx lain tidak akan membaik dengan menunggu."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return exc.code >= 500 or exc.code == 429
+    return isinstance(exc, (urllib.error.URLError, TimeoutError, OSError))
+
+
+def _http_retry_after(exc):
+    if isinstance(exc, urllib.error.HTTPError):
+        nilai = exc.headers.get("Retry-After") if exc.headers else None
+        try:
+            return float(nilai) if nilai else None
+        except (TypeError, ValueError):
+            return None
+    return None
+
 
 def _get(url, *, timeout=None):
     """GET sederhana. Mengembalikan bytes, atau None kalau gagal apa pun.
@@ -52,11 +78,24 @@ def _get(url, *, timeout=None):
     non-kritis, dan tidak punya data tren jauh lebih baik daripada mengarangnya.
     """
     req = urllib.request.Request(url, headers={"User-Agent": "content-factory/1.0"})
-    try:
+    host = urllib.parse.urlsplit(url).netloc
+
+    def sekali():
         with urllib.request.urlopen(req, timeout=timeout or TRENDS_TIMEOUT) as r:
             return r.read()
+
+    try:
+        # max_attempts kecil (2): Fase 0 non-kritis dan punya timeout tahap sendiri;
+        # lebih baik menyerah cepat tanpa data tren daripada menahan seluruh run.
+        return with_retry(
+            sekali,
+            is_retriable=_http_retriable,
+            extract_retry_after=_http_retry_after,
+            max_attempts=TRENDS_MAX_ATTEMPTS,
+            label=f"search_trends {host}",
+        )
     except urllib.error.HTTPError as e:
-        print(f"[warn] search_trends: HTTP {e.code} dari {urllib.parse.urlsplit(url).netloc}")
+        print(f"[warn] search_trends: HTTP {e.code} dari {host}")
     except Exception as e:
         print(f"[warn] search_trends: gagal mengambil data: {type(e).__name__}: {e}")
     return None
