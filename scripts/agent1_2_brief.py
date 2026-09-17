@@ -83,19 +83,32 @@ def select_assets():
     return names
 
 
+def build_performance_note(performance):
+    """Ringkasan performa untuk prompt -- hanya kalau datanya NYATA.
+
+    Agent 5 kini menulis data_source="NO_DATA" ketika belum ada angka asli.
+    Dict itu tetap truthy, jadi pengecekan harus eksplisit: tanpa ini, catatan
+    "tidak ada data" ikut terkirim sebagai kalau-kalau ada isinya, dan LLM akan
+    memperlakukannya sebagai sinyal.
+    """
+    if not performance or performance.get("data_source") != "REAL_API":
+        alasan = (performance or {}).get("reason", "belum ada data performa asli")
+        return (
+            f"TIDAK ADA data performa asli ({alasan}). "
+            "JANGAN mengarang angka, klaim performa, atau menyebut konten sebelumnya berhasil."
+        )
+    return json.dumps(performance, ensure_ascii=False, indent=2)
+
+
 def build_prompt(asset_names, performance):
-    performance_note = (
-        json.dumps(performance, ensure_ascii=False, indent=2)
-        if performance
-        else "Belum ada data performa post sebelumnya."
-    )
+    performance_note = build_performance_note(performance)
 
     return f"""
 Bertindaklah sebagai dua agent sekaligus:
 - Agent 1 TRENDANALYSTS: riset tren dan sentimen publik.
 - Agent 2 BRAINIDEA: ubah tren itu jadi satu konsep konten vertikal + naskah.
 
-Data performa konten sebelumnya (untuk closed-loop, pertimbangkan apa yang berhasil):
+Data performa konten sebelumnya:
 {performance_note}
 
 Bahan mentah yang WAJIB dipakai (foto/video milik user, urutan boleh disusun ulang):

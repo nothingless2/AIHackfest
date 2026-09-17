@@ -1,10 +1,16 @@
 """Agent 5 (ContentInsight): laporkan performa konten yang sudah tayang.
 
-Aturan: laporkan apa adanya, jangan dipermanis. Selama API analitik asli belum
-tersedia, angka ditandai jelas sebagai estimasi (data_source) dan TIDAK selalu positif.
+Aturan: laporkan apa adanya. Kalau data performa asli belum tersedia, katakan
+TIDAK ADA DATA -- jangan mengarang angka.
+
+Versi sebelumnya memanggil random.randint()/random.uniform() lalu menuliskannya
+sebagai "metrics" dengan penanda ESTIMATED_PLACEHOLDER. Hasilnya: walau belum ada
+satu pun post terbit (post_id "no_published_post_yet"), sistem bisa melaporkan
+"HIGH_PERFORMING, 13.899 views". Angka dadu itu lalu diumpankan ke prompt Agent
+1&2 sebagai "data performa konten sebelumnya, pertimbangkan apa yang berhasil" --
+sehingga LLM mengarang tren "berdasarkan" kebisingan. Seluruh jalur itu dihapus.
 """
 
-import random
 import sys
 
 from common import (
@@ -45,23 +51,6 @@ def classify(engagement_rate):
     return "LOW_PERFORMING"
 
 
-def estimate_metrics():
-    """Estimasi acak dalam rentang wajar — sengaja bisa jelek, supaya sinyal ke
-    TrendAnalysts jujur dan bervariasi, bukan selalu 'HIGH_PERFORMING'."""
-    views = random.randint(500, 60000)
-    likes = int(views * random.uniform(0.01, 0.09))
-    comments = int(views * random.uniform(0.001, 0.01))
-    shares = int(views * random.uniform(0.0, 0.02))
-    rate = round((likes + comments + shares) / views * 100, 2) if views else 0.0
-    return {
-        "views": views,
-        "likes": likes,
-        "comments": comments,
-        "shares": shares,
-        "engagement_rate": rate,
-    }
-
-
 def run():
     ensure_dirs()
 
@@ -69,30 +58,36 @@ def run():
     metrics = fetch_real_analytics(post["platform"], post["publish_id"]) if post else None
 
     if metrics:
-        data_source = "REAL_API"
-        post_id = post["publish_id"]
+        summary = {
+            "report_date": now_iso(),
+            "post_id": post["publish_id"],
+            "data_source": "REAL_API",
+            "metrics": metrics,
+            "performance_status": classify(float(metrics["engagement_rate"])),
+        }
+        pesan = (
+            f"laporan performa siap (sumber: REAL_API, "
+            f"engagement {metrics['engagement_rate']}%, status {summary['performance_status']})."
+        )
     else:
-        metrics = estimate_metrics()
-        data_source = "ESTIMATED_PLACEHOLDER"
-        post_id = post["publish_id"] if post else "no_published_post_yet"
-        if not post:
-            print("[Agent 5] Belum ada post berstatus PUBLISHED di publish_history.json.")
+        # Tidak ada data = katakan tidak ada data. Bukan menebak, bukan mengarang.
+        alasan = (
+            "belum ada post berstatus PUBLISHED"
+            if not post
+            else "API analitik platform belum dikonfigurasi"
+        )
+        summary = {
+            "report_date": now_iso(),
+            "post_id": post["publish_id"] if post else None,
+            "data_source": "NO_DATA",
+            "reason": alasan,
+            "metrics": None,
+            "performance_status": "UNKNOWN",
+        }
+        pesan = f"belum ada data performa ({alasan}). Tidak ada angka yang bisa dilaporkan."
 
-    summary = {
-        "report_date": now_iso(),
-        "post_id": post_id,
-        "data_source": data_source,
-        "metrics": metrics,
-        "performance_status": classify(float(metrics["engagement_rate"])),
-    }
     write_json(PERFORMANCE_PATH, summary)
-
-    notify(
-        "contentinsight",
-        f"laporan performa siap (sumber: {data_source}, "
-        f"engagement {metrics['engagement_rate']}%, status {summary['performance_status']}).",
-        chat_id=resolve_chat_id(),
-    )
+    notify("contentinsight", pesan, chat_id=resolve_chat_id())
     return 0
 
 
