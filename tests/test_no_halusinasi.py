@@ -122,6 +122,42 @@ def test_prompt_memakai_data_asli_kalau_memang_ada():
 
 
 def test_prompt_final_tidak_lagi_menyebut_closed_loop_palsu():
-    p = brief.build_prompt(["a.jpg"], {"data_source": "NO_DATA", "metrics": None})
+    p = brief.build_prompt(
+        ["a.jpg"], {"data_source": "NO_DATA", "metrics": None}, jumlah_gambar=1
+    )
     assert "pertimbangkan apa yang berhasil" not in p
     assert "JANGAN mengarang" in p
+
+
+# ---------- prompt: tidak mengaku meneliti tren ----------
+
+def test_prompt_menyatakan_model_tidak_tahu_tren_terkini():
+    p = brief.build_prompt(["a.jpg"], None, jumlah_gambar=3)
+    assert "TIDAK punya akses internet" in p
+    assert "TIDAK tahu tren yang sedang ramai" in p
+    assert "DILARANG mengarang statistik" in p
+
+
+def test_prompt_dengan_gambar_menyuruh_model_melihat():
+    p = brief.build_prompt(["a.jpg"], None, jumlah_gambar=3)
+    assert "DIBERI 3 gambar" in p
+    assert "WAJIB berakar pada" in p
+
+
+def test_prompt_tanpa_gambar_memperingatkan_model_buta(capsys):
+    """Kalau tidak ada gambar yang bisa diproses, model harus TAHU ia tidak tahu."""
+    p = brief.build_prompt(["a.jpg"], None, jumlah_gambar=0)
+    assert "TIDAK tahu isinya" in p
+    assert "JANGAN menyebut objek" in p
+
+
+def test_prompt_melarang_menyebut_yang_tidak_terlihat():
+    p = brief.build_prompt(["a.jpg"], None, jumlah_gambar=2)
+    assert "DILARANG menyebut objek, orang, tempat, atau aktivitas yang TIDAK terlihat" in p
+
+
+def test_skema_tidak_lagi_meminta_field_karangan():
+    p = brief.build_prompt(["a.jpg"], None, jumlah_gambar=2)
+    assert "confidence_score" not in p, "angka keyakinan atas tren karangan"
+    assert "public_sentiment" not in p, "klaim sentimen publik yang tak pernah diukur"
+    assert "observed_material" in p, "model harus menyatakan apa yang benar-benar dilihat"

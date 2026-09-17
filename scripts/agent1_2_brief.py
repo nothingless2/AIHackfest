@@ -9,6 +9,7 @@ import os
 import sys
 
 from openai import OpenAI
+from vision import build_image_parts
 
 from common import (
     BRIEF_PATH,
@@ -100,22 +101,42 @@ def build_performance_note(performance):
     return json.dumps(performance, ensure_ascii=False, indent=2)
 
 
-def build_prompt(asset_names, performance):
+def build_prompt(asset_names, performance, *, jumlah_gambar):
     performance_note = build_performance_note(performance)
+
+    bagian_visual = (
+        f"Kamu DIBERI {jumlah_gambar} gambar/frame dari bahan mentah user di pesan ini. "
+        "LIHAT gambar-gambar itu. Seluruh konsep, judul, dan naskah WAJIB berakar pada "
+        "apa yang benar-benar terlihat di sana."
+        if jumlah_gambar
+        else
+        "PERINGATAN: tidak ada gambar yang bisa diproses dari bahan user, jadi kamu TIDAK "
+        "tahu isinya. Buat naskah yang sangat umum dan aman, dan JANGAN menyebut objek, "
+        "tempat, merek, atau aktivitas spesifik apa pun."
+    )
 
     return f"""
 Bertindaklah sebagai dua agent sekaligus:
-- Agent 1 TRENDANALYSTS: riset tren dan sentimen publik.
-- Agent 2 BRAINIDEA: ubah tren itu jadi satu konsep konten vertikal + naskah.
+- Agent 1 TRENDANALYSTS: amati bahan user, tentukan sudut konten yang masuk akal.
+- Agent 2 BRAINIDEA: ubah sudut itu jadi satu konsep konten vertikal + naskah.
+
+{bagian_visual}
+
+BATAS PENGETAHUANMU (penting, jangan dilanggar):
+- Kamu TIDAK punya akses internet dan TIDAK tahu tren yang sedang ramai saat ini.
+- DILARANG mengarang statistik, jumlah view, "sedang viral", "menurut riset",
+  nama tren terkini, atau sentimen publik seolah-olah kamu mengukurnya.
+- "content_angle" adalah usulanmu berdasarkan isi bahan, BUKAN hasil riset tren.
 
 Data performa konten sebelumnya:
 {performance_note}
 
-Bahan mentah yang WAJIB dipakai (foto/video milik user, urutan boleh disusun ulang):
+Nama file bahan (urutan boleh disusun ulang; gambar di atas berurutan sesuai daftar ini):
 {json.dumps(asset_names, ensure_ascii=False)}
 
 Aturan keras:
 - Hanya boleh memakai nama file dari daftar di atas. DILARANG mengarang nama file lain.
+- DILARANG menyebut objek, orang, tempat, atau aktivitas yang TIDAK terlihat di gambar.
 - Naskah voice-over harus Bahasa Indonesia, natural saat dibacakan, 20-35 detik
   (kira-kira 55-95 kata), berstruktur Hook - Masalah - Solusi - CTA.
 - "scenes" adalah teks on-screen singkat (maksimal 6 kata per scene), bukan salinan
@@ -125,11 +146,11 @@ Balas HANYA JSON murni dengan struktur persis berikut:
 {{
   "trend_report": {{
     "timestamp": "{now_iso()}",
-    "top_trend_topic": "string",
+    "source": "LLM_TANPA_DATA_TREN_LIVE",
+    "observed_material": "deskripsi FAKTUAL apa yang terlihat di gambar, 1-2 kalimat",
+    "content_angle": "string",
     "recommended_hook_template": "string",
-    "format_style": "string",
-    "confidence_score": 0.0,
-    "public_sentiment": "string"
+    "format_style": "string"
   }},
   "creative_brief": {{
     "judul": "string",
@@ -149,21 +170,35 @@ def run():
 
     chat_id = resolve_chat_id()
     asset_names = select_assets()
+    asset_paths = resolve_assets(asset_names)
+
     notify(
         "trendanalysts",
-        f"menganalisis tren untuk {len(asset_names)} bahan mentah...",
+        f"mengamati {len(asset_names)} bahan mentah...",
         chat_id=chat_id,
     )
 
     if not OPENAI_API_KEY:
         raise ValueError("OPENAI_API_KEY belum diisi di .env")
 
+    # Kirim ISI bahan, bukan cuma nama file. Tanpa ini model tidak pernah melihat
+    # apa pun dan hanya menebak dari UUID di nama file.
+    image_parts = build_image_parts(asset_paths)
+    if not image_parts:
+        print("[warn] Tidak ada gambar yang bisa diproses — brief akan dibuat tanpa melihat bahan.")
+    else:
+        print(f"[info] {len(image_parts)} gambar/frame dikirim ke {MODEL} untuk diamati.")
+
     client = OpenAI(api_key=OPENAI_API_KEY)
     performance = read_json(PERFORMANCE_PATH)
 
+    prompt_text = build_prompt(asset_names, performance, jumlah_gambar=len(image_parts))
     response = client.chat.completions.create(
         model=MODEL,
-        messages=[{"role": "user", "content": build_prompt(asset_names, performance)}],
+        messages=[{
+            "role": "user",
+            "content": [{"type": "text", "text": prompt_text}, *image_parts],
+        }],
         response_format={"type": "json_object"},
     )
     result = json.loads(response.choices[0].message.content)
@@ -186,7 +221,7 @@ def run():
     notify(
         "brainidea",
         f"konsep siap: \"{brief.get('judul', 'Untitled')}\" "
-        f"({len(brief.get('scenes', []))} scene, tren: {trend_report.get('top_trend_topic')})",
+        f"({len(brief.get('scenes', []))} scene, sudut: {trend_report.get('content_angle')})",
         chat_id=chat_id,
     )
     return 0
