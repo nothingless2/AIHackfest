@@ -201,6 +201,14 @@ export default defineToolPlugin({
               sessionKey: toolContext.sessionKey ?? null,
               mediaCount: mediaPaths.length,
               hasUserContext: Boolean((userContext ?? "").trim()),
+              // Path yang BENAR-BENAR dikirim model, plus hasil validasinya.
+              // Tanpa ini, penolakan "file tidak ditemukan" tidak bisa didiagnosis
+              // dari log sama sekali -- yang tercatat cuma jumlahnya.
+              mediaPaths,
+              mediaMissing: mediaPaths.filter((p) => !existsSync(p)),
+              mediaUnsupported: mediaPaths.filter(
+                (p) => !SUPPORTED_EXTENSIONS.has(extname(p).toLowerCase()),
+              ),
             });
 
             const missing = mediaPaths.filter((p) => !existsSync(p));
