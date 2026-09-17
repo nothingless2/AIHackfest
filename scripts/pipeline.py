@@ -12,7 +12,7 @@ approval CLI berjalan bersamaan (risiko itu yang ditutup 1b).
 import os
 import sys
 
-from common import CLI_CHAT_ID, ensure_dirs, log_error, notify
+from common import CLI_CHAT_ID, chat_allowed, ensure_dirs, log_error, notify
 from orchestrator import install_signal_handlers, run_core_stages_locked, run_stage
 from run_lock import FileLockBusyError, RUN_LOCK_STALE_SECONDS, generate_run_id, sanitize_run_id
 from run_log import log_event
@@ -45,6 +45,17 @@ def main():
     else:
         print("ℹ️  TELEGRAM_CHAT_ID kosong di .env — pipeline tetap jalan, "
               "tapi tidak ada notifikasi/hasil yang dikirim ke Telegram.")
+
+    # Konsisten dengan jalur Telegram: allowlist dicek sebelum lock & GPT-4o.
+    # chat_id kosong tetap diizinkan -- itu run lokal murni yang tidak mengirim
+    # apa pun ke siapa pun, jadi tidak ada yang perlu dilindungi allowlist.
+    if chat_id and not chat_allowed(chat_id):
+        log_event("run_rejected", run_id, chat_id=chat_id, reason="chat_not_allowed")
+        print(
+            f"\n❌ chat {chat_id} (TELEGRAM_CHAT_ID di .env) tidak ada di ALLOWED_CHAT_IDS. "
+            "Tambahkan ke ALLOWED_CHAT_IDS, atau kosongkan TELEGRAM_CHAT_ID untuk run lokal tanpa kirim."
+        )
+        return os.EX_NOPERM
 
     try:
         status, detail = run_core_stages_locked(

@@ -15,6 +15,12 @@ CHAT_B = "222222222"
 
 
 @pytest.fixture
+def izinkan_ab(monkeypatch):
+    """Lolos allowlist untuk kedua chat uji (conftest mengosongkannya by default)."""
+    monkeypatch.setenv("ALLOWED_CHAT_IDS", f"{CHAT_A},{CHAT_B}")
+
+
+@pytest.fixture
 def rekam(monkeypatch, tmp_path):
     """Rekam setiap panggilan send_video/notify beserta chat tujuannya."""
     calls = {"send_video": [], "notify": []}
@@ -68,7 +74,7 @@ def test_chat_tidak_diketahui_ditolak_tanpa_mengirim_apa_pun(rekam, monkeypatch)
     assert dipanggil == [], "render tidak boleh dijalankan"
 
 
-def test_lock_sibuk_pesan_ke_peminta_bukan_ke_pemegang(rekam, monkeypatch):
+def test_lock_sibuk_pesan_ke_peminta_bukan_ke_pemegang(rekam, monkeypatch, izinkan_ab):
     """Render B ditolak karena A memegang lock -> pesan penolakan harus ke B."""
     monkeypatch.setenv("CONTENT_FACTORY_CHAT_ID", CHAT_B)
 
@@ -85,7 +91,7 @@ def test_lock_sibuk_pesan_ke_peminta_bukan_ke_pemegang(rekam, monkeypatch):
     assert rekam["send_video"] == []
 
 
-def test_pesan_penolakan_tidak_membocorkan_isi_run_pemegang(monkeypatch):
+def test_pesan_penolakan_tidak_membocorkan_isi_run_pemegang(monkeypatch, izinkan_ab):
     """Pesan ke peminta tidak boleh menyebut judul/isi run milik orang lain."""
     monkeypatch.setenv("CONTENT_FACTORY_CHAT_ID", CHAT_B)
     pesan = []

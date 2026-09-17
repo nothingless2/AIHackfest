@@ -24,6 +24,7 @@ import sys
 
 from common import (
     brief_path_for_run,
+    chat_allowed,
     draft_video_path_for_run,
     ensure_dirs,
     log_error,
@@ -84,6 +85,17 @@ def main():
         log_error("run_and_deliver routing", RuntimeError(msg))
         log_event("run_rejected", run_id, chat_id=None, reason="chat_unknown")
         return 1
+
+    # Allowlist dicek PALING AWAL: sebelum lock render dan sebelum satu pun
+    # panggilan GPT-4o, supaya chat yang tidak berhak tidak pernah membakar
+    # kredit maupun menahan giliran render orang lain.
+    if not chat_allowed(chat_id):
+        log_event("run_rejected", run_id, chat_id=chat_id, reason="chat_not_allowed")
+        print(f"[error] chat {chat_id} tidak ada di ALLOWED_CHAT_IDS — run ditolak.")
+        # Balasan singkat & netral ke peminta sendiri: cukup memberi tahu bahwa
+        # aksesnya tidak diizinkan, tanpa membocorkan detail sistem/daftar chat.
+        notify("pipeline", "akses tidak diizinkan untuk chat ini.", chat_id=chat_id)
+        return os.EX_NOPERM
 
     try:
         status, detail = run_core_stages_locked(

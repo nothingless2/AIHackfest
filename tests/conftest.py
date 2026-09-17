@@ -26,7 +26,15 @@ if SCRIPTS_DIR not in sys.path:
 
 # Dikosongkan SEBELUM modul test (dan common.py) diimpor. Anak proses yang di-spawn
 # test juga mewarisi os.environ ini, jadi mereka ikut aman.
-_TELEGRAM_ENV_KEYS = ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "CONTENT_FACTORY_CHAT_ID")
+# ALLOWED_CHAT_IDS ikut dikosongkan supaya daftar chat ASLI di .env tidak pernah
+# mempengaruhi hasil test. Kosong = gagal-tertutup, jadi test yang memang perlu
+# lolos allowlist harus menyetelnya sendiri secara eksplisit.
+_TELEGRAM_ENV_KEYS = (
+    "TELEGRAM_BOT_TOKEN",
+    "TELEGRAM_CHAT_ID",
+    "CONTENT_FACTORY_CHAT_ID",
+    "ALLOWED_CHAT_IDS",
+)
 for _key in _TELEGRAM_ENV_KEYS:
     os.environ[_key] = ""
 

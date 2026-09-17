@@ -43,7 +43,7 @@ lewat subprocess `ffmpeg` native. Hasil akhir: **35,6 detik** untuk kasus yang s
 |---|---|---|
 | **APPROVE/REVISI tidak pernah ditangkap** | `agent4_approval.py` punya logika polling `getUpdates`, tapi **tidak dipanggil** oleh jalur plugin (`run_and_deliver.py`). Tidak ada kode yang bereaksi terhadap balasan APPROVE. | Human-in-the-loop yang dijanjikan di caption Telegram **tidak ditegakkan** sistem. Untungnya juga tidak ada auto-publish, jadi tidak berbahaya — tapi fiturnya memang belum ada. |
 | ~~**Path output video tetap (bukan per-run)**~~ **(diperbaiki di Commit 1a)** | Hasil akhir kini disalin ke `video_{run_id}.mp4` / `creative_brief_{run_id}.json` **sebelum** lock render dilepas; render itu sendiri dilindungi `flock` eksklusif. | Sudah tertutup. Path kerja internal ffmpeg (`_segment_*.mp4` dll) tetap path tetap — aman karena berada di dalam lock. |
-| **Tidak ada pembatasan akses per-pengirim** | `tools.toolsBySender` belum diset di config OpenClaw. | Semua akun Telegram yang sudah *paired* bisa memicu pipeline dan memakai kredit OpenAI Anda. |
+| ~~**Tidak ada pembatasan akses per-pengirim**~~ **(diperbaiki: allowlist)** | `ALLOWED_CHAT_IDS` di `.env` dicek sebelum lock render dan sebelum panggilan GPT-4o mana pun. Gagal-tertutup: daftar kosong menolak semua. `tools.toolsBySender` di OpenClaw tetap belum diset, tapi pembatasan kini ditegakkan di sisi pipeline. | Sudah tertutup untuk pemakaian kredit & pengiriman. |
 | `publish_to_platforms()` | Stub, `return None`. Butuh kredensial Meta Graph API / TikTok / YouTube Data API. | Publish otomatis tidak ada; user diminta upload manual. |
 | `fetch_real_analytics()` | Stub, `return None`, fallback ke estimasi acak. | Angka performa bukan data asli platform. |
 | `agents/*.md`, `skills/*.md`, `openclaw.config.json` (AIHackfest) | Tidak dibaca kode apa pun. `agents.entries` di OpenClaw tidak menunjuk ke file `.md` ini. | Dokumen desain murni, tidak mempengaruhi perilaku sistem. |
@@ -98,6 +98,20 @@ berikutnya. Yang tersisa hanyalah sampah disk dan berkurangnya lapis pertahanan.
 Rencana 1b: hapus file kerja (`_segment_*.mp4`, `_combined_*.mp4`, `_concat_list.txt`,
 `temp_vo.mp3`, `video_output.mp4` basi) di **awal** render, **di dalam** lock render —
 sekaligus memulihkan regresi di atas.
+
+### Routing per-chat (2026-09-17)
+
+Tujuan pengiriman kini selalu chat pemicu (`CONTENT_FACTORY_CHAT_ID` dari
+`nativeChannelId`). Fallback lama ke `TELEGRAM_CHAT_ID` **dihapus** dari jalur
+Telegram: fallback itulah yang membuat hasil run siapa pun terkirim ke satu chat
+tetap, sehingga materi milik satu user bisa sampai ke user lain. `.env` kini hanya
+sumber untuk jalur CLI. `notify()`/`send_video()` mewajibkan `chat_id` eksplisit.
+
+**Wajib untuk handler APPROVE jalur plugin (kalau/ketika dibangun):** handler itu
+**harus memfilter balasan per `chat_id` pemicu run**, sama seperti
+`wait_for_reply()` di `agent4_approval.py` sekarang. Tanpa filter itu, satu user
+bisa menyetujui atau menolak konten milik user lain. Ini bukan detail opsional —
+sistem ini dipakai lebih dari satu orang.
 
 ### Operasional: install plugin & penyebab OOM
 

@@ -68,6 +68,29 @@ def resolve_chat_id():
 # lewat CONTENT_FACTORY_CHAT_ID. Jangan pernah dipakai langsung sebagai tujuan.
 CLI_CHAT_ID = (os.getenv("TELEGRAM_CHAT_ID") or "").strip() or None
 
+
+def allowed_chat_ids():
+    """Himpunan chat yang boleh memicu pipeline, dari ALLOWED_CHAT_IDS di .env.
+
+    Dibaca per-panggilan (bukan konstanta modul) supaya perubahan .env tidak
+    butuh restart, dan supaya test bisa mengubahnya lewat monkeypatch env.
+    """
+    raw = os.getenv("ALLOWED_CHAT_IDS", "")
+    return {part.strip() for part in raw.split(",") if part.strip()}
+
+
+def chat_allowed(chat_id):
+    """True kalau chat_id boleh memicu pipeline.
+
+    GAGAL-TERTUTUP: ALLOWED_CHAT_IDS kosong/tidak diset berarti TIDAK ADA yang
+    diizinkan -- bukan "semua boleh". Pipeline ini membakar kredit OpenAI dan
+    mengirim materi user, jadi daftar kosong harus berarti berhenti, bukan
+    terbuka lebar untuk siapa pun yang kebetulan sudah paired di Telegram.
+    """
+    if not chat_id:
+        return False
+    return str(chat_id) in allowed_chat_ids()
+
 # Persona sesuai agent yang terdaftar di OpenClaw (agents.entries).
 PERSONA = {
     "trendanalysts": "🔍 TrendAnalysts",
