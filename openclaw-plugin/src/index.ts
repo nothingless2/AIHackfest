@@ -1,7 +1,8 @@
 import { Type } from "typebox";
 import { defineToolPlugin } from "openclaw/plugin-sdk/tool-plugin";
 import { spawn } from "node:child_process";
-import { existsSync, copyFileSync, mkdirSync } from "node:fs";
+import { existsSync, copyFileSync, mkdirSync, appendFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { basename, extname, resolve } from "node:path";
 
 const SUPPORTED_EXTENSIONS = new Set([
@@ -94,6 +95,33 @@ function startPipelineDetached(
   return child.pid;
 }
 
+/**
+ * DIAGNOSTIK ROUTING (sementara, untuk melacak bug "output pindah ke chat lain").
+ *
+ * Dua hipotesis yang sedang diuji:
+ *  (a) di chat pribadi `nativeChannelId` undefined -> jatuh ke TELEGRAM_CHAT_ID di .env,
+ *      sehingga output selalu ke satu chat tetap;
+ *  (b) `toolContext` yang ditangkap closure factory tidak diperbarui tiap turn, sehingga
+ *      chat tujuan basi (milik turn sebelumnya).
+ *
+ * Untuk membedakannya kita catat `factoryInstanceId`: kalau dua panggilan dari DUA chat
+ * berbeda memakai factoryInstanceId yang SAMA dan channel id yang sama, hipotesis (b)
+ * terbukti. Menulis log TIDAK BOLEH menggagalkan tool -- semua dibungkus try/catch.
+ */
+function logInvocation(projectRoot: string, entry: Record<string, unknown>): void {
+  try {
+    const dir = resolve(projectRoot, "workspace", "state");
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(
+      resolve(dir, "plugin_calls.jsonl"),
+      JSON.stringify({ ts: new Date().toISOString(), ...entry }) + "\n",
+      "utf8",
+    );
+  } catch {
+    // sengaja diabaikan: diagnostik tidak boleh merusak jalur utama
+  }
+}
+
 export default defineToolPlugin({
   id: "content-factory",
   name: "Content Factory",
@@ -115,6 +143,12 @@ export default defineToolPlugin({
       parameters: runParams,
       optional: true,
       factory({ api, toolContext }) {
+        // Snapshot SAAT FACTORY DIPANGGIL. Dibandingkan dengan nilai saat execute()
+        // untuk membuktikan apakah toolContext diperbarui per turn atau basi.
+        const factoryInstanceId = randomUUID().slice(0, 8);
+        const factoryChannelId = toolContext.nativeChannelId ?? null;
+        const factorySenderId = toolContext.requesterSenderId ?? null;
+
         return {
           name: "content_factory_run",
           label: "Content Factory Run",
@@ -138,6 +172,22 @@ export default defineToolPlugin({
             }
 
             const { mediaPaths } = params;
+
+            // Dicatat SEBELUM validasi apa pun, supaya tetap ada bukti walau
+            // permintaan nanti ditolak (file hilang / format tidak didukung).
+            logInvocation(projectRoot, {
+              toolCallId,
+              toolCallIdLength: toolCallId.length,
+              factoryInstanceId,
+              factoryChannelId,
+              factorySenderId,
+              executeChannelId: toolContext.nativeChannelId ?? null,
+              executeSenderId: toolContext.requesterSenderId ?? null,
+              senderIsOwner: toolContext.senderIsOwner ?? null,
+              messageChannel: toolContext.messageChannel ?? null,
+              sessionKey: toolContext.sessionKey ?? null,
+              mediaCount: mediaPaths.length,
+            });
 
             const missing = mediaPaths.filter((p) => !existsSync(p));
             if (missing.length > 0) {
