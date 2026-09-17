@@ -4,6 +4,12 @@ Dipakai untuk mode asinkron: plugin OpenClaw memanggil script ini secara detache
 lalu langsung kembali, supaya render panjang (2-4 menit) tidak dibunuh oleh batas
 waktu eksekusi tool. Progress dan video dikirim langsung dari sini.
 
+ROUTING (gagal-tertutup): tujuan pengiriman HANYA dari CONTENT_FACTORY_CHAT_ID
+yang diisi plugin dari nativeChannelId. Tidak ada fallback ke TELEGRAM_CHAT_ID di
+.env -- fallback itulah yang dulu membuat hasil run siapa pun terkirim ke satu
+chat tetap, sehingga materi milik user A bisa sampai ke user B. Kalau chat pemicu
+tidak dapat ditentukan, run ditolak dan TIDAK ada yang dikirim ke siapa pun.
+
 Sengaja TIDAK melakukan polling getUpdates: balasan APPROVE/REVISI user belum
 punya handler di jalur ini sama sekali (lihat STATUS.md) -- caption di bawah
 sekadar instruksi untuk user, bukan janji fungsional. File per-run
@@ -17,13 +23,13 @@ import os
 import sys
 
 from common import (
-    TELEGRAM_CHAT_ID,
     brief_path_for_run,
     draft_video_path_for_run,
     ensure_dirs,
     log_error,
     notify,
     read_json,
+    resolve_chat_id,
     send_video,
 )
 from orchestrator import install_signal_handlers, run_core_stages_locked
@@ -31,7 +37,7 @@ from run_lock import FileLockBusyError, RUN_LOCK_STALE_SECONDS, generate_run_id,
 from run_log import log_event
 
 
-def deliver_plugin(run_id):
+def deliver_plugin(run_id, chat_id):
     video_path = draft_video_path_for_run(run_id)
     brief = read_json(brief_path_for_run(run_id), {}) or {}
     judul = brief.get("judul", "Untitled")
@@ -45,10 +51,14 @@ def deliver_plugin(run_id):
         "Balas APPROVE untuk menyetujui atau REVISI untuk perbaikan."
     )
 
-    ok = send_video(caption, video_path)
-    log_event("delivered" if ok else "delivery_failed", run_id, chat_id=TELEGRAM_CHAT_ID)
+    ok = send_video(caption, video_path, chat_id=chat_id)
+    log_event("delivered" if ok else "delivery_failed", run_id, chat_id=chat_id)
     if not ok:
-        notify("pipeline", f"video selesai tapi gagal dikirim. File ada di {video_path}")
+        notify(
+            "pipeline",
+            f"video selesai tapi gagal dikirim. File ada di {video_path}",
+            chat_id=chat_id,
+        )
         return 1
     return 0
 
@@ -62,14 +72,30 @@ def main():
     ensure_dirs()
     run_id = sanitize_run_id(os.getenv("CONTENT_FACTORY_RUN_ID") or generate_run_id())
 
+    chat_id = resolve_chat_id()
+    if not chat_id:
+        # Gagal-tertutup: tanpa chat pemicu yang jelas, tidak ada tujuan yang aman.
+        # Mengirim ke chat cadangan berarti membocorkan materi ke orang yang salah.
+        msg = (
+            "chat pemicu tidak dapat ditentukan (CONTENT_FACTORY_CHAT_ID kosong) — "
+            "run dibatalkan, tidak ada yang dikirim ke siapa pun."
+        )
+        print(f"[error] {msg}")
+        log_error("run_and_deliver routing", RuntimeError(msg))
+        log_event("run_rejected", run_id, chat_id=None, reason="chat_unknown")
+        return 1
+
     try:
         status, detail = run_core_stages_locked(
-            run_id, capture_output=True, on_noncritical_failure=_on_noncritical_failure
+            run_id,
+            chat_id=chat_id,
+            capture_output=True,
+            on_noncritical_failure=_on_noncritical_failure,
         )
     except FileLockBusyError as e:
         log_event(
-            "run_rejected", run_id, chat_id=TELEGRAM_CHAT_ID,
-            holder=e.holder, elapsed_seconds=e.elapsed_seconds,
+            "run_rejected", run_id, chat_id=chat_id, reason="render_locked",
+            holder_run_id=(e.holder or {}).get("holder_id"), elapsed_seconds=e.elapsed_seconds,
         )
         if e.elapsed_seconds > RUN_LOCK_STALE_SECONDS:
             msg = (
@@ -78,16 +104,18 @@ def main():
             )
         else:
             msg = f"masih ada render yang berjalan ({e.elapsed_seconds:.0f} detik lalu). Coba lagi setelah selesai."
-        notify("pipeline", msg)
+        # Dikirim ke chat PEMINTA yang ditolak, dan sengaja tidak menyebut apa pun
+        # tentang isi/judul run yang sedang memegang lock.
+        notify("pipeline", msg, chat_id=chat_id)
         return os.EX_TEMPFAIL
 
     if status == "FAILED":
         code, (label, output) = detail
         tail = ("\n" + "\n".join(output.splitlines()[-4:])) if output else ""
-        notify("pipeline", f"gagal di tahap {label}.{tail}")
+        notify("pipeline", f"gagal di tahap {label}.{tail}", chat_id=chat_id)
         return code
 
-    return deliver_plugin(run_id)
+    return deliver_plugin(run_id, chat_id)
 
 
 if __name__ == "__main__":
@@ -95,5 +123,5 @@ if __name__ == "__main__":
         sys.exit(main())
     except Exception as e:
         log_error("run_and_deliver failure", e)
-        notify("pipeline", f"pipeline gagal — {e}")
+        notify("pipeline", f"pipeline gagal — {e}", chat_id=resolve_chat_id())
         sys.exit(1)

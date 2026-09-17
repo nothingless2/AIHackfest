@@ -12,16 +12,17 @@ from openai import OpenAI
 
 from common import (
     BRIEF_PATH,
-    OPENAI_API_KEY,
-    PERFORMANCE_PATH,
-    TREND_REPORT_PATH,
     ensure_dirs,
     list_raw_assets,
     log_error,
     notify,
     now_iso,
+    OPENAI_API_KEY,
+    PERFORMANCE_PATH,
     read_json,
     resolve_assets,
+    resolve_chat_id,
+    TREND_REPORT_PATH,
     write_json,
 )
 
@@ -100,8 +101,13 @@ Balas HANYA JSON murni dengan struktur persis berikut:
 def run():
     ensure_dirs()
 
+    chat_id = resolve_chat_id()
     asset_names = select_assets()
-    notify("trendanalysts", f"menganalisis tren untuk {len(asset_names)} bahan mentah...")
+    notify(
+        "trendanalysts",
+        f"menganalisis tren untuk {len(asset_names)} bahan mentah...",
+        chat_id=chat_id,
+    )
 
     if not OPENAI_API_KEY:
         raise ValueError("OPENAI_API_KEY belum diisi di .env")
@@ -135,6 +141,7 @@ def run():
         "brainidea",
         f"konsep siap: \"{brief.get('judul', 'Untitled')}\" "
         f"({len(brief.get('scenes', []))} scene, tren: {trend_report.get('top_trend_topic')})",
+        chat_id=chat_id,
     )
     return 0
 
@@ -144,5 +151,5 @@ if __name__ == "__main__":
         sys.exit(run())
     except Exception as e:
         log_error("Agent 1&2 (brief) failure", e)
-        notify("trendanalysts", f"gagal menyusun brief — {e}")
+        notify("trendanalysts", f"gagal menyusun brief — {e}", chat_id=resolve_chat_id())
         sys.exit(1)

@@ -12,7 +12,7 @@ approval CLI berjalan bersamaan (risiko itu yang ditutup 1b).
 import os
 import sys
 
-from common import ensure_dirs, log_error, notify
+from common import CLI_CHAT_ID, ensure_dirs, log_error, notify
 from orchestrator import install_signal_handlers, run_core_stages_locked, run_stage
 from run_lock import FileLockBusyError, RUN_LOCK_STALE_SECONDS, generate_run_id, sanitize_run_id
 from run_log import log_event
@@ -35,16 +35,30 @@ def main():
 
     run_id = sanitize_run_id(os.getenv("CONTENT_FACTORY_RUN_ID") or generate_run_id())
 
+    # Jalur CLI: .env boleh jadi sumber chat tujuan (di sinilah satu-satunya
+    # tempat TELEGRAM_CHAT_ID sah dipakai). Nilainya lalu diteruskan ke semua
+    # tahap lewat CONTENT_FACTORY_CHAT_ID, supaya agent anak punya satu sumber
+    # kebenaran yang sama dengan jalur Telegram -- tanpa fallback tersembunyi.
+    chat_id = CLI_CHAT_ID
+    if chat_id:
+        os.environ["CONTENT_FACTORY_CHAT_ID"] = chat_id
+    else:
+        print("ℹ️  TELEGRAM_CHAT_ID kosong di .env — pipeline tetap jalan, "
+              "tapi tidak ada notifikasi/hasil yang dikirim ke Telegram.")
+
     try:
         status, detail = run_core_stages_locked(
             run_id,
+            chat_id=chat_id,
             capture_output=False,
             on_stage_start=_on_stage_start,
             on_noncritical_failure=_on_noncritical_failure,
         )
     except FileLockBusyError as e:
         log_event(
-            "run_rejected", run_id, holder=e.holder, elapsed_seconds=e.elapsed_seconds
+            "run_rejected", run_id, chat_id=chat_id, reason="render_locked",
+            holder_run_id=(e.holder or {}).get("holder_id"),
+            elapsed_seconds=e.elapsed_seconds,
         )
         if e.elapsed_seconds > RUN_LOCK_STALE_SECONDS:
             msg = (
@@ -54,14 +68,14 @@ def main():
         else:
             msg = f"masih ada render yang berjalan ({e.elapsed_seconds:.0f} detik lalu). Coba lagi setelah selesai."
         print(f"\n❌ {msg}")
-        notify("pipeline", msg)
+        notify("pipeline", msg, chat_id=chat_id)
         return os.EX_TEMPFAIL
 
     if status == "FAILED":
         code, (label, _output) = detail
         message = f"Pipeline dihentikan: {label} gagal (exit code {code})."
         print(f"\n❌ {message}")
-        notify("pipeline", message)
+        notify("pipeline", message, chat_id=chat_id)
         return code
 
     print("\n▶ Fase 3 — ApprovalPost (approval user)")
@@ -71,7 +85,7 @@ def main():
     if code != 0:
         message = f"Pipeline dihentikan: Fase 3 — ApprovalPost (approval user) gagal (exit code {code})."
         print(f"\n❌ {message}")
-        notify("pipeline", message)
+        notify("pipeline", message, chat_id=chat_id)
         return code
 
     print("\n" + "=" * 60)

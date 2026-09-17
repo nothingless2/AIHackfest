@@ -15,7 +15,6 @@ from common import (
     BRIEF_PATH,
     DRAFT_VIDEO_PATH,
     PROJECT_ROOT,
-    TELEGRAM_CHAT_ID,
     brief_path_for_run,
     draft_video_path_for_run,
 )
@@ -117,7 +116,8 @@ def run_stages(stages, *, run_id, capture_output, on_noncritical_failure, on_sta
 
 
 def run_core_stages_locked(
-    run_id, *, capture_output, on_stage_start=None, on_noncritical_failure=None
+    run_id, *,
+    chat_id, capture_output, on_stage_start=None, on_noncritical_failure=None
 ):
     """Jalankan CORE_STAGES di dalam lock render. Kalau sukses, salin
     DRAFT_VIDEO_PATH/BRIEF_PATH ke path ber-run_id SEBELUM lock dilepas --
@@ -134,7 +134,7 @@ def run_core_stages_locked(
             print(f"[warn] {label} gagal (exit {code}), tahap non-kritis — lanjut.")
 
     with acquire_render_lock(run_id):
-        log_event("run_started", run_id, chat_id=TELEGRAM_CHAT_ID)
+        log_event("run_started", run_id, chat_id=chat_id)
         t0 = time.time()
         status = "ERROR"
         try:
@@ -156,7 +156,7 @@ def run_core_stages_locked(
             log_event(
                 "run_finished",
                 run_id,
-                chat_id=TELEGRAM_CHAT_ID,
+                chat_id=chat_id,
                 status=status,
                 duration_seconds=time.time() - t0,
             )

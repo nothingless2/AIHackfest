@@ -15,7 +15,7 @@ from common import (
     DRAFT_VIDEO_PATH,
     PUBLISH_HISTORY_PATH,
     TELEGRAM_BOT_TOKEN,
-    TELEGRAM_CHAT_ID,
+    resolve_chat_id,
     ensure_dirs,
     log_error,
     notify,
@@ -64,7 +64,7 @@ def get_latest_update_id():
     return results[-1]["update_id"] if results else 0
 
 
-def wait_for_reply(after_update_id):
+def wait_for_reply(after_update_id, *, chat_id):
     deadline = time.time() + POLL_TIMEOUT_SECONDS
     offset = after_update_id + 1
 
@@ -85,7 +85,10 @@ def wait_for_reply(after_update_id):
         for update in updates:
             offset = update["update_id"] + 1
             message = update.get("message") or {}
-            if str(message.get("chat", {}).get("id")) != str(TELEGRAM_CHAT_ID):
+            # Hanya balasan dari chat yang MEMICU run ini yang dihitung.
+            # APPROVE dari chat lain diabaikan: satu user tidak boleh menyetujui
+            # (atau menolak) konten milik user lain.
+            if str(message.get("chat", {}).get("id")) != str(chat_id):
                 continue
             text = (message.get("text") or "").strip().upper()
             if text in APPROVE_WORDS:
@@ -131,10 +134,18 @@ def run():
             f"Draft video tidak ada di {DRAFT_VIDEO_PATH}. Jalankan Agent 3 dahulu."
         )
 
-    if not telegram_configured():
+    chat_id = resolve_chat_id()
+    if not chat_id:
+        record_history("REJECTED_CHAT_UNKNOWN")
+        raise ValueError(
+            "Chat pemicu tidak dapat ditentukan (CONTENT_FACTORY_CHAT_ID kosong) — "
+            "draft TIDAK dikirim ke siapa pun."
+        )
+
+    if not telegram_configured(chat_id):
         record_history("PENDING_NO_TELEGRAM")
         raise ValueError(
-            "TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID belum diisi di .env — "
+            "TELEGRAM_BOT_TOKEN belum diisi di .env — "
             "draft tidak bisa dikirim untuk approval."
         )
 
@@ -153,34 +164,35 @@ def run():
         f"Balas APPROVE untuk menyetujui atau REVISI untuk perbaikan."
     )
 
-    if not send_video(caption, DRAFT_VIDEO_PATH):
+    if not send_video(caption, DRAFT_VIDEO_PATH, chat_id=chat_id):
         record_history("PENDING_SEND_FAILED")
         raise RuntimeError("Gagal mengirim draft video ke Telegram.")
 
     print(f"[Agent 4] Menunggu balasan APPROVE/REVISI (timeout {POLL_TIMEOUT_SECONDS} detik)...")
-    decision = wait_for_reply(after_update_id)
+    decision = wait_for_reply(after_update_id, chat_id=chat_id)
 
     if decision == "APPROVED":
         live_url = publish_to_platforms()
         if live_url:
             record_history("PUBLISHED", live_url)
-            notify("approvalpost", f"konten sudah dipublikasikan: {live_url}")
+            notify("approvalpost", f"konten sudah dipublikasikan: {live_url}", chat_id=chat_id)
         else:
             record_history("APPROVED_AWAITING_MANUAL_UPLOAD")
             notify(
                 "approvalpost",
                 "disetujui! Kredensial API platform belum dikonfigurasi, jadi upload "
                 f"otomatis belum bisa dilakukan. Silakan upload manual: {DRAFT_VIDEO_PATH}",
+                chat_id=chat_id,
             )
         return 0
 
     if decision == "REJECTED":
         record_history("REJECTED")
-        notify("approvalpost", "draf ditolak (REVISI). Tidak ada yang dipublikasikan.")
+        notify("approvalpost", "draf ditolak (REVISI). Tidak ada yang dipublikasikan.", chat_id=chat_id)
         return 0
 
     record_history("TIMEOUT_NO_REPLY")
-    notify("approvalpost", "tidak ada balasan dalam batas waktu. Tidak ada yang dipublikasikan.")
+    notify("approvalpost", "tidak ada balasan dalam batas waktu. Tidak ada yang dipublikasikan.", chat_id=chat_id)
     return 0
 
 
@@ -189,5 +201,5 @@ if __name__ == "__main__":
         sys.exit(run())
     except Exception as e:
         log_error("Agent 4 (approval) failure", e)
-        notify("approvalpost", f"gagal memproses approval — {e}")
+        notify("approvalpost", f"gagal memproses approval — {e}", chat_id=resolve_chat_id())
         sys.exit(1)

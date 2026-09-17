@@ -6,12 +6,13 @@ import sys
 from common import (
     BRIEF_PATH,
     DRAFT_VIDEO_PATH,
-    PROJECT_ROOT,
-    RENDER_STATUS_PATH,
     ensure_dirs,
     log_error,
     notify,
+    PROJECT_ROOT,
     read_json,
+    RENDER_STATUS_PATH,
+    resolve_chat_id,
     write_json,
 )
 
@@ -28,10 +29,12 @@ def run():
             f"{BRIEF_PATH} tidak ada. Jalankan agent1_2_brief.py (Agent 1 & 2) dahulu."
         )
 
+    chat_id = resolve_chat_id()
     assets = brief.get("media_assets", [])
     notify(
         "contentmakers",
         f"merender video 9:16 dari {len(assets)} bahan + voice-over AI...",
+        chat_id=chat_id,
     )
 
     render_from_agent_script(
@@ -47,6 +50,7 @@ def run():
     notify(
         "contentmakers",
         f"draft selesai ({status.get('duration', 0):.1f} detik) — diserahkan ke ApprovalPost.",
+        chat_id=chat_id,
     )
     return 0
 
@@ -57,5 +61,5 @@ if __name__ == "__main__":
     except Exception as e:
         log_error("Agent 3 (render) failure", e)
         write_json(RENDER_STATUS_PATH, {"status": "FAILED", "error": str(e)})
-        notify("contentmakers", f"gagal merender video — {e}")
+        notify("contentmakers", f"gagal merender video — {e}", chat_id=resolve_chat_id())
         sys.exit(1)

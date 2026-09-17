@@ -8,13 +8,14 @@ import random
 import sys
 
 from common import (
-    PERFORMANCE_PATH,
-    PUBLISH_HISTORY_PATH,
     ensure_dirs,
     log_error,
     notify,
     now_iso,
+    PERFORMANCE_PATH,
+    PUBLISH_HISTORY_PATH,
     read_json,
+    resolve_chat_id,
     write_json,
 )
 
@@ -90,6 +91,7 @@ def run():
         "contentinsight",
         f"laporan performa siap (sumber: {data_source}, "
         f"engagement {metrics['engagement_rate']}%, status {summary['performance_status']}).",
+        chat_id=resolve_chat_id(),
     )
     return 0
 
@@ -99,5 +101,5 @@ if __name__ == "__main__":
         sys.exit(run())
     except Exception as e:
         log_error("Agent 5 (insight) failure", e)
-        notify("contentinsight", f"gagal menyusun laporan performa — {e}")
+        notify("contentinsight", f"gagal menyusun laporan performa — {e}", chat_id=resolve_chat_id())
         sys.exit(1)

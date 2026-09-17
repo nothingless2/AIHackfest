@@ -218,18 +218,28 @@ export default defineToolPlugin({
               return destName;
             });
 
-            // Kirim hasil ke chat yang memicu tool, bukan ke satu chat tetap di .env.
+            // Tujuan pengiriman HARUS chat pemicu. Kalau tidak diketahui, pipeline
+            // ditolak di sini -- BUKAN dilanjutkan dengan chat cadangan dari .env.
+            // Fallback itulah yang dulu membuat hasil run siapa pun terkirim ke satu
+            // chat tetap, sehingga materi milik user A bisa sampai ke user B.
             const originChatId = toolContext.nativeChannelId;
+            if (!originChatId) {
+              return fail(
+                "Chat pemicu tidak dapat ditentukan, jadi pipeline tidak dijalankan — " +
+                  "hasilnya tidak punya tujuan yang aman. Lihat workspace/state/plugin_calls.jsonl " +
+                  "untuk konteks yang diterima plugin.",
+                { error: "origin_chat_unknown" },
+              );
+            }
+
             const pipelineEnv: Record<string, string> = {
               CONTENT_FACTORY_ASSETS: copiedNames.join(","),
               // Diteruskan apa adanya (BUKAN runPrefix yang sudah dipotong 8 char) --
               // Python-side run_lock.sanitize_run_id() yang menangani sanitasi/
               // pemendekan aman (prefix+hash) kalau toolCallId ternyata panjang.
               CONTENT_FACTORY_RUN_ID: toolCallId,
+              CONTENT_FACTORY_CHAT_ID: String(originChatId),
             };
-            if (originChatId) {
-              pipelineEnv.CONTENT_FACTORY_CHAT_ID = String(originChatId);
-            }
 
             const pid = startPipelineDetached(projectRoot, pipelineEnv);
 

@@ -50,10 +50,23 @@ def brief_path_for_run(run_id):
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Tujuan pengiriman: utamakan chat asal pemanggil (diteruskan plugin OpenClaw),
-# baru jatuh ke TELEGRAM_CHAT_ID di .env untuk pemakaian CLI. Tanpa ini, hasil
-# selalu terkirim ke satu chat tetap walau yang memicu adalah akun/chat lain.
-TELEGRAM_CHAT_ID = os.getenv("CONTENT_FACTORY_CHAT_ID") or os.getenv("TELEGRAM_CHAT_ID")
+# Chat tujuan untuk RUN INI. Satu-satunya sumber: CONTENT_FACTORY_CHAT_ID, yang
+# diisi oleh titik masuk (plugin OpenClaw dari nativeChannelId, atau pipeline.py
+# dari .env untuk pemakaian CLI) lalu diwariskan ke semua tahap sebagai env.
+#
+# TIDAK ADA fallback ke TELEGRAM_CHAT_ID di sini. Versi lama memakai
+# `CONTENT_FACTORY_CHAT_ID or TELEGRAM_CHAT_ID`, sehingga ketika chat pemicu tidak
+# dapat ditentukan, hasil run SIAPA PUN dikirim ke satu chat tetap di .env --
+# materi milik user A bisa sampai ke user B. Sekarang gagal-tertutup: tidak tahu
+# tujuannya berarti tidak mengirim.
+def resolve_chat_id():
+    """Chat tujuan run ini, atau None kalau tidak dapat ditentukan."""
+    return (os.getenv("CONTENT_FACTORY_CHAT_ID") or "").strip() or None
+
+
+# HANYA untuk jalur CLI (pipeline.py) sebagai nilai awal yang lalu diteruskan
+# lewat CONTENT_FACTORY_CHAT_ID. Jangan pernah dipakai langsung sebagai tujuan.
+CLI_CHAT_ID = (os.getenv("TELEGRAM_CHAT_ID") or "").strip() or None
 
 # Persona sesuai agent yang terdaftar di OpenClaw (agents.entries).
 PERSONA = {
@@ -101,12 +114,20 @@ def write_json(path, payload):
         json.dump(payload, f, indent=4, ensure_ascii=False)
 
 
-def telegram_configured():
-    return bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
+def telegram_configured(chat_id=None):
+    """Siap mengirim? Butuh token DAN chat tujuan yang eksplisit.
+
+    chat_id=None berarti "pakai tujuan run ini" (resolve_chat_id()).
+    """
+    target = chat_id if chat_id is not None else resolve_chat_id()
+    return bool(TELEGRAM_BOT_TOKEN and target)
 
 
-def notify(agent_key, message, silent_fail=True):
-    """Kirim pesan berlabel persona ke Telegram. Selalu ikut dicetak ke stdout.
+def notify(agent_key, message, *, chat_id, silent_fail=True):
+    """Kirim pesan berlabel persona ke SATU chat tertentu. Selalu ikut dicetak ke stdout.
+
+    `chat_id` sengaja wajib dan keyword-only: tujuan pengiriman tidak boleh datang
+    dari konstanta global/ambient. chat_id kosong -> hanya dicetak, tidak dikirim.
 
     Kalau CONTENT_FACTORY_QUIET diset (mis. saat dijalankan lewat plugin OpenClaw),
     pesan hanya dicetak — pengiriman ke chat diserahkan ke pemanggil supaya tidak dobel.
@@ -118,13 +139,17 @@ def notify(agent_key, message, silent_fail=True):
     if os.getenv("CONTENT_FACTORY_QUIET"):
         return False
 
-    if not telegram_configured():
+    if not chat_id:
+        print(f"[warn] notify({agent_key}): chat tujuan tidak diketahui, pesan tidak dikirim.")
+        return False
+
+    if not telegram_configured(chat_id):
         return False
 
     try:
         resp = requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-            data={"chat_id": TELEGRAM_CHAT_ID, "text": text},
+            data={"chat_id": chat_id, "text": text},
             timeout=15,
         )
         return resp.status_code == 200
@@ -135,9 +160,17 @@ def notify(agent_key, message, silent_fail=True):
         return False
 
 
-def send_video(caption, video_path):
-    """Kirim file video ke Telegram. Return True kalau benar-benar terkirim."""
-    if not telegram_configured():
+def send_video(caption, video_path, *, chat_id):
+    """Kirim file video ke SATU chat tertentu. Return True kalau benar-benar terkirim.
+
+    `chat_id` wajib dan keyword-only: ini jalur yang mengirim materi milik user,
+    jadi tujuannya harus disebut eksplisit oleh pemanggil, tidak pernah ditebak.
+    """
+    if not chat_id:
+        print(f"[warn] chat tujuan tidak diketahui, video TIDAK dikirim: {video_path}")
+        return False
+
+    if not telegram_configured(chat_id):
         print(f"[warn] Telegram belum dikonfigurasi, video tidak dikirim: {video_path}")
         return False
 
@@ -149,7 +182,7 @@ def send_video(caption, video_path):
         with open(video_path, "rb") as vf:
             resp = requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendVideo",
-                data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption},
+                data={"chat_id": chat_id, "caption": caption},
                 files={"video": vf},
                 timeout=120,
             )
