@@ -11,7 +11,8 @@ def test_telegram_tidak_terkonfigurasi_selama_test():
     import common
 
     assert common.TELEGRAM_BOT_TOKEN == ""
-    assert common.TELEGRAM_CHAT_ID == ""
+    assert common.CLI_CHAT_ID is None
+    assert common.resolve_chat_id() is None
     assert common.telegram_configured() is False
 
 
@@ -21,7 +22,7 @@ def test_send_video_menolak_kirim_dan_tidak_melempar(tmp_path):
 
     dummy = tmp_path / "dummy.mp4"
     dummy.write_bytes(b"bukan video sungguhan")
-    assert common.send_video("caption tes", str(dummy)) is False
+    assert common.send_video("caption tes", str(dummy), chat_id=None) is False
 
 
 def test_anak_proses_mewarisi_env_telegram_kosong():

@@ -10,14 +10,14 @@ def test_log_event_menulis_baris_json_valid(tmp_path, monkeypatch):
     log_path = tmp_path / "run_log.jsonl"
     monkeypatch.setattr(run_log, "RUN_LOG_PATH", str(log_path))
 
-    run_log.log_event("run_started", "abc123", chat_id="531508359", extra_field="x")
+    run_log.log_event("run_started", "abc123", chat_id="chat-uji-123", extra_field="x")
 
     lines = log_path.read_text().strip().splitlines()
     assert len(lines) == 1
     entry = json.loads(lines[0])
     assert entry["event"] == "run_started"
     assert entry["run_id"] == "abc123"
-    assert entry["chat_id"] == "531508359"
+    assert entry["chat_id"] == "chat-uji-123"
     assert entry["extra_field"] == "x"
     assert "ts" in entry
 
