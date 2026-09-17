@@ -15,6 +15,7 @@ import sys
 from common import CLI_CHAT_ID, chat_allowed, ensure_dirs, log_error, notify
 from orchestrator import install_signal_handlers, run_core_stages_locked, run_stage
 from run_lock import FileLockBusyError, RUN_LOCK_STALE_SECONDS, generate_run_id, sanitize_run_id
+from retention import sweep_old_run_files
 from run_log import log_event
 
 
@@ -29,6 +30,7 @@ def _on_noncritical_failure(label, code):
 def main():
     install_signal_handlers()
     ensure_dirs()
+    sweep_old_run_files()  # jaring pengaman retensi, murah & aman dipanggil tiap run
     print("=" * 60)
     print("🚀 PIPELINE 5 AGENT CONTENT FACTORY")
     print("=" * 60)

@@ -19,6 +19,7 @@ from common import (
     draft_video_path_for_run,
 )
 from run_lock import acquire_render_lock
+from retention import clear_render_workspace
 from run_log import log_event
 
 SCRIPTS_DIR = os.path.join(PROJECT_ROOT, "scripts")
@@ -135,6 +136,11 @@ def run_core_stages_locked(
 
     with acquire_render_lock(run_id):
         log_event("run_started", run_id, chat_id=chat_id)
+        # DI DALAM lock: buang sisa file kerja render yang mati di tengah, supaya
+        # render ini mulai dari keadaan bersih dan tidak ada draft lama yang bisa
+        # terkirim tidak sengaja. Di luar lock, ini akan menghapus file milik
+        # render lain yang sedang berjalan.
+        clear_render_workspace()
         t0 = time.time()
         status = "ERROR"
         try:

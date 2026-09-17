@@ -1,0 +1,117 @@
+"""Pembersihan file kerja render dan retensi file per-run.
+
+Dua hal berbeda yang sengaja dipisah:
+
+1. `clear_render_workspace()` — file KERJA render (_segment_*.mp4, _combined_*.mp4,
+   _concat_list.txt, temp_vo.mp3) plus draft lama `video_output.mp4`. auto_render.py
+   sudah menghapus file kerjanya sendiri di akhir render yang SUKSES, jadi sisa file
+   ini hanya muncul kalau render mati di tengah (timeout/killpg/SIGINT/kill -9).
+   Dipanggil di AWAL render, DI DALAM lock render.
+
+2. `cleanup_run_files()` / `sweep_old_run_files()` — file HASIL per-run
+   (video_{run_id}.mp4, creative_brief_{run_id}.json) yang umurnya panjang.
+
+`workspace/raw/` TIDAK PERNAH disentuh modul ini: bahan mentah milik user adalah
+masukan, bukan sampah kerja, dan menghapusnya bisa menggagalkan run yang sedang
+berjalan maupun percobaan ulang.
+"""
+
+import glob
+import os
+import time
+
+from common import BRIEF_PATH, DRAFT_VIDEO_PATH, DRAFTS_DIR, STATE_DIR
+
+RUN_FILE_RETENTION_DAYS = int(os.getenv("RUN_FILE_RETENTION_DAYS", "7"))
+
+# Nama file tetap yang TIDAK boleh ikut tersapu retensi: keduanya adalah path
+# kerja milik run yang sedang berjalan, bukan artefak lama.
+_LINDUNGI = {os.path.basename(DRAFT_VIDEO_PATH), os.path.basename(BRIEF_PATH)}
+
+
+def _hapus(path, label):
+    """Hapus satu file. Kegagalan hanya diperingatkan -- pembersihan tidak boleh
+    menggagalkan pipeline."""
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+            return True
+    except OSError as e:
+        print(f"[warn] retention: gagal menghapus {label} {path}: {e}")
+    return False
+
+
+def clear_render_workspace():
+    """Buang sisa file kerja render sebelum render baru mulai.
+
+    WAJIB dipanggil di dalam lock render: di luar lock, ini bisa menghapus file
+    milik render lain yang sedang berjalan.
+
+    Juga menghapus `video_output.mp4` lama. Pengaman ini ada di versi pra-1a
+    ("buang sisa file rusak dari run sebelumnya supaya tidak terkirim tidak
+    sengaja") lalu hilang saat 1a menulis ulang main() -- dipulihkan di sini,
+    sekaligus di tempat yang lebih tepat karena kini dilindungi lock.
+    """
+    jumlah = 0
+    pola = ["_segment_*.mp4", "_combined_*.mp4", "_concat_list.txt", "temp_vo.mp3"]
+    for p in pola:
+        for path in glob.glob(os.path.join(DRAFTS_DIR, p)):
+            jumlah += _hapus(path, "file kerja")
+
+    if _hapus(DRAFT_VIDEO_PATH, "draft lama"):
+        jumlah += 1
+
+    if jumlah:
+        print(f"[info] retention: {jumlah} sisa file render dibersihkan sebelum mulai.")
+    return jumlah
+
+
+def cleanup_run_files(run_id, *, video=True, brief=True):
+    """Hapus file HASIL milik satu run.
+
+    `video=False` dipakai setelah video dipindah ke workspace/published/ -- file
+    sudah berpindah, jadi tidak ada yang perlu dihapus.
+    """
+    if not run_id:
+        return 0
+    jumlah = 0
+    if video:
+        jumlah += _hapus(os.path.join(DRAFTS_DIR, f"video_{run_id}.mp4"), "video per-run")
+    if brief:
+        jumlah += _hapus(
+            os.path.join(STATE_DIR, f"creative_brief_{run_id}.json"), "brief per-run"
+        )
+    return jumlah
+
+
+def sweep_old_run_files(max_age_days=None):
+    """Jaring pengaman: buang file per-run yang lebih tua dari N hari.
+
+    Untuk kasus cleanup_run_files tidak sempat jalan (crash, kill -9), dan untuk
+    jalur plugin yang memang sengaja tidak membersihkan langsung.
+
+    Yang DILINDUNGI dan tidak pernah ikut tersapu:
+    - `video_output.mp4` dan `creative_brief.json` (path kerja run berjalan)
+    - seluruh isi `workspace/raw/` (bahan mentah user, bukan sampah kerja)
+    - `workspace/published/` (arsip permanen yang dirujuk publish_history.json)
+    """
+    days = RUN_FILE_RETENTION_DAYS if max_age_days is None else max_age_days
+    batas = time.time() - days * 86400
+    jumlah = 0
+
+    kandidat = glob.glob(os.path.join(DRAFTS_DIR, "video_*.mp4")) + glob.glob(
+        os.path.join(STATE_DIR, "creative_brief_*.json")
+    )
+    for path in kandidat:
+        if os.path.basename(path) in _LINDUNGI:
+            continue
+        try:
+            if os.path.getmtime(path) >= batas:
+                continue
+        except OSError:
+            continue
+        jumlah += _hapus(path, "file per-run kedaluwarsa")
+
+    if jumlah:
+        print(f"[info] retention: {jumlah} file per-run lebih tua dari {days} hari dibuang.")
+    return jumlah

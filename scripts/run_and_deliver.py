@@ -35,6 +35,7 @@ from common import (
 )
 from orchestrator import install_signal_handlers, run_core_stages_locked
 from run_lock import FileLockBusyError, RUN_LOCK_STALE_SECONDS, generate_run_id, sanitize_run_id
+from retention import sweep_old_run_files
 from run_log import log_event
 
 
@@ -71,6 +72,7 @@ def _on_noncritical_failure(label, code):
 def main():
     install_signal_handlers()
     ensure_dirs()
+    sweep_old_run_files()  # jaring pengaman retensi, murah & aman dipanggil tiap run
     run_id = sanitize_run_id(os.getenv("CONTENT_FACTORY_RUN_ID") or generate_run_id())
 
     chat_id = resolve_chat_id()
