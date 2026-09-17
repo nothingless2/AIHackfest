@@ -40,6 +40,33 @@ for _key in _TELEGRAM_ENV_KEYS:
 
 
 @pytest.fixture(autouse=True)
+def _tanpa_jaringan(monkeypatch):
+    """Tidak ada test yang boleh menembak jaringan sungguhan.
+
+    Dipasang setelah ketahuan test memanggil agent5.run() tanpa mengalihkan
+    TREND_POOL_PATH, sehingga ia benar-benar meminta data ke Google Trends DAN
+    menimpa workspace/state/ asli. Kegagalannya sengaja berisik: lebih baik test
+    gagal dengan pesan jelas daripada diam-diam bergantung pada internet.
+    """
+    import urllib.request
+
+    def tolak(*a, **k):
+        raise AssertionError(
+            "Test mencoba mengakses jaringan. Mock-lah pemanggilannya "
+            "(mis. monkeypatch fetch_trends._get atau common.chat_json)."
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", tolak)
+    try:
+        import requests
+        for nama in ("get", "post", "request"):
+            monkeypatch.setattr(requests, nama, tolak)
+    except ImportError:
+        pass
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _telegram_selalu_mati(monkeypatch):
     """Jaring pengaman kedua: paksa konstanta common menjadi kosong di tiap test,
     apa pun urutan importnya. Artefak tes pernah bocor ke Telegram user -- ini

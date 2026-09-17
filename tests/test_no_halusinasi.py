@@ -17,11 +17,18 @@ import agent5_insight as insight
 def paths(tmp_path, monkeypatch):
     perf = tmp_path / "performance_summary.json"
     hist = tmp_path / "publish_history.json"
+    pool = tmp_path / "trend_pool.json"
     monkeypatch.setattr(insight, "PERFORMANCE_PATH", str(perf))
     monkeypatch.setattr(insight, "PUBLISH_HISTORY_PATH", str(hist))
+    # WAJIB dialihkan juga: tanpa ini insight.run() menulis ke workspace/state/
+    # asli dan memanggil Google Trends sungguhan.
+    monkeypatch.setattr(insight, "TREND_POOL_PATH", str(pool))
+    monkeypatch.setattr(insight, "gather", lambda *a, **k: {
+        "items": [], "sources_ok": [], "sources_failed": [], "queries": []})
+    monkeypatch.setattr(insight, "derive_queries", lambda *a, **k: [])
     monkeypatch.setattr(insight, "ensure_dirs", lambda: None)
     monkeypatch.setattr(insight, "notify", lambda *a, **k: True)
-    return {"perf": perf, "hist": hist}
+    return {"perf": perf, "hist": hist, "pool": pool}
 
 
 def baca(p):
