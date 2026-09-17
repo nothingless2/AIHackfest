@@ -79,7 +79,29 @@ lewat `finally`, lock terlepas.
   `workspace/published/`, rombak urutan `record_history`/cleanup di
   `agent4_approval.py`, dan pembersihan file kerja segmen (lihat di bawah).
 
-### Regresi yang diperkenalkan 1a — harus dipulihkan di 1b
+### Commit 1b — selesai (2026-09-17)
+
+Lock approval terpisah dari lock render (dua proses yang sama-sama polling
+`getUpdates` dengan token sama akan saling mencuri balasan), guard gateway di dua
+tempat, arsip `workspace/published/`, dan urutan cleanup yang benar.
+
+- **Video APPROVED dipindah, bukan dihapus.** `publish_history.json` menyimpan
+  `file_path` permanen; kalau filenya dibuang retensi, riwayatnya jadi rujukan
+  mati. `published/` di luar `DRAFTS_DIR` sehingga tidak pernah kena sweep.
+- **`record_history()` path-agnostik** — pemanggil menyebutkan `video_path`/
+  `brief_path` yang benar untuk momennya (per-run sebelum APPROVE, `published/`
+  sesudahnya).
+- **Cleanup paling akhir**, setelah semua pembacaan selesai. Desain awal menaruh
+  `cleanup_run_files()` di `finally`, yang akan menghapus brief SEBELUM
+  `record_history()` sempat membacanya.
+- **Lock approval sibuk → tidak cleanup sama sekali.** File dibiarkan utuh supaya
+  bisa dicoba lagi tanpa render ulang (yang berarti membakar kredit GPT-4o lagi).
+  Pesannya menyertakan `run_id` dan perintah ulangnya.
+- **Guard gateway di `pipeline.py`** (sebelum render, supaya tidak membakar kredit
+  lalu ditolak di ujung) **dan di `agent4_approval.py`** (untuk pemakaian
+  standalone). Diekstrak ke `scripts/gateway_check.py` agar tidak terduplikasi.
+
+### Regresi yang diperkenalkan 1a — sudah dipulihkan di 1b
 
 Versi pra-1a `run_and_deliver.py` menghapus `video_output.mp4` basi di awal run
 ("supaya tidak terkirim tidak sengaja") dan mengecek keberadaan file setelah render.

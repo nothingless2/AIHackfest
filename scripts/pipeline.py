@@ -13,6 +13,7 @@ import os
 import sys
 
 from common import CLI_CHAT_ID, chat_allowed, ensure_dirs, log_error, notify
+from gateway_check import warn_if_gateway_polling
 from orchestrator import install_signal_handlers, run_core_stages_locked, run_stage
 from run_lock import FileLockBusyError, RUN_LOCK_STALE_SECONDS, generate_run_id, sanitize_run_id
 from retention import sweep_old_run_files
@@ -34,6 +35,16 @@ def main():
     print("=" * 60)
     print("🚀 PIPELINE 5 AGENT CONTENT FACTORY")
     print("=" * 60)
+
+    # Guard gateway DI SINI, sebelum render. Fase 3 (approval CLI) akan ditolak
+    # kalau gateway hidup; menolaknya di ujung berarti sudah terlanjur membakar
+    # waktu render dan kredit GPT-4o untuk hasil yang tidak bisa di-approve.
+    if warn_if_gateway_polling():
+        print(
+            "\n❌ Gateway OpenClaw aktif — mode approval CLI tidak aman. "
+            "Hentikan gateway, atau pakai jalur plugin (tool content_factory_run)."
+        )
+        return os.EX_TEMPFAIL
 
     run_id = sanitize_run_id(os.getenv("CONTENT_FACTORY_RUN_ID") or generate_run_id())
 
