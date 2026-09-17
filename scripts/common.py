@@ -25,6 +25,7 @@ TREND_REPORT_PATH = os.path.join(STATE_DIR, "trend_report.json")
 RENDER_STATUS_PATH = os.path.join(STATE_DIR, "render_status.json")
 PUBLISH_HISTORY_PATH = os.path.join(STATE_DIR, "publish_history.json")
 PERFORMANCE_PATH = os.path.join(STATE_DIR, "performance_summary.json")
+TREND_POOL_PATH = os.path.join(STATE_DIR, "trend_pool.json")
 ERROR_LOG_PATH = os.path.join(STATE_DIR, "error.log")
 RUN_LOG_PATH = os.path.join(STATE_DIR, "run_log.jsonl")
 

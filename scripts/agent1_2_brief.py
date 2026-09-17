@@ -20,6 +20,7 @@ from common import (
     now_iso,
     OPENAI_API_KEY,
     PERFORMANCE_PATH,
+    TREND_POOL_PATH,
     read_json,
     resolve_assets,
     resolve_chat_id,
@@ -101,8 +102,47 @@ def build_performance_note(performance):
     return json.dumps(performance, ensure_ascii=False, indent=2)
 
 
-def build_prompt(asset_names, performance, *, jumlah_gambar):
+def build_trend_note(pool):
+    """Kolam tren NYATA sebagai daftar bernomor. LLM hanya boleh memilih nomor."""
+    items = (pool or {}).get("items") or []
+    if not items:
+        return ("TIDAK ADA data tren yang berhasil diambil. Set trend_index = null "
+                "dan tentukan sudut konten murni dari isi gambar."), []
+    baris = []
+    for i, it in enumerate(items):
+        metric = f" [{it['metric']}]" if it.get("metric") else ""
+        konteks = ""
+        if it.get("context"):
+            konteks = " | berita: " + "; ".join(it["context"][:2])
+        baris.append(f"{i}. ({it['source']}) {it['term']}{metric}{konteks}")
+    return "\n".join(baris), items
+
+
+def pilih_tren(pool, trend_index):
+    """Ambil item tren dari kolam berdasarkan pilihan LLM.
+
+    Ini penegak anti-halusinasinya: LLM hanya mengembalikan NOMOR, dan seluruh
+    isi trend_report diambil dari item yang benar-benar difetch. Nomor di luar
+    jangkauan atau bukan angka diperlakukan sebagai "tidak memilih" -- bukan
+    error, karena menolak memang jawaban yang sah.
+    """
+    items = (pool or {}).get("items") or []
+    if trend_index is None or not items:
+        return None
+    try:
+        idx = int(trend_index)
+    except (TypeError, ValueError):
+        print(f"[warn] trend_index bukan angka ({trend_index!r}) — dianggap tidak memilih.")
+        return None
+    if not 0 <= idx < len(items):
+        print(f"[warn] trend_index {idx} di luar jangkauan 0..{len(items)-1} — dianggap tidak memilih.")
+        return None
+    return items[idx]
+
+
+def build_prompt(asset_names, performance, *, jumlah_gambar, pool=None):
     performance_note = build_performance_note(performance)
+    trend_note, _ = build_trend_note(pool)
 
     bagian_visual = (
         f"Kamu DIBERI {jumlah_gambar} gambar/frame dari bahan mentah user di pesan ini. "
@@ -131,6 +171,16 @@ BATAS PENGETAHUANMU (penting, jangan dilanggar):
 Data performa konten sebelumnya:
 {performance_note}
 
+DAFTAR TREN NYATA (hasil pengambilan data, bukan ingatanmu):
+{trend_note}
+
+Aturan memilih tren:
+- Kamu HANYA boleh memilih dari daftar bernomor di atas, lewat "trend_index".
+- Kalau TIDAK ADA yang benar-benar berhubungan dengan isi gambar, set
+  "trend_index": null. Memaksakan tren yang tidak nyambung JAUH lebih buruk
+  daripada tidak memakai tren sama sekali.
+- DILARANG menulis nama tren lain di luar daftar itu.
+
 Nama file bahan (urutan boleh disusun ulang; gambar di atas berurutan sesuai daftar ini):
 {json.dumps(asset_names, ensure_ascii=False)}
 
@@ -145,9 +195,9 @@ Aturan keras:
 Balas HANYA JSON murni dengan struktur persis berikut:
 {{
   "trend_report": {{
-    "timestamp": "{now_iso()}",
-    "source": "LLM_TANPA_DATA_TREN_LIVE",
     "observed_material": "deskripsi FAKTUAL apa yang terlihat di gambar, 1-2 kalimat",
+    "trend_index": 0,
+    "trend_reason": "kenapa tren itu nyambung dengan gambar; kosongkan kalau null",
     "content_angle": "string",
     "recommended_hook_template": "string",
     "format_style": "string"
@@ -192,7 +242,10 @@ def run():
     client = OpenAI(api_key=OPENAI_API_KEY)
     performance = read_json(PERFORMANCE_PATH)
 
-    prompt_text = build_prompt(asset_names, performance, jumlah_gambar=len(image_parts))
+    pool = read_json(TREND_POOL_PATH, {}) or {}
+    prompt_text = build_prompt(
+        asset_names, performance, jumlah_gambar=len(image_parts), pool=pool
+    )
     response = client.chat.completions.create(
         model=MODEL,
         messages=[{
@@ -205,6 +258,29 @@ def run():
 
     trend_report = result["trend_report"]
     brief = result["creative_brief"]
+
+    # Penegakan: seluruh FAKTA tren diambil dari item yang benar-benar difetch,
+    # bukan dari teks LLM. LLM hanya menyumbang nomor pilihan + alasannya.
+    terpilih = pilih_tren(pool, trend_report.get("trend_index"))
+    trend_report.pop("trend_index", None)
+    trend_report["timestamp"] = now_iso()
+    if terpilih:
+        trend_report["trend_source"] = terpilih["source"]
+        trend_report["trend_term"] = terpilih["term"]
+        trend_report["trend_metric"] = terpilih.get("metric")
+        trend_report["trend_url"] = terpilih.get("url")
+        trend_report["trend_query"] = terpilih.get("query")
+        print(f"[info] tren dipakai: ({terpilih['source']}) {terpilih['term'][:60]}")
+    else:
+        trend_report["trend_source"] = "TIDAK_ADA_TREN_RELEVAN"
+        trend_report["trend_term"] = None
+        trend_report["trend_metric"] = None
+        trend_report["trend_url"] = None
+        trend_report["trend_query"] = None
+        trend_report.pop("trend_reason", None)
+        print("[info] tidak ada tren relevan — sudut konten murni dari isi bahan.")
+    trend_report["pool_size"] = len((pool or {}).get("items") or [])
+    trend_report["pool_sources"] = (pool or {}).get("sources_ok") or []
 
     # Zero Hallucination on Assets: daftar bahan ditentukan Python, bukan LLM.
     brief["media_assets"] = resolve_assets(asset_names)

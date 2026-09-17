@@ -30,7 +30,11 @@ SCRIPTS_DIR = os.path.join(PROJECT_ROOT, "scripts")
 # retry yang ditambahkan di Commit 2 (belum ada di 1a, tapi angka sudah konsisten
 # supaya tidak perlu direvisi lagi nanti).
 CORE_STAGES = [
-    ("agent5_insight.py", "ContentInsight", False, 30),
+    # 90 detik (naik dari 30): Fase 0 kini memanggil jaringan -- 1 panggilan vision
+    # kecil utk menurunkan kata kunci, lalu YouTube API + RSS Google Trends.
+    # Tetap NON-KRITIS: kalau sumber tren mati atau lambat, pipeline harus lanjut
+    # tanpa data tren, bukan berhenti.
+    ("agent5_insight.py", "ContentInsight", False, 90),
     ("agent1_2_brief.py", "TrendAnalysts & BrainIdea", True, 255),
     ("agent3_render.py", "ContentMakers", True, 300),
 ]
