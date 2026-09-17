@@ -97,6 +97,27 @@ async def generate_voice(text, output_audio):
         attempt_timeout=TTS_ATTEMPT_TIMEOUT,
         label="voice-over edge-tts",
     )
+    _catat_pemakaian_tts(text)
+
+
+def _catat_pemakaian_tts(text):
+    """Catat jumlah karakter TTS. Dibungkus try/except -- pelacakan biaya tidak
+    boleh menggagalkan render yang sudah berhasil."""
+    try:
+        from cost_estimate import estimate_tts_cost
+        from run_log import log_event
+
+        chars = len(text or "")
+        log_event(
+            "tts_call",
+            (os.getenv("CONTENT_FACTORY_RUN_ID") or "").strip() or None,
+            chat_id=(os.getenv("CONTENT_FACTORY_CHAT_ID") or "").strip() or None,
+            engine="edge-tts",
+            chars=chars,
+            cost_usd=estimate_tts_cost("edge-tts", chars),
+        )
+    except Exception as e:
+        print(f"[warn] cost: gagal mencatat pemakaian TTS: {type(e).__name__}: {e}")
 
 
 def scale_crop_filter():

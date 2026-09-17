@@ -1,0 +1,18 @@
+{
+  "_catatan": "Harga per 1 JUTA token, mata uang USD. PERIKSA ULANG di halaman resmi penyedia sebelum dipakai untuk keputusan biaya nyata -- harga berubah dan file ini tidak memperbarui dirinya sendiri. Model yang TIDAK ada di sini tidak akan ditebak: biayanya dilaporkan null, bukan dikarang.",
+  "updated_at": "2026-09-17",
+  "currency": "USD",
+  "llm": {
+    "gpt-4o": {
+      "input_per_1m": 2.50,
+      "output_per_1m": 10.00,
+      "sumber": "https://openai.com/api/pricing/"
+    }
+  },
+  "tts": {
+    "edge-tts": {
+      "per_1k_chars": 0.0,
+      "catatan": "Pembungkus layanan Microsoft Edge tanpa harga publik. Dicatat 0 supaya jumlah karakter tetap terlacak, BUKAN klaim bahwa ini gratis selamanya."
+    }
+  }
+}

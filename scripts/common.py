@@ -326,6 +326,7 @@ def chat_json(messages, *, model, label="panggilan LLM"):
             model=model, messages=messages,
             response_format={"type": "json_object"},
         )
+        _catat_pemakaian_llm(model, resp, label)
         return _json.loads(resp.choices[0].message.content)
 
     return with_retry(
@@ -334,3 +335,35 @@ def chat_json(messages, *, model, label="panggilan LLM"):
         extract_retry_after=openai_retry_after,
         label=label,
     )
+
+
+def _catat_pemakaian_llm(model, resp, label):
+    """Catat pemakaian token NYATA dari response.usage.
+
+    Dicatat per PANGGILAN, bukan per run: percobaan yang gagal lalu diulang tetap
+    menghabiskan token di sisi server kalau sempat diproses, dan satu run punya
+    lebih dari satu panggilan LLM.
+
+    Seluruh badan fungsi ini dibungkus try/except: pelacakan biaya adalah
+    pengamatan dan TIDAK BOLEH menggagalkan pipeline.
+    """
+    try:
+        from cost_estimate import estimate_llm_cost
+        from run_log import log_event  # impor tertunda: run_log mengimpor common
+
+        usage = getattr(resp, "usage", None)
+        masuk = getattr(usage, "prompt_tokens", None)
+        keluar = getattr(usage, "completion_tokens", None)
+        log_event(
+            "llm_call",
+            (os.getenv("CONTENT_FACTORY_RUN_ID") or "").strip() or None,
+            chat_id=resolve_chat_id(),
+            label=label,
+            model=model,
+            prompt_tokens=masuk,
+            completion_tokens=keluar,
+            total_tokens=getattr(usage, "total_tokens", None),
+            cost_usd=estimate_llm_cost(model, masuk, keluar),
+        )
+    except Exception as e:
+        print(f"[warn] cost: gagal mencatat pemakaian LLM: {type(e).__name__}: {e}")
