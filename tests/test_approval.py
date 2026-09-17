@@ -193,3 +193,49 @@ def test_record_history_memakai_path_yang_diberikan(lingkungan):
     entri = riwayat_terakhir(lingkungan["riwayat"])
     assert entri["file_path"] == "/x/video.mp4"
     assert entri["judul"] == "Judul Uji"
+
+
+# ---------- urutan: pindah DULU, baru publish ----------
+
+def test_video_dipindah_SEBELUM_publish_dipanggil(lingkungan, monkeypatch):
+    """Meta MENARIK video dari URL publik yang menyajikan published/.
+    Mempublikasikan sebelum file pindah berarti Meta menarik dari alamat kosong."""
+    monkeypatch.setattr(a4, "wait_for_reply", lambda *a, **k: "APPROVED")
+    arsip = lingkungan["published"] / f"{lingkungan['run_id']}.mp4"
+    terlihat = {}
+
+    def fake_publish(video_path, caption=""):
+        terlihat["path"] = video_path
+        terlihat["ada_saat_publish"] = os.path.exists(video_path)
+        return "https://instagram.com/reel/xyz"
+
+    monkeypatch.setattr(a4, "publish_to_platforms", fake_publish)
+
+    a4.run()
+
+    assert terlihat["path"] == str(arsip), "publish harus memakai path published/"
+    assert terlihat["ada_saat_publish"] is True, "file wajib sudah ada saat publish"
+
+
+def test_live_url_tercatat_saat_publish_berhasil(lingkungan, monkeypatch):
+    monkeypatch.setattr(a4, "wait_for_reply", lambda *a, **k: "APPROVED")
+    monkeypatch.setattr(a4, "publish_to_platforms",
+                        lambda v, c="": "https://instagram.com/reel/xyz")
+
+    a4.run()
+
+    entri = riwayat_terakhir(lingkungan["riwayat"])
+    assert entri["status"] == "PUBLISHED"
+    assert entri["live_url"] == "https://instagram.com/reel/xyz"
+
+
+def test_publish_gagal_tetap_APPROVED_dan_file_aman(lingkungan, monkeypatch):
+    """Gagal publish bukan alasan kehilangan konten yang sudah disetujui."""
+    monkeypatch.setattr(a4, "wait_for_reply", lambda *a, **k: "APPROVED")
+    monkeypatch.setattr(a4, "publish_to_platforms", lambda v, c="": None)
+
+    a4.run()
+
+    entri = riwayat_terakhir(lingkungan["riwayat"])
+    assert entri["status"] == "APPROVED_AWAITING_MANUAL_UPLOAD"
+    assert os.path.exists(entri["file_path"])

@@ -114,12 +114,16 @@ def record_history(status, live_url=None, *, video_path=None, brief_path=None):
     return history[-1]
 
 
-def publish_to_platforms(video_path=None):
-    """TODO: belum ada kredensial API platform (Meta Graph API / TikTok Content Posting
-    API / YouTube Data API v3) di .env, jadi upload otomatis belum bisa dilakukan.
-    Setelah kredensial tersedia, panggil API upload di sini dan kembalikan live_url.
-    Return None berarti belum bisa publish otomatis."""
-    return None
+def publish_to_platforms(video_path, caption=""):
+    """Publikasikan video yang SUDAH disetujui. Return live_url atau None.
+
+    `video_path` harus sudah berada di workspace/published/, karena Meta menarik
+    file dari URL publik yang menyajikan direktori itu -- bukan dari path per-run
+    yang tidak terekspos.
+    """
+    from publish import publish as publish_ke_platform
+
+    return publish_ke_platform(video_path, caption)
 
 
 def run():
@@ -206,12 +210,13 @@ def run():
     # --- Di luar lock approval. record_history() dan cleanup PALING AKHIR,
     # --- setelah semua pembacaan video_path/brief_path selesai.
     if decision == "APPROVED":
-        live_url = publish_to_platforms(video_path)
-
-        # Video yang disetujui DIPINDAH, bukan dihapus: file_path di
-        # publish_history.json disimpan permanen, jadi kalau filenya dibuang
-        # retensi, riwayatnya jadi rujukan mati. published/ di luar DRAFTS_DIR
-        # sehingga tidak pernah kena sweep.
+        # Video DIPINDAH lebih dulu, bukan dihapus. Dua alasan:
+        # 1. file_path di publish_history.json disimpan permanen; kalau filenya
+        #    dibuang retensi, riwayatnya jadi rujukan mati. published/ di luar
+        #    DRAFTS_DIR sehingga tidak pernah kena sweep.
+        # 2. Meta MENARIK video dari URL publik yang menyajikan published/.
+        #    Mempublikasikan sebelum file pindah berarti Meta menarik dari alamat
+        #    yang belum berisi apa-apa.
         nama = f"{run_id}.mp4" if run_id else f"cli_{now_iso().replace(':', '-')}.mp4"
         published_path = os.path.join(PUBLISHED_DIR, nama)
         try:
@@ -219,6 +224,8 @@ def run():
         except OSError as e:
             print(f"[warn] gagal memindah video ke published/: {e}")
             published_path = video_path
+
+        live_url = publish_to_platforms(published_path, caption)
 
         if live_url:
             record_history("PUBLISHED", live_url,
