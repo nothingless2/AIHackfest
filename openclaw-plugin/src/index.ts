@@ -239,6 +239,11 @@ export default defineToolPlugin({
               // pemendekan aman (prefix+hash) kalau toolCallId ternyata panjang.
               CONTENT_FACTORY_RUN_ID: toolCallId,
               CONTENT_FACTORY_CHAT_ID: String(originChatId),
+              // Prefix kepemilikan file, dikirim EKSPLISIT supaya sisi Python tidak
+              // perlu menebak ulang `slice(0, 8)` di sini. Dipakai untuk memastikan
+              // run ini hanya memakai bahan miliknya sendiri, bukan seluruh isi
+              // workspace/raw/ yang kini menampung materi lebih dari satu user.
+              CONTENT_FACTORY_RUN_PREFIX: runPrefix,
             };
 
             const pid = startPipelineDetached(projectRoot, pipelineEnv);

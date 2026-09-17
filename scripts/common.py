@@ -233,8 +233,32 @@ def resolve_assets(names):
 
     Zero Hallucination on Assets: kalau ada nama yang tidak ada di disk, gagal
     terang-terangan alih-alih diam-diam melanjutkan dengan bahan karangan.
+
+    Nama WAJIB berupa nama file polos di dalam RAW_DIR. Pemisah path dan '..'
+    ditolak, dan hasil akhirnya diperiksa ulang dengan realpath supaya symlink
+    pun tidak bisa menunjuk keluar folder. Tanpa ini, satu nama berisi '../'
+    cukup untuk membaca file di luar workspace.
     """
+    bad = [
+        n for n in names
+        if not n
+        or os.path.basename(n) != n
+        or n in (".", "..")
+        or os.path.isabs(n)
+    ]
+    if bad:
+        raise ValueError(f"Nama bahan mentah tidak valid (harus nama file polos): {bad}")
+
+    raw_root = os.path.realpath(RAW_DIR)
     paths = [os.path.join(RAW_DIR, name) for name in names]
+
+    escaped = [
+        n for n, p in zip(names, paths)
+        if os.path.commonpath([raw_root, os.path.realpath(p)]) != raw_root
+    ]
+    if escaped:
+        raise ValueError(f"Bahan mentah menunjuk keluar {RAW_DIR}: {escaped}")
+
     missing = [n for n, p in zip(names, paths) if not os.path.exists(p)]
     if missing:
         raise FileNotFoundError(f"Bahan mentah tidak ada di {RAW_DIR}: {missing}")

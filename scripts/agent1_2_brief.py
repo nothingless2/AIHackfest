@@ -30,15 +30,48 @@ MODEL = "gpt-4o"
 
 
 def select_assets():
-    """Daftar bahan untuk run ini: dari env CONTENT_FACTORY_ASSETS kalau ada,
-    kalau tidak pakai semua yang ada di workspace/raw/."""
-    forced = os.getenv("CONTENT_FACTORY_ASSETS", "").strip()
-    available = list_raw_assets()
+    """Daftar bahan untuk run ini.
 
-    if forced:
-        names = [n.strip() for n in forced.split(",") if n.strip()]
-    else:
-        names = available
+    workspace/raw/ dipakai bersama oleh SEMUA run dan SEMUA user, dan isinya tidak
+    pernah dihapus. Jadi "pakai semua isi folder" bukan default yang aman: run milik
+    user A bisa ikut menyertakan foto milik user B.
+
+    Aturannya sekarang bergantung pada asal run:
+
+    - Run dari plugin/Telegram (CONTENT_FACTORY_RUN_PREFIX terisi): WAJIB menyebut
+      bahannya lewat CONTENT_FACTORY_ASSETS, dan setiap nama wajib berawalan
+      "{prefix}_" -- yaitu file yang disalin plugin untuk run ini sendiri. Daftar
+      kosong berarti GAGAL, bukan jatuh ke seluruh isi folder.
+
+    - Run CLI manual (tanpa prefix): perilaku lama dipertahankan -- pakai
+      CONTENT_FACTORY_ASSETS kalau ada, kalau tidak seluruh isi workspace/raw/.
+      Di jalur ini operator sendiri yang menaruh file, jadi tidak ada percampuran
+      antar-user, tapi tetap diberi peringatan.
+    """
+    forced = os.getenv("CONTENT_FACTORY_ASSETS", "").strip()
+    run_prefix = (os.getenv("CONTENT_FACTORY_RUN_PREFIX") or "").strip()
+    names = [n.strip() for n in forced.split(",") if n.strip()] if forced else []
+
+    if run_prefix:
+        if not names:
+            raise ValueError(
+                "Run dari plugin tidak menyebutkan bahan (CONTENT_FACTORY_ASSETS kosong). "
+                "Dibatalkan — TIDAK jatuh ke seluruh isi workspace/raw/, karena folder itu "
+                "berisi bahan milik run dan user lain."
+            )
+        asing = [n for n in names if not n.startswith(f"{run_prefix}_")]
+        if asing:
+            raise ValueError(
+                f"Bahan berikut bukan milik run ini (prefix wajib '{run_prefix}_'): {asing}. "
+                "Dibatalkan untuk mencegah bahan milik user lain ikut terpakai."
+            )
+    elif not names:
+        names = list_raw_assets()
+        if names:
+            print(
+                f"[warn] Run CLI tanpa CONTENT_FACTORY_ASSETS — memakai SEMUA "
+                f"{len(names)} bahan di workspace/raw/. Pastikan isinya memang milik run ini."
+            )
 
     if not names:
         raise ValueError(
@@ -46,7 +79,7 @@ def select_assets():
             "Minta user mengupload foto/video dulu sebelum menjalankan pipeline."
         )
 
-    resolve_assets(names)  # memvalidasi semuanya benar-benar ada
+    resolve_assets(names)  # memvalidasi nama aman + semuanya benar-benar ada
     return names
 
 
