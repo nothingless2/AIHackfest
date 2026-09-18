@@ -8,6 +8,7 @@ import json
 import os
 import sys
 
+from transcribe import transcribe_assets
 from vision import build_image_parts
 
 from common import (
@@ -140,9 +141,32 @@ def pilih_tren(pool, trend_index):
     return items[idx]
 
 
-def build_prompt(asset_names, performance, *, jumlah_gambar, pool=None, konteks=""):
+def build_transcript_note(transkrip):
+    """Apa yang user BENAR-BENAR ucapkan di videonya.
+
+    Ini sumber kebenaran terkuat yang kita punya — jauh di atas tebakan dari satu
+    frame diam. Untuk video talking-head, frame hanya memperlihatkan wajah; isi
+    sebenarnya seluruhnya ada di ucapan.
+    """
+    if not transkrip:
+        return ("TIDAK ADA transkrip (bahan berupa gambar, tanpa audio, atau transkripsi "
+                "gagal). Bertumpu pada gambar saja.")
+    baris = [f'- "{teks}"' for teks in transkrip.values()]
+    return (
+        "UCAPAN ASLI user di dalam video (hasil transkripsi, BUKAN tebakan):\n"
+        + "\n".join(baris)
+        + "\n\nIni sumber kebenaran UTAMA. Kalau isinya bertentangan dengan tebakanmu "
+          "atas gambar, MENANGKAN transkrip — gambar cuma memperlihatkan wajah dan latar, "
+          "sedangkan transkrip memuat isi sebenarnya. DILARANG membuat konten bertema lain "
+          "dari yang dibicarakan di transkrip."
+    )
+
+
+def build_prompt(asset_names, performance, *, jumlah_gambar, pool=None, konteks="",
+                 transkrip=None):
     performance_note = build_performance_note(performance)
     trend_note, _ = build_trend_note(pool)
+    transcript_note = build_transcript_note(transkrip)
     konteks_note = (
         f'PERMINTAAN USER (apa adanya): "{konteks}"\n'
         "Ini yang user benar-benar inginkan. Judul, sudut, dan naskah WAJIB melayani\n"
@@ -178,6 +202,8 @@ BATAS PENGETAHUANMU (penting, jangan dilanggar):
 - "content_angle" adalah usulanmu berdasarkan isi bahan, BUKAN hasil riset tren.
 
 {konteks_note}
+
+{transcript_note}
 
 Data performa konten sebelumnya:
 {performance_note}
@@ -252,12 +278,17 @@ def run():
 
     performance = read_json(PERFORMANCE_PATH)
 
+    transkrip = transcribe_assets(asset_paths)
+    if transkrip:
+        print(f"[info] {len(transkrip)} bahan berhasil ditranskrip — isi ucapan ikut dikirim.")
+
     pool = read_json(TREND_POOL_PATH, {}) or {}
     konteks = (os.getenv("CONTENT_FACTORY_USER_CONTEXT") or "").strip()
     if konteks:
         print(f"[info] konteks user dipakai -> {konteks[:80]!r}")
     prompt_text = build_prompt(
-        asset_names, performance, jumlah_gambar=len(image_parts), pool=pool, konteks=konteks
+        asset_names, performance, jumlah_gambar=len(image_parts), pool=pool,
+        konteks=konteks, transkrip=transkrip,
     )
     result = chat_json(
         [{"role": "user",

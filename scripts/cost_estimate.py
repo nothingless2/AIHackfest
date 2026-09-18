@@ -61,3 +61,20 @@ def estimate_tts_cost(engine, chars, *, pricing=None):
     except (KeyError, TypeError, ValueError):
         print(f"[warn] cost: entri harga TTS '{engine}' tidak lengkap/valid.")
         return None
+
+
+def estimate_transcribe_cost(model, audio_seconds, *, pricing=None):
+    """USD untuk satu transkripsi, atau None kalau modelnya tidak dikenal.
+
+    Ditagih per MENIT audio, bukan per token — jadi rumusnya berbeda dari
+    estimate_llm_cost() dan tidak boleh disatukan dengannya.
+    """
+    tabel = (pricing if pricing is not None else load_pricing()).get("transcribe") or {}
+    harga = tabel.get(model)
+    if not harga:
+        return None
+    try:
+        return round((float(audio_seconds or 0) / 60.0) * float(harga["per_minute"]), 6)
+    except (KeyError, TypeError, ValueError):
+        print(f"[warn] cost: entri harga transkripsi '{model}' tidak lengkap/valid.")
+        return None

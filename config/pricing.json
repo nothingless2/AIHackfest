@@ -4,8 +4,8 @@
   "currency": "USD",
   "llm": {
     "gpt-4o": {
-      "input_per_1m": 2.50,
-      "output_per_1m": 10.00,
+      "input_per_1m": 2.5,
+      "output_per_1m": 10.0,
       "sumber": "https://openai.com/api/pricing/"
     }
   },
@@ -13,6 +13,13 @@
     "edge-tts": {
       "per_1k_chars": 0.0,
       "catatan": "Pembungkus layanan Microsoft Edge tanpa harga publik. Dicatat 0 supaya jumlah karakter tetap terlacak, BUKAN klaim bahwa ini gratis selamanya."
+    }
+  },
+  "transcribe": {
+    "whisper-1": {
+      "per_minute": 0.006,
+      "sumber": "https://openai.com/api/pricing/",
+      "catatan": "Ditagih per MENIT audio, bukan per token. Dibulatkan ke atas oleh OpenAI."
     }
   }
 }
