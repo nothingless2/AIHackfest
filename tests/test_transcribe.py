@@ -71,9 +71,10 @@ def mock_transcribe(monkeypatch):
 
     def fake(audio_path, *, durasi=0.0):
         dipanggil.append(durasi)
-        return "teks hasil transkrip"
+        return {"text": "teks hasil transkrip",
+                "segments": [{"start": 0.0, "end": 1.0, "text": "teks hasil transkrip"}]}
 
-    monkeypatch.setattr(transcribe, "transcribe_file", fake)
+    monkeypatch.setattr(transcribe, "transcribe_file_detailed", fake)
     monkeypatch.setattr(transcribe, "OPENAI_API_KEY", "kunci-palsu")
     monkeypatch.setattr(transcribe, "TRANSCRIBE_ENABLED", True)
     return dipanggil
@@ -119,7 +120,7 @@ def test_kegagalan_transkrip_tidak_menggagalkan_pipeline(tmp_path, monkeypatch, 
     def meledak(*a, **k):
         raise RuntimeError("API mati")
 
-    monkeypatch.setattr(transcribe, "transcribe_file", meledak)
+    monkeypatch.setattr(transcribe, "transcribe_file_detailed", meledak)
     src = buat_video(tmp_path / "v.mp4", dengan_audio=True)
 
     assert transcribe.transcribe_assets([src]) == {}
@@ -130,7 +131,8 @@ def test_transkrip_kosong_tidak_masuk_hasil(tmp_path, monkeypatch):
     """Pemanggil tidak boleh menyangka ada teks padahal kosong."""
     monkeypatch.setattr(transcribe, "OPENAI_API_KEY", "k")
     monkeypatch.setattr(transcribe, "TRANSCRIBE_ENABLED", True)
-    monkeypatch.setattr(transcribe, "transcribe_file", lambda p, durasi=0.0: "   ")
+    monkeypatch.setattr(transcribe, "transcribe_file_detailed",
+                        lambda p, durasi=0.0: {"text": "   ", "segments": []})
     src = buat_video(tmp_path / "v.mp4", dengan_audio=True)
     assert transcribe.transcribe_assets([src]) == {}
 
@@ -187,3 +189,24 @@ def test_prompt_memuat_transkrip():
                            transkrip={"a.mp4": "isi ucapan asli"})
     assert "isi ucapan asli" in p
     assert "BUKAN tebakan" in p
+
+
+# ---------- timestamp untuk subtitle ----------
+
+def test_detailed_menyertakan_potongan_bertimestamp(tmp_path, mock_transcribe):
+    """Timestamp asli inilah yang membuat subtitle bisa pas dengan ucapan user,
+    alih-alih memakai timing karangan LLM yang tidak terkait audio."""
+    src = buat_video(tmp_path / "v.mp4", dengan_audio=True)
+    hasil = transcribe.transcribe_assets_detailed([src])
+
+    data = hasil["v.mp4"]
+    assert data["text"] == "teks hasil transkrip"
+    assert data["segments"][0]["start"] == 0.0
+    assert data["segments"][0]["end"] == 1.0
+    assert data["duration"] > 0
+
+
+def test_transcribe_assets_tetap_mengembalikan_teks_saja(tmp_path, mock_transcribe):
+    """Pemanggil lama (prompt brief) tidak boleh ikut berubah."""
+    src = buat_video(tmp_path / "v.mp4", dengan_audio=True)
+    assert transcribe.transcribe_assets([src]) == {"v.mp4": "teks hasil transkrip"}

@@ -8,7 +8,8 @@ import json
 import os
 import sys
 
-from transcribe import transcribe_assets
+from audio_mode import requested_mode, resolve_audio_mode
+from transcribe import transcribe_assets_detailed
 from vision import build_image_parts
 
 from common import (
@@ -278,9 +279,15 @@ def run():
 
     performance = read_json(PERFORMANCE_PATH)
 
-    transkrip = transcribe_assets(asset_paths)
+    rinci = transcribe_assets_detailed(asset_paths)
+    transkrip = {nama: d["text"] for nama, d in rinci.items()}
     if transkrip:
         print(f"[info] {len(transkrip)} bahan berhasil ditranskrip — isi ucapan ikut dikirim.")
+
+    # Mode audio diputuskan DI SINI karena di sinilah kita tahu apakah bahan
+    # benar-benar berisi ucapan: transkrip yang tidak kosong adalah buktinya.
+    mode_audio, alasan_audio = resolve_audio_mode(requested_mode(), transkrip)
+    print(f"[info] mode audio: {mode_audio} — {alasan_audio}")
 
     pool = read_json(TREND_POOL_PATH, {}) or {}
     konteks = (os.getenv("CONTENT_FACTORY_USER_CONTEXT") or "").strip()
@@ -324,6 +331,11 @@ def run():
     trend_report["pool_sources"] = (pool or {}).get("sources_ok") or []
 
     # Zero Hallucination on Assets: daftar bahan ditentukan Python, bukan LLM.
+    brief["audio_mode"] = mode_audio
+    brief["audio_mode_reason"] = alasan_audio
+    # Potongan bertimestamp disimpan supaya renderer bisa membuat subtitle yang
+    # pas dengan ucapan asli, bukan memakai timing karangan LLM.
+    brief["transcript_segments"] = {nama: d["segments"] for nama, d in rinci.items()}
     brief["media_assets"] = resolve_assets(asset_names)
     brief["asset_names"] = asset_names
     brief["brief_id"] = f"brief_{now_iso()}"

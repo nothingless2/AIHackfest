@@ -155,6 +155,17 @@ const runParams = Type.Object({
         "yang harus disusun jadi satu konten.",
     },
   ),
+  audioMode: Type.Optional(
+    Type.Union([Type.Literal("ai"), Type.Literal("original")], {
+      description:
+        "Sumber suara video. 'original' = pakai audio asli dari video user, TANPA " +
+        "voice-over AI — isi HANYA kalau user memang memintanya (mis. \"jangan pakai " +
+        "suara AI\", \"pakai suara asli saya\"). 'ai' = voice-over AI. " +
+        "Kosongkan kalau user tidak menyebut soal suara sama sekali. " +
+        "Catatan: kalau video ternyata tidak ada ucapannya, sistem otomatis kembali " +
+        "ke voice-over AI supaya videonya tidak sunyi.",
+    }),
+  ),
   userContext: Type.Optional(
     Type.String({
       maxLength: 2000,
@@ -323,7 +334,7 @@ export default defineToolPlugin({
           parameters: runParams,
           async execute(
             toolCallId: string,
-            params: { mediaPaths: string[]; userContext?: string },
+            params: { mediaPaths: string[]; userContext?: string; audioMode?: "ai" | "original" },
           ) {
             const fail = (text: string, details: Record<string, unknown>) => ({
               content: [{ type: "text" as const, text }],
@@ -341,7 +352,7 @@ export default defineToolPlugin({
               });
             }
 
-            const { mediaPaths, userContext } = params;
+            const { mediaPaths, userContext, audioMode } = params;
 
             // Dicatat SEBELUM validasi apa pun, supaya tetap ada bukti walau
             // permintaan nanti ditolak (file hilang / format tidak didukung).
@@ -358,6 +369,7 @@ export default defineToolPlugin({
               sessionKey: toolContext.sessionKey ?? null,
               mediaCount: mediaPaths.length,
               hasUserContext: Boolean((userContext ?? "").trim()),
+              audioMode: audioMode ?? null,
               // Path yang BENAR-BENAR dikirim model, plus hasil validasinya.
               // Tanpa ini, penolakan "file tidak ditemukan" tidak bisa didiagnosis
               // dari log sama sekali -- yang tercatat cuma jumlahnya.
@@ -442,6 +454,10 @@ export default defineToolPlugin({
             // Kalimat user adalah sinyal paling langsung tentang MAKSUD konten --
             // topik, audiens, gaya. Sebelumnya dibuang sama sekali, sehingga
             // pipeline harus menebak semuanya dari piksel.
+            if (audioMode) {
+              pipelineEnv.CONTENT_FACTORY_AUDIO_MODE = audioMode;
+            }
+
             const konteks = (userContext ?? "").trim();
             if (konteks) {
               pipelineEnv.CONTENT_FACTORY_USER_CONTEXT = konteks;

@@ -75,6 +75,18 @@ def extract_audio(path, out_path):
 
 def transcribe_file(audio_path, *, durasi=0.0):
     """Transkrip satu file audio. Return teks, atau "" kalau gagal."""
+    return (transcribe_file_detailed(audio_path, durasi=durasi) or {}).get("text", "")
+
+
+def transcribe_file_detailed(audio_path, *, durasi=0.0):
+    """Transkrip + potongan bertimestamp.
+
+    Return {"text": str, "segments": [{"start": float, "end": float, "text": str}]}.
+
+    Timestamp diminta lewat response_format="verbose_json" -- ini yang membuat
+    subtitle bisa pas dengan ucapan asli user, alih-alih memakai timing karangan
+    LLM yang tidak ada hubungannya dengan audio sebenarnya.
+    """
     from openai import OpenAI
 
     from retry import with_retry
@@ -85,7 +97,9 @@ def transcribe_file(audio_path, *, durasi=0.0):
 
     def sekali():
         with open(audio_path, "rb") as f:
-            return client.audio.transcriptions.create(model=TRANSCRIBE_MODEL, file=f)
+            return client.audio.transcriptions.create(
+                model=TRANSCRIBE_MODEL, file=f, response_format="verbose_json",
+            )
 
     hasil = with_retry(
         sekali,
@@ -93,9 +107,21 @@ def transcribe_file(audio_path, *, durasi=0.0):
         extract_retry_after=openai_retry_after,
         label=f"transkripsi {TRANSCRIBE_MODEL}",
     )
+
     teks = (getattr(hasil, "text", "") or "").strip()
+    potongan = []
+    for seg in (getattr(hasil, "segments", None) or []):
+        isi = (getattr(seg, "text", "") or "").strip()
+        if not isi:
+            continue
+        potongan.append({
+            "start": float(getattr(seg, "start", 0) or 0),
+            "end": float(getattr(seg, "end", 0) or 0),
+            "text": isi,
+        })
+
     _catat_biaya(durasi, teks)
-    return teks
+    return {"text": teks, "segments": potongan}
 
 
 def _catat_biaya(durasi_detik, teks):
@@ -118,11 +144,20 @@ def _catat_biaya(durasi_detik, teks):
 
 
 def transcribe_assets(paths, *, max_assets=None):
-    """Transkrip semua bahan yang punya audio.
+    """Transkrip semua bahan yang punya audio. Return {nama_file: teks}."""
+    return {
+        nama: data["text"]
+        for nama, data in transcribe_assets_detailed(paths, max_assets=max_assets).items()
+    }
 
-    Return dict {nama_file: transkrip} — hanya berisi yang BERHASIL dan tidak
-    kosong. Bahan tanpa audio, gagal ekstrak, atau gagal transkrip tidak muncul,
-    sehingga pemanggil tidak pernah menyangka ada teks padahal tidak ada.
+
+def transcribe_assets_detailed(paths, *, max_assets=None):
+    """Seperti transcribe_assets, tapi menyertakan potongan bertimestamp.
+
+    Return {nama_file: {"text":..., "segments":[...], "duration": float}} — hanya
+    berisi yang BERHASIL dan tidak kosong. Bahan tanpa audio, gagal ekstrak, atau
+    gagal transkrip tidak muncul, sehingga pemanggil tidak pernah menyangka ada
+    teks padahal tidak ada.
     """
     if not TRANSCRIBE_ENABLED or not OPENAI_API_KEY:
         return {}
@@ -149,13 +184,19 @@ def transcribe_assets(paths, *, max_assets=None):
         try:
             if not extract_audio(path, tmp.name):
                 continue
-            # strip defensif: jangan bergantung pada transcribe_file sudah
+            data = transcribe_file_detailed(tmp.name, durasi=durasi) or {}
+            # strip defensif: jangan bergantung pada pemanggil sudah
             # membersihkannya. Transkrip berisi spasi saja bukan "isi" dan tidak
             # boleh masuk ke prompt seolah-olah user mengatakan sesuatu.
-            teks = (transcribe_file(tmp.name, durasi=durasi) or "").strip()
+            teks = (data.get("text") or "").strip()
             if teks:
-                hasil[os.path.basename(path)] = teks
-                print(f"[info] transcribe: {os.path.basename(path)} -> {len(teks)} karakter")
+                hasil[os.path.basename(path)] = {
+                    "text": teks,
+                    "segments": data.get("segments") or [],
+                    "duration": durasi,
+                }
+                print(f"[info] transcribe: {os.path.basename(path)} -> {len(teks)} karakter, "
+                      f"{len(data.get('segments') or [])} potongan bertimestamp")
         except Exception as e:
             print(f"[warn] transcribe: {os.path.basename(path)} gagal: {type(e).__name__}: {e}")
         finally:

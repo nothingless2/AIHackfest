@@ -20,9 +20,12 @@ import sys
 
 import pytest
 
-SCRIPTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts")
-if SCRIPTS_DIR not in sys.path:
-    sys.path.insert(0, SCRIPTS_DIR)
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SCRIPTS_DIR = os.path.join(_ROOT, "scripts")
+RENDER_DIR = os.path.join(_ROOT, "skills", "video_generator")
+for _d in (SCRIPTS_DIR, RENDER_DIR):
+    if _d not in sys.path:
+        sys.path.insert(0, _d)
 
 # Dikosongkan SEBELUM modul test (dan common.py) diimpor. Anak proses yang di-spawn
 # test juga mewarisi os.environ ini, jadi mereka ikut aman.

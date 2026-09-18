@@ -37,6 +37,14 @@ SAFE_BOTTOM_MARGIN_PX = 300
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv"}
 MIN_CLIP_DURATION = 1.5
+# Durasi tampil satu GAMBAR saat mode audio asli. Di mode ini tiap klip video
+# main sepanjang durasi aslinya, jadi gambar butuh angkanya sendiri.
+IMAGE_CLIP_SECONDS = float(os.getenv("IMAGE_CLIP_SECONDS", "3"))
+# Parameter audio seragam untuk SEMUA segmen. Concat demuxer dengan -c copy
+# menuntut stream yang identik; segmen tanpa audio atau dengan laju berbeda
+# akan membuat penggabungan gagal atau menghasilkan audio kacau.
+AUDIO_RATE = "44100"
+AUDIO_CHANNELS = "2"
 FPS = 24
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -128,36 +136,42 @@ def scale_crop_filter():
     )
 
 
-def build_segment(asset_path, duration, segment_path):
-    """Satu bahan mentah (gambar atau video) -> satu segmen 9:16 sepanjang `duration`."""
+def build_segment(asset_path, duration, segment_path, *, keep_audio=False):
+    """Satu bahan mentah (gambar atau video) -> satu segmen 9:16 sepanjang `duration`.
+
+    `keep_audio=True` (mode audio asli) mempertahankan suara asli video, dan
+    memberi gambar trek audio SENYAP sepanjang durasinya. Trek senyap itu wajib:
+    concat demuxer dengan -c copy menuntut semua segmen punya susunan stream yang
+    sama, jadi satu segmen tanpa audio akan merusak penggabungan.
+    """
     ext = os.path.splitext(asset_path)[1].lower()
     vf = scale_crop_filter()
+    audio_enc = ["-c:a", "aac", "-ar", AUDIO_RATE, "-ac", AUDIO_CHANNELS]
 
     if ext in IMAGE_EXTENSIONS:
-        run_ffmpeg(
-            [
-                "-loop", "1", "-i", asset_path,
-                "-t", f"{duration:.3f}",
-                "-vf", vf,
-                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "fast",
-                segment_path,
-            ],
-            f"gambar {os.path.basename(asset_path)}",
-        )
+        args = ["-loop", "1", "-i", asset_path]
+        if keep_audio:
+            args += ["-f", "lavfi", "-i",
+                     f"anullsrc=channel_layout=stereo:sample_rate={AUDIO_RATE}"]
+        args += ["-t", f"{duration:.3f}", "-vf", vf,
+                 "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "fast"]
+        args += audio_enc if keep_audio else []
+        run_ffmpeg(args + [segment_path], f"gambar {os.path.basename(asset_path)}")
+
     elif ext in VIDEO_EXTENSIONS:
-        # -stream_loop -1 mengulang video kalau lebih pendek dari `duration`;
-        # -t memotongnya persis di durasi target baik untuk video pendek maupun panjang.
-        run_ffmpeg(
-            [
-                "-stream_loop", "-1", "-i", asset_path,
-                "-t", f"{duration:.3f}",
-                "-vf", vf,
-                "-an",
-                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "fast",
-                segment_path,
-            ],
-            f"video {os.path.basename(asset_path)}",
-        )
+        if keep_audio:
+            # TANPA -stream_loop: di mode audio asli klip main sepanjang durasi
+            # aslinya. Mengulang video berarti mengulang ucapannya juga.
+            args = ["-i", asset_path, "-vf", vf,
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "fast", *audio_enc]
+        else:
+            # -stream_loop -1 mengulang video kalau lebih pendek dari `duration`;
+            # -t memotongnya persis di durasi target.
+            args = ["-stream_loop", "-1", "-i", asset_path,
+                    "-t", f"{duration:.3f}", "-vf", vf, "-an",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "fast"]
+        run_ffmpeg(args + [segment_path], f"video {os.path.basename(asset_path)}")
+
     else:
         raise ValueError(f"Ekstensi tidak didukung untuk '{asset_path}': {ext}")
 
@@ -189,6 +203,47 @@ def escape_drawtext(text):
     )
 
 
+# Perkiraan lebar rata-rata karakter DejaVuSans-Bold relatif terhadap fontsize.
+# Dipakai untuk membungkus baris: drawtext TIDAK melakukan wrapping sendiri, jadi
+# kalimat panjang akan melebar keluar kanvas dan terpotong di kedua sisi.
+# Diukur dari hasil render nyata, bukan ditebak: baris 34 karakter pada
+# fontsize 52 mengisi penuh 1080 px -> 1080/34/52 = 0,61. Dipakai 0,62 + lebar
+# aman 88% supaya ada margin untuk huruf lebar (M, W) dan tepi tidak tersentuh.
+CHAR_WIDTH_RATIO = 0.62
+MAX_SUBTITLE_LINES = 3
+
+
+def wrap_text(teks, fontsize, video_width, *, max_lines=MAX_SUBTITLE_LINES):
+    """Bungkus teks jadi beberapa baris agar muat di kanvas.
+
+    Wajib untuk subtitle dari transkrip: potongan Whisper adalah kalimat utuh
+    (100+ karakter), sedangkan scene tulisan LLM dibatasi 6 kata. Tanpa ini,
+    kalimat panjang melebar keluar layar dan kedua ujungnya terpotong.
+    """
+    lebar_aman = video_width * 0.88
+    maks = max(8, int(lebar_aman / (fontsize * CHAR_WIDTH_RATIO)))
+
+    baris, sekarang = [], ""
+    for kata in teks.split():
+        calon = f"{sekarang} {kata}".strip()
+        if len(calon) <= maks:
+            sekarang = calon
+            continue
+        if sekarang:
+            baris.append(sekarang)
+        sekarang = kata
+        if len(baris) == max_lines:
+            break
+    if sekarang and len(baris) < max_lines:
+        baris.append(sekarang)
+
+    # Tandai kalau ada yang dibuang, supaya tidak tampak seperti kalimat selesai.
+    dipakai = " ".join(baris)
+    if len(dipakai.split()) < len(teks.split()):
+        baris[-1] = baris[-1] + "..."
+    return "\n".join(baris)
+
+
 def build_drawtext_chain(scenes, video_height):
     """Satu filter drawtext berantai per scene, tampil sesuai rentang waktu masing-masing."""
     y_pos = min(SAFE_TOP_MARGIN_PX, video_height - SAFE_BOTTOM_MARGIN_PX - 120)
@@ -199,7 +254,7 @@ def build_drawtext_chain(scenes, video_height):
         end = sc.get("end")
         if not text or end is None or end <= start:
             continue
-        safe_text = escape_drawtext(text)
+        safe_text = escape_drawtext(wrap_text(text, 52, TARGET_W))
         filters.append(
             "drawtext="
             f"fontfile={FONT_PATH}:text='{safe_text}':fontsize=52:fontcolor=yellow:"
@@ -234,6 +289,97 @@ def mux_audio(video_path, audio_path, output_path):
     )
 
 
+def media_duration(path):
+    """Durasi file media dalam detik, atau 0.0 kalau tidak terbaca."""
+    try:
+        out = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=nw=1:nk=1", path],
+            capture_output=True, text=True, timeout=30,
+        )
+        return float(out.stdout.strip()) if out.returncode == 0 else 0.0
+    except (subprocess.TimeoutExpired, OSError, ValueError):
+        return 0.0
+
+
+def split_for_subtitle(teks, fontsize, video_width, *, max_lines=MAX_SUBTITLE_LINES):
+    """Pecah kalimat panjang jadi beberapa tampilan subtitle.
+
+    Membungkus baris saja tidak cukup: potongan Whisper bisa jauh lebih panjang
+    dari yang muat di layar, dan memotongnya berarti membuang ucapan user. Di
+    sini kalimat dipecah jadi beberapa bagian yang masing-masing muat, lalu
+    pemanggil membagi durasinya secara proporsional.
+    """
+    lebar_aman = video_width * 0.88
+    per_baris = max(8, int(lebar_aman / (fontsize * CHAR_WIDTH_RATIO)))
+    # 90% dari anggaran penuh: pemecahan dan pembungkusan memakai perkiraan yang
+    # sama, jadi tanpa margin ini batas kata bisa mendorong potongan ke baris
+    # keempat dan wrap_text terpaksa memotongnya dengan "..." -- membuang ucapan
+    # user padahal seluruhnya sebenarnya muat.
+    per_tampilan = int(per_baris * max_lines * 0.9)
+
+    bagian, sekarang = [], ""
+    for kata in teks.split():
+        calon = f"{sekarang} {kata}".strip()
+        if len(calon) <= per_tampilan or not sekarang:
+            sekarang = calon
+        else:
+            bagian.append(sekarang)
+            sekarang = kata
+    if sekarang:
+        bagian.append(sekarang)
+    return bagian or [teks]
+
+
+def subtitle_scenes(data, assets, durasi_klip):
+    """Ubah transkrip bertimestamp jadi scene subtitle dengan waktu ABSOLUT.
+
+    Whisper memberi timestamp relatif terhadap awal TIAP klip. Di video gabungan,
+    klip ke-i mulai pada jumlah durasi klip sebelumnya — jadi tiap potongan harus
+    digeser sebesar offset itu. Tanpa penggeseran, semua subtitle akan menumpuk
+    di detik-detik awal video.
+
+    Return [] kalau tidak ada transkrip; pemanggil lalu memakai scenes dari brief.
+    """
+    per_aset = data.get("transcript_segments") or {}
+    if not per_aset:
+        return []
+
+    hasil = []
+    offset = 0.0
+    for i, path in enumerate(assets):
+        for seg in per_aset.get(os.path.basename(path), []):
+            teks = (seg.get("text") or "").strip()
+            mulai, selesai = float(seg.get("start", 0)), float(seg.get("end", 0))
+            if not teks or selesai <= mulai:
+                continue
+            # Jepit ke panjang klipnya: transkrip bisa sedikit melewati batas,
+            # dan subtitle yang muncul setelah klipnya berganti akan menyesatkan.
+            mulai = min(mulai, durasi_klip[i])
+            selesai = min(selesai, durasi_klip[i])
+            if selesai <= mulai:
+                continue
+            # Kalimat panjang dipecah, durasinya dibagi rata menurut jumlah kata
+            # tiap bagian — mendekati tempo bicara tanpa perlu timestamp per kata.
+            bagian = split_for_subtitle(teks, 52, TARGET_W)
+            total_kata = sum(len(b.split()) for b in bagian) or 1
+            jalan = offset + mulai
+            rentang = selesai - mulai
+            for b in bagian:
+                porsi = rentang * (len(b.split()) / total_kata)
+                hasil.append({
+                    "start": round(jalan, 2),
+                    "end": round(jalan + porsi, 2),
+                    "text": b,
+                })
+                jalan += porsi
+        offset += durasi_klip[i]
+
+    if hasil:
+        print(f"📝 {len(hasil)} subtitle dibuat dari ucapan asli user.")
+    return hasil
+
+
 def render_from_agent_script(
     json_path="workspace/drafts/script.json",
     image_path="",
@@ -245,8 +391,11 @@ def render_from_agent_script(
     with open(json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
+    audio_mode = (data.get("audio_mode") or "ai").strip().lower()
+    pakai_audio_asli = audio_mode == "original"
+
     full_vo = data.get("full_voice_over", "")
-    if not full_vo:
+    if not full_vo and not pakai_audio_asli:
         raise ValueError(f"'full_voice_over' kosong di {json_path}, tidak ada narasi untuk di-render.")
 
     scenes = data.get("scenes", [])
@@ -257,11 +406,6 @@ def render_from_agent_script(
     temp_audio = os.path.join(output_dir, "temp_vo.mp3")
 
     print(f"🎬 Judul Konten: {data.get('judul', 'Untitled')}")
-    print("🎙️ Menghasilkan Voice-Over AI secara dinamis...")
-    asyncio.run(generate_voice(full_vo, temp_audio))
-
-    total_duration = AudioFileClip(temp_audio).duration
-    print(f"⏱️ Durasi Voice-Over: {total_duration:.1f} detik")
 
     existing_assets = [p for p in media_assets if os.path.exists(p)]
     missing = [p for p in media_assets if not os.path.exists(p)]
@@ -271,13 +415,32 @@ def render_from_agent_script(
     if not existing_assets:
         raise ValueError("Tidak ada bahan mentah (media_assets) untuk dirender.")
 
-    per_clip = max(MIN_CLIP_DURATION, total_duration / len(existing_assets))
-    print(f"🖼️ Menyusun {len(existing_assets)} bahan mentah user ({per_clip:.1f} detik per bahan)")
+    if pakai_audio_asli:
+        # Durasi ditentukan bahan, bukan TTS: tiap klip main sepanjang aslinya
+        # supaya ucapan user tidak terpotong di tengah kalimat.
+        print("🔊 Memakai AUDIO ASLI dari video user (tanpa voice-over AI).")
+        durasi_klip = [
+            media_duration(p) if os.path.splitext(p)[1].lower() in VIDEO_EXTENSIONS
+            else IMAGE_CLIP_SECONDS
+            for p in existing_assets
+        ]
+        durasi_klip = [d if d > 0 else IMAGE_CLIP_SECONDS for d in durasi_klip]
+        total_duration = sum(durasi_klip)
+        scenes = subtitle_scenes(data, existing_assets, durasi_klip) or scenes
+        print(f"⏱️ Durasi total dari {len(existing_assets)} bahan: {total_duration:.1f} detik")
+    else:
+        print("🎙️ Menghasilkan Voice-Over AI secara dinamis...")
+        asyncio.run(generate_voice(full_vo, temp_audio))
+        total_duration = AudioFileClip(temp_audio).duration
+        print(f"⏱️ Durasi Voice-Over: {total_duration:.1f} detik")
+        per = max(MIN_CLIP_DURATION, total_duration / len(existing_assets))
+        durasi_klip = [per] * len(existing_assets)
+        print(f"🖼️ Menyusun {len(existing_assets)} bahan mentah user ({per:.1f} detik per bahan)")
 
     segment_paths = []
     for i, asset_path in enumerate(existing_assets):
         seg_path = os.path.join(output_dir, f"_segment_{i}.mp4")
-        build_segment(asset_path, per_clip, seg_path)
+        build_segment(asset_path, durasi_klip[i], seg_path, keep_audio=pakai_audio_asli)
         segment_paths.append(seg_path)
 
     silent_combined = os.path.join(output_dir, "_combined_silent.mp4")
@@ -286,15 +449,20 @@ def render_from_agent_script(
     else:
         os.replace(segment_paths[0], silent_combined)
 
-    with_text = os.path.join(output_dir, "_combined_text.mp4")
-    print("🎨 Menambahkan teks per-scene...")
-    apply_text_overlay(silent_combined, scenes, with_text)
-
-    print("🚀 Menggabungkan voice-over...")
-    mux_audio(with_text, temp_audio, output_video)
+    if pakai_audio_asli:
+        # Audio sudah menyatu di segmen; tidak ada yang perlu di-mux.
+        print("🎨 Menambahkan subtitle dari ucapan asli...")
+        apply_text_overlay(silent_combined, scenes, output_video)
+        with_text = None
+    else:
+        with_text = os.path.join(output_dir, "_combined_text.mp4")
+        print("🎨 Menambahkan teks per-scene...")
+        apply_text_overlay(silent_combined, scenes, with_text)
+        print("🚀 Menggabungkan voice-over...")
+        mux_audio(with_text, temp_audio, output_video)
 
     for tmp in [*segment_paths, silent_combined, with_text, temp_audio]:
-        if os.path.exists(tmp):
+        if tmp and os.path.exists(tmp):
             os.remove(tmp)
 
     print(f"✅ SUKSES! Video otomatis siap di: {output_video}")
@@ -303,6 +471,7 @@ def render_from_agent_script(
         "SUCCESS",
         file_path=output_video,
         duration=total_duration,
+        audio_mode=audio_mode,
         judul=data.get("judul"),
         scene_count=len(scenes),
         source_assets=existing_assets,
