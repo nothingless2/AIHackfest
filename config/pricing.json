@@ -13,6 +13,16 @@
     "edge-tts": {
       "per_1k_chars": 0.0,
       "catatan": "Pembungkus layanan Microsoft Edge tanpa harga publik. Dicatat 0 supaya jumlah karakter tetap terlacak, BUKAN klaim bahwa ini gratis selamanya."
+    },
+    "gpt-4o-mini-tts": {
+      "per_1k_chars": 0.0167,
+      "sumber": "https://openai.com/api/pricing/",
+      "catatan": "PERKIRAAN. gpt-4o-mini-tts sebenarnya ditagih per TOKEN (teks masuk + audio keluar), bukan per karakter. Angka ini diturunkan dari estimasi OpenAI ~$0,015 per menit audio dan ~900 karakter per menit bicara. Pakai untuk gambaran kasar, bukan rekonsiliasi tagihan."
+    },
+    "tts-1-hd": {
+      "per_1k_chars": 0.03,
+      "sumber": "https://openai.com/api/pricing/",
+      "catatan": "tts-1-hd ditagih $30 per 1 juta karakter."
     }
   },
   "transcribe": {

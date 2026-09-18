@@ -33,7 +33,40 @@ from trim_silence import (  # noqa: E402
 from moviepy import AudioFileClip
 
 TARGET_W, TARGET_H = 1080, 1920
-FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+# Font dipilih lewat NAMA keluarga (mis. "Inter", "Roboto"), bukan path file --
+# path berbeda-beda antar distribusi dan antar versi paket. fc-match yang
+# menerjemahkannya, dan selalu mengembalikan sesuatu (font terdekat) sehingga
+# nama yang salah ketik tidak membuat render gagal.
+SUBTITLE_FONT = os.getenv("SUBTITLE_FONT", "DejaVu Sans")
+SUBTITLE_FONT_WEIGHT = os.getenv("SUBTITLE_FONT_WEIGHT", "bold")
+FONT_FALLBACK = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+
+
+def resolve_font(nama=None, berat=None):
+    """Nama keluarga font -> path file, lewat fc-match.
+
+    fc-match SELALU mengembalikan hasil (font terdekat yang ada), jadi nama yang
+    tidak terpasang tidak menggagalkan render -- tapi hasilnya bisa bukan yang
+    diminta. Karena itu diperingatkan kalau keluarga yang kembali berbeda.
+    """
+    minta = nama or SUBTITLE_FONT
+    pola = f"{minta}:{berat or SUBTITLE_FONT_WEIGHT}"
+    try:
+        out = subprocess.run(["fc-match", "-f", "%{file}|%{family}", pola],
+                             capture_output=True, text=True, timeout=10)
+        if out.returncode == 0 and "|" in out.stdout:
+            berkas, keluarga = out.stdout.split("|", 1)
+            if berkas and os.path.exists(berkas):
+                if minta.lower() not in keluarga.lower():
+                    print(f"[warn] font {minta!r} tidak terpasang; memakai "
+                          f"{keluarga.strip()!r}. Lihat `fc-list : family`.")
+                return berkas
+    except (subprocess.TimeoutExpired, OSError) as e:
+        print(f"[warn] fc-match gagal ({e}); memakai font bawaan.")
+    return FONT_FALLBACK
+
+
+FONT_PATH = resolve_font()
 SAFE_TOP_MARGIN_PX = 300
 SAFE_BOTTOM_MARGIN_PX = 300
 
@@ -107,6 +140,22 @@ def run_ffmpeg(args, context):
 
 TTS_ATTEMPT_TIMEOUT = int(os.getenv("TTS_ATTEMPT_TIMEOUT_SECONDS", "30"))
 
+# --- Penyedia voice-over ---------------------------------------------------
+# "openai" memakai gpt-4o-mini-tts yang gayanya bisa diarahkan lewat instruksi,
+# terdengar jauh lebih natural daripada edge-tts yang kaku. "edge" dipertahankan
+# sebagai cadangan: gratis, dan satu-satunya yang tetap jalan kalau kredit habis.
+TTS_PROVIDER = (os.getenv("TTS_PROVIDER") or "openai").strip().lower()
+TTS_MODEL = os.getenv("TTS_MODEL", "gpt-4o-mini-tts")
+TTS_VOICE = os.getenv("TTS_VOICE", "nova")
+TTS_INSTRUCTIONS = os.getenv(
+    "TTS_INSTRUCTIONS",
+    "Bicara dalam Bahasa Indonesia yang natural dan hangat, seperti menjelaskan "
+    "ke teman. Tempo sedang, jangan datar, jangan seperti membaca teks. Beri "
+    "penekanan wajar pada kata penting dan jeda singkat di akhir kalimat.",
+)
+EDGE_VOICE = os.getenv("EDGE_TTS_VOICE", "id-ID-GadisNeural")
+EDGE_RATE = os.getenv("EDGE_TTS_RATE", "+5%")
+
 
 def _tts_retriable(exc):
     """edge-tts memakai layanan Microsoft tanpa autentikasi: tidak ada kategori
@@ -115,24 +164,70 @@ def _tts_retriable(exc):
     return not isinstance(exc, (TypeError, ValueError, KeyError))
 
 
-async def generate_voice(text, output_audio):
-    """TTS dgn retry. Instance Communicate DIBUAT BARU tiap percobaan -- objek
-    yang sudah gagal menyimpan state koneksi dan tidak aman dipakai ulang."""
+async def _voice_edge(text, output_audio):
+    """edge-tts. Instance Communicate DIBUAT BARU tiap percobaan -- objek yang
+    sudah gagal menyimpan state koneksi dan tidak aman dipakai ulang."""
 
     async def sekali():
-        communicate = edge_tts.Communicate(text, voice="id-ID-GadisNeural", rate="+5%")
+        communicate = edge_tts.Communicate(text, voice=EDGE_VOICE, rate=EDGE_RATE)
         await communicate.save(output_audio)
 
     await with_retry_async(
-        sekali,
-        is_retriable=_tts_retriable,
-        attempt_timeout=TTS_ATTEMPT_TIMEOUT,
-        label="voice-over edge-tts",
+        sekali, is_retriable=_tts_retriable,
+        attempt_timeout=TTS_ATTEMPT_TIMEOUT, label="voice-over edge-tts",
     )
-    _catat_pemakaian_tts(text)
 
 
-def _catat_pemakaian_tts(text):
+async def _voice_openai(text, output_audio):
+    """OpenAI TTS. `instructions` mengarahkan GAYA bicara -- itu yang membedakan
+    gpt-4o-mini-tts dari TTS lama yang membaca datar."""
+    from common import make_openai_client, openai_is_retriable, openai_retry_after
+    from retry import with_retry
+
+    client = make_openai_client(timeout=TTS_ATTEMPT_TIMEOUT * 2)
+
+    def sekali():
+        kw = {}
+        # Hanya model gpt-4o-* yang menerima `instructions`; mengirimnya ke
+        # tts-1 akan ditolak.
+        if TTS_MODEL.startswith("gpt-4o") and TTS_INSTRUCTIONS:
+            kw["instructions"] = TTS_INSTRUCTIONS
+        r = client.audio.speech.create(
+            model=TTS_MODEL, voice=TTS_VOICE, input=text, **kw)
+        with open(output_audio, "wb") as f:
+            f.write(r.content)
+        if os.path.getsize(output_audio) == 0:
+            raise RuntimeError("TTS mengembalikan audio kosong")
+
+    with_retry(
+        sekali, is_retriable=openai_is_retriable,
+        extract_retry_after=openai_retry_after, label=f"voice-over {TTS_MODEL}",
+    )
+
+
+async def generate_voice(text, output_audio):
+    """Voice-over dgn penyedia yang bisa dipilih.
+
+    Kegagalan OpenAI JATUH ke edge-tts, bukan menggagalkan render: kredit habis
+    atau relay bermasalah tidak boleh membuat video gagal total kalau masih ada
+    jalur gratis yang bekerja.
+    """
+    if TTS_PROVIDER == "openai":
+        try:
+            print(f"🎙️ Voice-over {TTS_MODEL} (suara: {TTS_VOICE})")
+            await _voice_openai(text, output_audio)
+            _catat_pemakaian_tts(text, mesin=TTS_MODEL)
+            return
+        except Exception as e:
+            print(f"[warn] TTS {TTS_MODEL} gagal ({type(e).__name__}: {str(e)[:80]}); "
+                  "jatuh ke edge-tts.")
+
+    print(f"🎙️ Voice-over edge-tts (suara: {EDGE_VOICE})")
+    await _voice_edge(text, output_audio)
+    _catat_pemakaian_tts(text, mesin="edge-tts")
+
+
+def _catat_pemakaian_tts(text, mesin="edge-tts"):
     """Catat jumlah karakter TTS. Dibungkus try/except -- pelacakan biaya tidak
     boleh menggagalkan render yang sudah berhasil."""
     try:
@@ -144,9 +239,9 @@ def _catat_pemakaian_tts(text):
             "tts_call",
             (os.getenv("CONTENT_FACTORY_RUN_ID") or "").strip() or None,
             chat_id=(os.getenv("CONTENT_FACTORY_CHAT_ID") or "").strip() or None,
-            engine="edge-tts",
+            engine=mesin,
             chars=chars,
-            cost_usd=estimate_tts_cost("edge-tts", chars),
+            cost_usd=estimate_tts_cost(mesin, chars),
         )
     except Exception as e:
         print(f"[warn] cost: gagal mencatat pemakaian TTS: {type(e).__name__}: {e}")
