@@ -46,6 +46,27 @@ IMAGE_CLIP_SECONDS = float(os.getenv("IMAGE_CLIP_SECONDS", "3"))
 # Parameter audio seragam untuk SEMUA segmen. Concat demuxer dengan -c copy
 # menuntut stream yang identik; segmen tanpa audio atau dengan laju berbeda
 # akan membuat penggabungan gagal atau menghasilkan audio kacau.
+# --- Transisi antar klip ---------------------------------------------------
+# "fade" = redup ke hitam di ujung tiap segmen. DIPILIH setelah mengukur:
+#   hard cut : 8,02 dtk durasi
+#   xfade    : 7,67 dtk  <- MENYUSUT, karena klip tumpang tindih
+#   fade     : 8,06 dtk  <- utuh
+# xfade memendekkan video sebesar durasi overlap di TIAP sambungan. Dengan 7
+# sambungan itu ~2,8 detik pergeseran, dan semua subtitle sesudahnya melenceng --
+# padahal sinkronisasi itu baru saja dibangun susah payah lewat map_time().
+#
+# Alasan kedua, khusus bahan talking-head: crossfade dua rekaman orang yang sama
+# di posisi yang sama terlihat seperti bayangan ganda, bukan transisi. Dan
+# acrossfade akan menumpuk dua suara yang sedang bicara.
+#
+# Filter fade ditumpangkan ke encode segmen yang MEMANG sudah berjalan, jadi
+# tidak ada pass encoding tambahan.
+TRANSITION = os.getenv("TRANSITION", "fade")
+TRANSITION_DURATION = float(os.getenv("TRANSITION_DURATION", "0.2"))
+# Fade audio dibuat jauh lebih pendek: 0,2 dtk cukup untuk memotong suku kata,
+# sedangkan tujuannya hanya mencegah bunyi "klik" di sambungan.
+AUDIO_FADE_DURATION = float(os.getenv("AUDIO_FADE_DURATION", "0.06"))
+
 AUDIO_RATE = "44100"
 AUDIO_CHANNELS = "2"
 FPS = 24
@@ -139,6 +160,25 @@ def scale_crop_filter():
     )
 
 
+def fade_filters(durasi, *, keep_audio):
+    """(filter video, filter audio) untuk transisi redup di ujung segmen.
+
+    Segmen yang terlalu pendek untuk menampung dua fade dilewati — memaksakannya
+    membuat klip nyaris tidak pernah terlihat terang.
+    """
+    if TRANSITION != "fade" or TRANSITION_DURATION <= 0:
+        return "", ""
+    d = min(TRANSITION_DURATION, durasi / 3)
+    if d < 0.05:
+        return "", ""
+    vf = f"fade=t=in:st=0:d={d:.3f},fade=t=out:st={max(0, durasi - d):.3f}:d={d:.3f}"
+    if not keep_audio:
+        return vf, ""
+    a = min(AUDIO_FADE_DURATION, durasi / 6)
+    af = f"afade=t=in:st=0:d={a:.3f},afade=t=out:st={max(0, durasi - a):.3f}:d={a:.3f}"
+    return vf, af
+
+
 def build_segment(asset_path, duration, segment_path, *, keep_audio=False,
                   potong=None):
     """Satu bahan mentah (gambar atau video) -> satu segmen 9:16 sepanjang `duration`.
@@ -150,7 +190,12 @@ def build_segment(asset_path, duration, segment_path, *, keep_audio=False,
     """
     ext = os.path.splitext(asset_path)[1].lower()
     vf = scale_crop_filter()
+    fade_v, fade_a = fade_filters(duration, keep_audio=keep_audio)
+    if fade_v:
+        vf = f"{vf},{fade_v}"
     audio_enc = ["-c:a", "aac", "-ar", AUDIO_RATE, "-ac", AUDIO_CHANNELS]
+    if fade_a:
+        audio_enc = ["-af", fade_a] + audio_enc
     # `potong` = (mulai, selesai) untuk mengambil sepotong klip saja (pemotongan
     # jeda). -ss diletakkan SEBELUM -i supaya ffmpeg mencari cepat ke posisi itu
     # alih-alih mendekode dari awal.
