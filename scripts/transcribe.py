@@ -30,8 +30,38 @@ TRANSCRIBE_TIMEOUT = int(os.getenv("TRANSCRIBE_TIMEOUT_SECONDS", "60"))
 TRANSCRIBE_MAX_ASSETS = int(os.getenv("TRANSCRIBE_MAX_ASSETS", "6"))
 TRANSCRIBE_MAX_SECONDS = int(os.getenv("TRANSCRIBE_MAX_SECONDS", "600"))
 
+# Kosakata yang dibiaskan ke Whisper. Bahasa Indonesia lisan penuh serapan
+# Inggris, dan Whisper cenderung menuliskannya secara fonetis: "leads" jadi
+# "lid", "closing" jadi "klosing". Diuji langsung pada audio user:
+#   tanpa prompt : "dan ketika semua lid masuk"
+#   dengan prompt: "dan ketika semua lead masuk"
+# `language` TIDAK dipaksa -- diuji tidak menambah apa pun, dan memaksanya justru
+# berisiko untuk bahan yang campur dua bahasa.
+TRANSCRIBE_VOCAB = os.getenv(
+    "TRANSCRIBE_VOCAB",
+    "Istilah yang sering dipakai: leads, listing, website, spreadsheet, follow up, "
+    "closing, database, CRM, marketing, konten, brand, engagement, konversi, "
+    "landing page, e-commerce, digital, online, offline, target, budget.",
+)
+# Batas prompt Whisper ~224 token; dipotong aman jauh di bawahnya.
+TRANSCRIBE_PROMPT_MAX_CHARS = 700
+
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv"}
 AUDIO_EXTENSIONS = {".mp3", ".m4a", ".wav", ".ogg", ".opus"}
+
+
+def build_vocab_prompt(konteks=""):
+    """Prompt bias kosakata: daftar istilah + permintaan user apa adanya.
+
+    Konteks user disertakan karena ia menyebut domainnya sendiri ("UMKM",
+    "properti", "skincare"), dan itu membantu Whisper memilih ejaan yang benar
+    untuk istilah domain tersebut.
+    """
+    bagian = [TRANSCRIBE_VOCAB]
+    konteks = (konteks or "").strip()
+    if konteks:
+        bagian.append(konteks)
+    return " ".join(bagian)[:TRANSCRIBE_PROMPT_MAX_CHARS]
 
 
 def _ffprobe(path, entries):
@@ -78,7 +108,7 @@ def transcribe_file(audio_path, *, durasi=0.0):
     return (transcribe_file_detailed(audio_path, durasi=durasi) or {}).get("text", "")
 
 
-def transcribe_file_detailed(audio_path, *, durasi=0.0):
+def transcribe_file_detailed(audio_path, *, durasi=0.0, vocab_prompt=None):
     """Transkrip + potongan bertimestamp.
 
     Return {"text": str, "segments": [{"start": float, "end": float, "text": str}]}.
@@ -99,6 +129,7 @@ def transcribe_file_detailed(audio_path, *, durasi=0.0):
         with open(audio_path, "rb") as f:
             return client.audio.transcriptions.create(
                 model=TRANSCRIBE_MODEL, file=f, response_format="verbose_json",
+                prompt=vocab_prompt if vocab_prompt is not None else build_vocab_prompt(),
                 # Granularitas KATA dipakai untuk animasi teks yang muncul
                 # mengikuti ucapan. Tidak menambah biaya: data ini datang dari
                 # panggilan transkripsi yang sama.
@@ -137,7 +168,14 @@ def transcribe_file_detailed(audio_path, *, durasi=0.0):
         })
 
     _catat_biaya(durasi, teks)
-    return {"text": teks, "segments": potongan, "words": kata}
+    return {
+        "text": teks,
+        "segments": potongan,
+        "words": kata,
+        # Bahasa DIDETEKSI Whisper, bukan diasumsikan — berguna kalau nanti
+        # naskah/subtitle perlu menyesuaikan bahasa bahan.
+        "language": getattr(hasil, "language", None),
+    }
 
 
 def _catat_biaya(durasi_detik, teks):
@@ -159,15 +197,16 @@ def _catat_biaya(durasi_detik, teks):
         print(f"[warn] cost: gagal mencatat transkripsi: {type(e).__name__}: {e}")
 
 
-def transcribe_assets(paths, *, max_assets=None):
+def transcribe_assets(paths, *, max_assets=None, konteks=""):
     """Transkrip semua bahan yang punya audio. Return {nama_file: teks}."""
     return {
         nama: data["text"]
-        for nama, data in transcribe_assets_detailed(paths, max_assets=max_assets).items()
+        for nama, data in transcribe_assets_detailed(
+            paths, max_assets=max_assets, konteks=konteks).items()
     }
 
 
-def transcribe_assets_detailed(paths, *, max_assets=None):
+def transcribe_assets_detailed(paths, *, max_assets=None, konteks=""):
     """Seperti transcribe_assets, tapi menyertakan potongan bertimestamp.
 
     Return {nama_file: {"text":..., "segments":[...], "duration": float}} — hanya
@@ -179,6 +218,7 @@ def transcribe_assets_detailed(paths, *, max_assets=None):
         return {}
 
     batas = TRANSCRIBE_MAX_ASSETS if max_assets is None else max_assets
+    vocab = build_vocab_prompt(konteks)
     hasil = {}
 
     for path in paths[:batas]:
@@ -200,7 +240,7 @@ def transcribe_assets_detailed(paths, *, max_assets=None):
         try:
             if not extract_audio(path, tmp.name):
                 continue
-            data = transcribe_file_detailed(tmp.name, durasi=durasi) or {}
+            data = transcribe_file_detailed(tmp.name, durasi=durasi, vocab_prompt=vocab) or {}
             # strip defensif: jangan bergantung pada pemanggil sudah
             # membersihkannya. Transkrip berisi spasi saja bukan "isi" dan tidak
             # boleh masuk ke prompt seolah-olah user mengatakan sesuatu.
@@ -210,6 +250,7 @@ def transcribe_assets_detailed(paths, *, max_assets=None):
                     "text": teks,
                     "segments": data.get("segments") or [],
                     "words": data.get("words") or [],
+                    "language": data.get("language"),
                     "duration": durasi,
                 }
                 print(f"[info] transcribe: {os.path.basename(path)} -> {len(teks)} karakter, "

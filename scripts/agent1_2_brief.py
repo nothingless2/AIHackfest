@@ -227,6 +227,8 @@ Aturan keras:
 - DILARANG menyebut objek, orang, tempat, atau aktivitas yang TIDAK terlihat di gambar.
 - Naskah voice-over harus Bahasa Indonesia, natural saat dibacakan, 20-35 detik
   (kira-kira 55-95 kata), berstruktur Hook - Masalah - Solusi - CTA.
+- "deskripsi" ditulis untuk dibaca calon penonton di kolom deskripsi platform,
+  bukan ringkasan internal. Jangan mengulang judul apa adanya.
 - "scenes" adalah teks on-screen singkat (maksimal 6 kata per scene), bukan salinan
   penuh voice-over. Waktu mulai/selesai tiap scene harus berurutan dan tidak tumpang tindih.
 
@@ -242,6 +244,7 @@ Balas HANYA JSON murni dengan struktur persis berikut:
   }},
   "creative_brief": {{
     "judul": "string",
+    "deskripsi": "deskripsi konten 2-3 kalimat untuk kolom caption/description platform: apa isinya, untuk siapa, dan apa yang didapat penonton. Berbeda dari judul (pendek) dan dari hashtags.",
     "target_trend": "string",
     "full_voice_over": "string",
     "scenes": [
@@ -279,7 +282,8 @@ def run():
 
     performance = read_json(PERFORMANCE_PATH)
 
-    rinci = transcribe_assets_detailed(asset_paths)
+    konteks = (os.getenv("CONTENT_FACTORY_USER_CONTEXT") or "").strip()
+    rinci = transcribe_assets_detailed(asset_paths, konteks=konteks)
     transkrip = {nama: d["text"] for nama, d in rinci.items()}
     if transkrip:
         print(f"[info] {len(transkrip)} bahan berhasil ditranskrip — isi ucapan ikut dikirim.")
@@ -290,7 +294,6 @@ def run():
     print(f"[info] mode audio: {mode_audio} — {alasan_audio}")
 
     pool = read_json(TREND_POOL_PATH, {}) or {}
-    konteks = (os.getenv("CONTENT_FACTORY_USER_CONTEXT") or "").strip()
     if konteks:
         print(f"[info] konteks user dipakai -> {konteks[:80]!r}")
     prompt_text = build_prompt(
@@ -337,6 +340,8 @@ def run():
     # pas dengan ucapan asli, bukan memakai timing karangan LLM.
     brief["transcript_segments"] = {nama: d["segments"] for nama, d in rinci.items()}
     brief["transcript_words"] = {nama: d.get("words") or [] for nama, d in rinci.items()}
+    bahasa = {d.get("language") for d in rinci.values() if d.get("language")}
+    brief["detected_language"] = sorted(bahasa)[0] if len(bahasa) == 1 else (sorted(bahasa) or None)
     brief["media_assets"] = resolve_assets(asset_names)
     brief["asset_names"] = asset_names
     brief["brief_id"] = f"brief_{now_iso()}"

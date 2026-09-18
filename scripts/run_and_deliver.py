@@ -33,6 +33,7 @@ from common import (
     resolve_chat_id,
     send_video,
 )
+from cost_estimate import ringkasan_biaya
 from orchestrator import install_signal_handlers, run_core_stages_locked
 from run_lock import FileLockBusyError, RUN_LOCK_STALE_SECONDS, generate_run_id, sanitize_run_id
 from retention import sweep_old_run_files
@@ -45,13 +46,23 @@ def deliver_plugin(run_id, chat_id):
     judul = brief.get("judul", "Untitled")
     hashtags = " ".join(brief.get("hashtags", []))
 
-    caption = (
-        "✅ ApprovalPost\n\n"
-        "Draf Konten Siap Direview!\n"
-        f"Judul: {judul}\n"
-        f"{hashtags}\n\n"
-        "Balas APPROVE untuk menyetujui atau REVISI untuk perbaikan."
-    )
+    deskripsi = (brief.get("deskripsi") or "").strip()
+    biaya = ringkasan_biaya(run_id)
+
+    bagian = ["✅ ApprovalPost", "", "Draf Konten Siap Direview!", f"Judul: {judul}"]
+    if deskripsi:
+        bagian += ["", f"Deskripsi: {deskripsi}"]
+    if hashtags:
+        bagian += ["", hashtags]
+    if biaya:
+        bagian += ["", biaya]
+    bagian += ["", "Balas APPROVE untuk menyetujui atau REVISI untuk perbaikan."]
+
+    caption = "\n".join(bagian)
+    # Batas caption Telegram 1024 karakter. Dipotong di sini, bukan dibiarkan
+    # gagal kirim -- video yang sudah jadi jauh lebih berharga daripada caption utuh.
+    if len(caption) > 1000:
+        caption = caption[:997] + "..."
 
     ok = send_video(caption, video_path, chat_id=chat_id)
     log_event("delivered" if ok else "delivery_failed", run_id, chat_id=chat_id)

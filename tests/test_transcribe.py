@@ -69,10 +69,12 @@ def test_ekstrak_dari_video_bisu_gagal_tanpa_melempar(tmp_path):
 def mock_transcribe(monkeypatch):
     dipanggil = []
 
-    def fake(audio_path, *, durasi=0.0):
+    def fake(audio_path, *, durasi=0.0, vocab_prompt=None):
         dipanggil.append(durasi)
         return {"text": "teks hasil transkrip",
-                "segments": [{"start": 0.0, "end": 1.0, "text": "teks hasil transkrip"}]}
+                "segments": [{"start": 0.0, "end": 1.0, "text": "teks hasil transkrip"}],
+                "words": [{"start": 0.0, "end": 1.0, "word": "teks"}],
+                "language": "indonesian"}
 
     monkeypatch.setattr(transcribe, "transcribe_file_detailed", fake)
     monkeypatch.setattr(transcribe, "OPENAI_API_KEY", "kunci-palsu")
@@ -132,7 +134,7 @@ def test_transkrip_kosong_tidak_masuk_hasil(tmp_path, monkeypatch):
     monkeypatch.setattr(transcribe, "OPENAI_API_KEY", "k")
     monkeypatch.setattr(transcribe, "TRANSCRIBE_ENABLED", True)
     monkeypatch.setattr(transcribe, "transcribe_file_detailed",
-                        lambda p, durasi=0.0: {"text": "   ", "segments": []})
+                        lambda p, durasi=0.0, vocab_prompt=None: {"text": "   ", "segments": []})
     src = buat_video(tmp_path / "v.mp4", dengan_audio=True)
     assert transcribe.transcribe_assets([src]) == {}
 
@@ -210,3 +212,54 @@ def test_transcribe_assets_tetap_mengembalikan_teks_saja(tmp_path, mock_transcri
     """Pemanggil lama (prompt brief) tidak boleh ikut berubah."""
     src = buat_video(tmp_path / "v.mp4", dengan_audio=True)
     assert transcribe.transcribe_assets([src]) == {"v.mp4": "teks hasil transkrip"}
+
+
+# ---------- bias kosakata: "leads" jangan jadi "lid" ----------
+
+def test_prompt_bias_memuat_istilah_serapan():
+    """Bahasa Indonesia lisan penuh serapan Inggris; tanpa bias, Whisper
+    menuliskannya fonetis. Diuji pada audio nyata user:
+        tanpa prompt : "dan ketika semua lid masuk"
+        dengan prompt: "dan ketika semua lead masuk"
+    """
+    p = transcribe.build_vocab_prompt()
+    for istilah in ("leads", "listing", "closing", "follow up"):
+        assert istilah in p, istilah
+
+
+def test_prompt_bias_menyertakan_konteks_user():
+    """User menyebut domainnya sendiri; itu membantu Whisper memilih ejaan."""
+    p = transcribe.build_vocab_prompt("konten promo UMKM properti")
+    assert "UMKM properti" in p
+
+
+def test_prompt_bias_dipotong_agar_tidak_melebihi_batas():
+    p = transcribe.build_vocab_prompt("x" * 5000)
+    assert len(p) <= transcribe.TRANSCRIBE_PROMPT_MAX_CHARS
+
+
+def test_prompt_bias_benar_benar_dikirim_ke_api(tmp_path, monkeypatch):
+    """Penjaga: prompt yang tidak sampai ke API tidak memperbaiki apa pun."""
+    terlihat = {}
+
+    def fake(audio_path, *, durasi=0.0, vocab_prompt=None):
+        terlihat["prompt"] = vocab_prompt
+        return {"text": "halo", "segments": [], "words": [], "language": "indonesian"}
+
+    monkeypatch.setattr(transcribe, "transcribe_file_detailed", fake)
+    monkeypatch.setattr(transcribe, "OPENAI_API_KEY", "k")
+    monkeypatch.setattr(transcribe, "TRANSCRIBE_ENABLED", True)
+
+    src = buat_video(tmp_path / "v.mp4", dengan_audio=True)
+    transcribe.transcribe_assets_detailed([src], konteks="properti")
+
+    assert terlihat["prompt"] is not None
+    assert "leads" in terlihat["prompt"]
+    assert "properti" in terlihat["prompt"]
+
+
+def test_bahasa_terdeteksi_ikut_dicatat(tmp_path, mock_transcribe):
+    """Bahasa DIDETEKSI Whisper, bukan diasumsikan."""
+    src = buat_video(tmp_path / "v.mp4", dengan_audio=True)
+    hasil = transcribe.transcribe_assets_detailed([src])
+    assert hasil["v.mp4"]["language"] == "indonesian"

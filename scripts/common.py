@@ -283,6 +283,19 @@ def openai_is_retriable(exc):
     """
     import openai
 
+    # Saldo habis datang sebagai RateLimitError (429) juga, TAPI tidak akan pernah
+    # membaik dengan menunggu. Tanpa pengecualian ini, tiap panggilan membuang
+    # ~6 detik mencoba ulang 3x dan penyebab sebenarnya baru terlihat di ujung.
+    # Ditemukan saat kredit user benar-benar habis, bukan dari membaca dokumentasi.
+    kode = str(getattr(exc, "code", "") or "")
+    tipe = str(getattr(getattr(exc, "body", None), "get", lambda *_: "")("type") or "")
+    pesan = str(exc)
+    if ("insufficient_quota" in (kode, tipe)
+            or "credit_balance_exhausted" in kode
+            or "insufficient_quota" in pesan
+            or "credit_balance_exhausted" in pesan):
+        return False
+
     if isinstance(exc, (openai.RateLimitError, openai.InternalServerError,
                         openai.APIConnectionError)):
         return True  # APITimeoutError turunan APIConnectionError, ikut tercakup

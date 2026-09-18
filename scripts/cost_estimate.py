@@ -78,3 +78,79 @@ def estimate_transcribe_cost(model, audio_seconds, *, pricing=None):
     except (KeyError, TypeError, ValueError):
         print(f"[warn] cost: entri harga transkripsi '{model}' tidak lengkap/valid.")
         return None
+
+
+# --- Ringkasan biaya untuk dilaporkan ke user -------------------------------
+#
+# CATATAN PENTING: OpenAI TIDAK mengekspos sisa saldo lewat API. Diuji langsung
+# dengan API key proyek ini: dashboard/billing/credit_grants -> 403,
+# v1/dashboard/billing/subscription -> 403, v1/organization/costs -> 403
+# (yang terakhir butuh Admin key, dan itu pun hanya memberi PEMAKAIAN, bukan
+# SISA). Jadi yang bisa dilaporkan adalah biaya dari catatan kita sendiri plus
+# budget yang ditetapkan user -- bukan sisa credit sebenarnya.
+
+MONTHLY_BUDGET_USD = float(os.getenv("MONTHLY_BUDGET_USD", "0") or 0)
+
+
+def _baca_biaya(sejak=None, run_id=None):
+    """Jumlahkan cost_usd dari run_log. Return (total, jumlah_tanpa_harga)."""
+    from common import RUN_LOG_PATH
+
+    total, tanpa_harga = 0.0, 0
+    if not os.path.exists(RUN_LOG_PATH):
+        return total, tanpa_harga
+    try:
+        with open(RUN_LOG_PATH, encoding="utf-8") as f:
+            for baris in f:
+                baris = baris.strip()
+                if not baris:
+                    continue
+                try:
+                    e = json.loads(baris)
+                except json.JSONDecodeError:
+                    continue
+                if e.get("event") not in ("llm_call", "tts_call", "transcribe_call"):
+                    continue
+                if run_id and e.get("run_id") != run_id:
+                    continue
+                if sejak and (e.get("ts") or "")[:10] < sejak:
+                    continue
+                biaya = e.get("cost_usd")
+                if biaya is None:
+                    tanpa_harga += 1
+                else:
+                    total += float(biaya)
+    except OSError:
+        pass
+    return round(total, 6), tanpa_harga
+
+
+def run_cost(run_id):
+    """Biaya satu run (USD), dan berapa panggilan yang tidak punya harga."""
+    return _baca_biaya(run_id=run_id)
+
+
+def month_to_date_cost():
+    """Biaya bulan berjalan (USD)."""
+    from datetime import datetime, timezone
+
+    awal_bulan = datetime.now(timezone.utc).strftime("%Y-%m-01")
+    return _baca_biaya(sejak=awal_bulan)
+
+
+def ringkasan_biaya(run_id):
+    """Satu baris ringkasan untuk dikirim ke user. None kalau tidak ada data."""
+    biaya, tanpa_harga = run_cost(run_id)
+    bulan, _ = month_to_date_cost()
+    if biaya <= 0 and bulan <= 0:
+        return None
+
+    baris = f"💰 Biaya konten ini: ${biaya:.4f} (estimasi)"
+    if MONTHLY_BUDGET_USD > 0:
+        persen = bulan / MONTHLY_BUDGET_USD * 100
+        baris += f"\nBulan ini: ${bulan:.4f} dari budget ${MONTHLY_BUDGET_USD:.2f} ({persen:.0f}%)"
+    else:
+        baris += f"\nTotal bulan ini: ${bulan:.4f}"
+    if tanpa_harga:
+        baris += f"\n({tanpa_harga} panggilan tanpa harga di pricing.json, tidak ikut dihitung)"
+    return baris

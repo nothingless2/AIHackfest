@@ -220,3 +220,47 @@ def test_retry_after_openai_header_aneh_jadi_none():
     exc.response = Resp()
     assert common.openai_retry_after(exc) is None
     assert common.openai_retry_after(Exception()) is None
+
+
+# ---------- saldo habis: 429 tapi TIDAK boleh diulang ----------
+
+class _Palsu(Exception):
+    """Meniru RateLimitError OpenAI dengan kode tertentu."""
+
+    def __init__(self, kode, pesan):
+        super().__init__(pesan)
+        self.code = kode
+
+
+def _sebagai_ratelimit(kode, pesan):
+    import openai
+
+    e = openai.RateLimitError.__new__(openai.RateLimitError)
+    e.code = kode
+    e.args = (pesan,)
+    return e
+
+
+def test_saldo_habis_tidak_diulang():
+    """Datang sebagai 429, tapi menunggu tidak akan pernah menambah saldo.
+    Ditemukan saat kredit user benar-benar habis: tiap panggilan membuang ~6 detik
+    mencoba ulang 3x, dan penyebabnya baru terlihat di ujung."""
+    exc = _sebagai_ratelimit("credit_balance_exhausted", "You have no credits remaining.")
+    assert common.openai_is_retriable(exc) is False
+
+
+def test_kuota_habis_tidak_diulang():
+    exc = _sebagai_ratelimit("insufficient_quota", "insufficient_quota")
+    assert common.openai_is_retriable(exc) is False
+
+
+def test_rate_limit_biasa_TETAP_diulang():
+    """Jangan sampai perbaikan di atas ikut mematikan retry yang memang berguna."""
+    exc = _sebagai_ratelimit("rate_limit_exceeded", "Rate limit reached, try again")
+    assert common.openai_is_retriable(exc) is True
+
+
+def test_saldo_habis_terdeteksi_dari_pesan_walau_kode_kosong():
+    """Bentuk error penyedia bisa berubah; pesan jadi jaring pengaman kedua."""
+    exc = _sebagai_ratelimit("", "Error: credit_balance_exhausted")
+    assert common.openai_is_retriable(exc) is False
