@@ -42,8 +42,11 @@ if ! grep -q "CONTENT_FACTORY_RUN_ID" dist/index.js; then
 fi
 echo "dist/index.js terverifikasi memuat CONTENT_FACTORY_RUN_ID"
 
-step "3/6 Jalankan test plugin"
+step "3/6 Jalankan test plugin + pytest"
 npm test
+# pytest ikut dijalankan di sini setelah satu commit sempat lolos dengan 3 test
+# gagal: pemeriksaan sebelum commit hanya memindai rahasia, tidak memeriksa test.
+python3 -m pytest "$SCRIPT_DIR/../tests" -q
 
 step "4/6 Siapkan folder staging tanpa devDependency"
 rm -rf "$STAGING_DIR"

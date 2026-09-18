@@ -98,7 +98,10 @@ def test_subtitle_digeser_sesuai_posisi_klip():
         "a.mp4": [{"start": 0.0, "end": 2.0, "text": "satu"}],
         "b.mp4": [{"start": 0.5, "end": 2.5, "text": "dua"}],
     }}
-    sc = ar.subtitle_scenes(data, ["/x/a.mp4", "/x/b.mp4"], [4.0, 5.0])
+    sc = ar.subtitle_scenes(data, [
+        {"path": "/x/a.mp4", "ranges": [(0.0, 4.0)], "durasi": 4.0},
+        {"path": "/x/b.mp4", "ranges": [(0.0, 5.0)], "durasi": 5.0},
+    ])
     assert sc[0]["start"] == 0.0
     assert sc[1]["start"] == 4.5, "klip kedua harus bergeser sepanjang klip pertama"
 
@@ -107,12 +110,14 @@ def test_subtitle_dijepit_ke_panjang_klip():
     """Transkrip bisa sedikit melewati batas klip; subtitle yang muncul setelah
     klipnya berganti akan menyesatkan."""
     data = {"transcript_segments": {"a.mp4": [{"start": 0.0, "end": 99.0, "text": "x"}]}}
-    sc = ar.subtitle_scenes(data, ["/x/a.mp4"], [3.0])
+    sc = ar.subtitle_scenes(
+        data, [{"path": "/x/a.mp4", "ranges": [(0.0, 3.0)], "durasi": 3.0}])
     assert sc[-1]["end"] <= 3.0
 
 
 def test_tanpa_transkrip_kembalikan_kosong():
-    assert ar.subtitle_scenes({}, ["/x/a.mp4"], [3.0]) == []
+    assert ar.subtitle_scenes(
+        {}, [{"path": "/x/a.mp4", "ranges": [(0.0, 3.0)], "durasi": 3.0}]) == []
 
 
 def test_potongan_kosong_dilewati():
@@ -120,7 +125,8 @@ def test_potongan_kosong_dilewati():
         {"start": 0.0, "end": 1.0, "text": "  "},
         {"start": 1.0, "end": 0.5, "text": "terbalik"},
     ]}}
-    assert ar.subtitle_scenes(data, ["/x/a.mp4"], [5.0]) == []
+    assert ar.subtitle_scenes(
+        data, [{"path": "/x/a.mp4", "ranges": [(0.0, 5.0)], "durasi": 5.0}]) == []
 
 
 # ---------- segmen dengan audio ----------
@@ -173,3 +179,18 @@ def test_mode_ai_tetap_membuang_audio_asli(tmp_path):
     out = tmp_path / "seg.mp4"
     ar.build_segment(str(src), 1.0, str(out), keep_audio=False)
     assert not _punya_audio(out)
+
+
+def test_subtitle_bergeser_saat_jeda_dipotong():
+    """Gabungan dua penggeseran: jeda dibuang DAN offset klip. Melewatkan salah
+    satunya membuat subtitle melenceng makin jauh."""
+    data = {"transcript_words": {"a.mp4": [
+        {"word": "awal", "start": 0.5, "end": 1.0},
+        {"word": "akhir", "start": 7.0, "end": 7.5},
+    ]}}
+    # jeda 2-6 dibuang: detik 7 asli menjadi detik 3 di hasil
+    ren = [{"path": "/x/a.mp4", "ranges": [(0.0, 2.0), (6.0, 10.0)], "durasi": 6.0}]
+    sc = ar.subtitle_scenes(data, ren)
+    kata = [w for s_ in sc for w in s_["words"]]
+    assert kata[0]["start"] == 0.5
+    assert kata[1]["start"] == 3.0, "harus maju 4 detik karena jeda dibuang"
