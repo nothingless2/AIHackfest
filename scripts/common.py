@@ -273,6 +273,32 @@ def resolve_assets(names):
 # dengan gambar), tapi cukup pendek untuk gagal cepat dan mencoba lagi.
 OPENAI_TIMEOUT_SECONDS = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "45"))
 
+# Endpoint alternatif yang kompatibel-OpenAI (mis. relay/proxy). Kosong = resmi.
+# Disimpan di .env, TIDAK di-hardcode, supaya tidak ikut ter-commit dan bisa
+# diganti tanpa menyentuh kode.
+OPENAI_BASE_URL = (os.getenv("OPENAI_BASE_URL") or "").strip() or None
+
+
+def make_openai_client(*, timeout=None):
+    """Satu-satunya tempat client OpenAI dibuat.
+
+    Dipusatkan supaya base_url, mematikan retry bawaan SDK, dan timeout tidak
+    perlu diulang di tiap pemanggil — dan supaya pindah penyedia cukup mengubah
+    satu variabel .env.
+    """
+    from openai import OpenAI
+
+    kw = {
+        "api_key": OPENAI_API_KEY,
+        # Retry bawaan SDK dimatikan; retry kita sendiri yang mengatur jeda dan
+        # klasifikasi. Tanpa ini, retry bersarang jadi 9 percobaan.
+        "max_retries": 0,
+        "timeout": timeout if timeout is not None else OPENAI_TIMEOUT_SECONDS,
+    }
+    if OPENAI_BASE_URL:
+        kw["base_url"] = OPENAI_BASE_URL
+    return OpenAI(**kw)
+
 
 def openai_is_retriable(exc):
     """Kegagalan sementara vs permanen.
@@ -327,12 +353,9 @@ def chat_json(messages, *, model, label="panggilan LLM"):
     """
     import json as _json
 
-    from openai import OpenAI
-
     from retry import with_retry
 
-    client = OpenAI(api_key=OPENAI_API_KEY, max_retries=0,
-                    timeout=OPENAI_TIMEOUT_SECONDS)
+    client = make_openai_client()
 
     def sekali():
         resp = client.chat.completions.create(

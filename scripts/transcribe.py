@@ -117,13 +117,11 @@ def transcribe_file_detailed(audio_path, *, durasi=0.0, vocab_prompt=None):
     subtitle bisa pas dengan ucapan asli user, alih-alih memakai timing karangan
     LLM yang tidak ada hubungannya dengan audio sebenarnya.
     """
-    from openai import OpenAI
-
     from retry import with_retry
 
-    from common import openai_is_retriable, openai_retry_after
+    from common import make_openai_client, openai_is_retriable, openai_retry_after
 
-    client = OpenAI(api_key=OPENAI_API_KEY, max_retries=0, timeout=TRANSCRIBE_TIMEOUT)
+    client = make_openai_client(timeout=TRANSCRIBE_TIMEOUT)
 
     def sekali():
         with open(audio_path, "rb") as f:
