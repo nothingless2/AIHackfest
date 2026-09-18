@@ -1,9 +1,9 @@
 import { Type } from "typebox";
 import { defineToolPlugin } from "openclaw/plugin-sdk/tool-plugin";
 import { spawn } from "node:child_process";
-import { existsSync, copyFileSync, mkdirSync, appendFileSync, realpathSync } from "node:fs";
+import { existsSync, copyFileSync, mkdirSync, appendFileSync, realpathSync, statSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { basename, extname, resolve, relative, isAbsolute } from "node:path";
+import { basename, extname, resolve, relative, isAbsolute, dirname } from "node:path";
 import { homedir } from "node:os";
 
 const SUPPORTED_EXTENSIONS = new Set([
@@ -19,38 +19,110 @@ const SUPPORTED_EXTENSIONS = new Set([
 ]);
 
 /**
- * Folder tempat OpenClaw menyimpan lampiran masuk. Path dari model adalah input
+ * Folder tempat OpenClaw menaruh lampiran masuk. Path dari model adalah input
  * TIDAK TEPERCAYA -- ia cuma string yang ditulis LLM.
  *
  * Idealnya path diambil dari metadata lampiran milik runtime, bukan dari model.
  * Sudah diperiksa: `OpenClawPluginToolContext` di SDK TIDAK menyediakannya (tipe
  * `attachments` ada di SDK, tapi untuk hook dan ACP runtime, tidak diekspos ke
- * tool plugin). Jadi satu-satunya jalan adalah menerima path dari model LALU
- * memvalidasinya dengan ketat.
+ * tool plugin). Jadi path diterima dari model LALU divalidasi ketat.
  *
- * Yang SENGAJA TIDAK dilakukan: memindai folder ini atau memakai "file terbaru"
- * sebagai fallback. Folder ini dipakai BERSAMA oleh semua user, jadi menebak file
- * berarti satu user bisa memakai lampiran milik user lain.
+ * Layout nyata (diverifikasi dari plugin_calls.jsonl, bukan diasumsikan):
+ *   ~/.openclaw/workspace/media/inbound/openclaw-staged-<uuid-per-turn>/input-<uuid>.mp4
+ *
+ * Tiap turn mendapat folder staging SENDIRI. Itu primitif isolasi yang kuat --
+ * tapi folder turn lama tetap tersimpan di disk, jadi sekadar mengizinkan seluruh
+ * root masih memungkinkan satu user memakai lampiran milik user lain dari turn
+ * sebelumnya. Karena itu ada tiga syarat, bukan satu.
  */
-const INBOUND_DIR = resolve(
-  process.env.OPENCLAW_MEDIA_INBOUND?.trim() ||
-    resolve(homedir(), ".openclaw", "media", "inbound"),
-);
+const INBOUND_ROOTS = [
+  process.env.OPENCLAW_MEDIA_INBOUND?.trim(),
+  resolve(homedir(), ".openclaw", "workspace", "media", "inbound"),
+  resolve(homedir(), ".openclaw", "media", "inbound"),
+]
+  .filter((p): p is string => Boolean(p))
+  .map((p) => resolve(p));
+
+/** Umur maksimal folder staging yang boleh dipakai. Lampiran turn ini baru dibuat
+ * beberapa detik lalu; folder lama HANYA bisa milik turn/user lain. */
+const INBOUND_MAX_AGE_MS =
+  Number(process.env.OPENCLAW_MEDIA_MAX_AGE_MINUTES || 30) * 60_000;
+
+function realOrNull(p: string): string | null {
+  try {
+    return realpathSync(p);
+  } catch {
+    return null;
+  }
+}
+
+function isInsideRoots(real: string, roots: string[]): boolean {
+  return roots.some((root) => {
+    const rel = relative(root, real);
+    return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+  });
+}
+
+export type InboundVerdict =
+  | { ok: true }
+  | { ok: false; reason: string; offending: string[] };
 
 /**
- * True kalau `p` benar-benar berada DI DALAM folder inbound setelah symlink
- * diselesaikan. realpathSync penting: tanpa itu, symlink di dalam inbound yang
- * menunjuk ke /etc/passwd akan lolos pemeriksaan prefix string biasa.
+ * Tiga syarat yang harus dipenuhi bersama:
+ *  1. realpath berada di dalam salah satu root inbound (symlink keluar ditolak);
+ *  2. SEMUA berkas berada di folder staging yang SAMA -- mencampur folder berarti
+ *     mencampur turn, dan turn lain bisa milik user lain;
+ *  3. folder itu masih baru -- folder lama hanya bisa milik turn/user lain.
  */
-function isInsideInbound(p: string): boolean {
-  let real: string;
-  try {
-    real = realpathSync(p);
-  } catch {
-    return false; // tidak ada / tidak terbaca -> perlakukan sebagai tidak sah
+export function verifyInbound(
+  paths: string[],
+  opts: { roots?: string[]; maxAgeMs?: number } = {},
+): InboundVerdict {
+  const roots = opts.roots ?? INBOUND_ROOTS;
+  const maxAgeMs = opts.maxAgeMs ?? INBOUND_MAX_AGE_MS;
+
+  if (paths.length === 0) {
+    return { ok: false, reason: "tidak ada lampiran yang disebutkan", offending: [] };
   }
-  const rel = relative(INBOUND_DIR, real);
-  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+
+  const reals = paths.map((p) => ({ asli: p, real: realOrNull(p) }));
+
+  const tidakSah = reals.filter((r) => !r.real || !isInsideRoots(r.real, roots));
+  if (tidakSah.length > 0) {
+    return {
+      ok: false,
+      reason: "berada di luar folder lampiran OpenClaw",
+      offending: tidakSah.map((r) => r.asli),
+    };
+  }
+
+  const folders = new Set(reals.map((r) => dirname(r.real as string)));
+  if (folders.size > 1) {
+    return {
+      ok: false,
+      reason:
+        "berasal dari lebih dari satu folder lampiran (tiap pesan punya folder " +
+        "sendiri, jadi ini mencampur kiriman yang berbeda)",
+      offending: [...folders],
+    };
+  }
+
+  const folder = [...folders][0];
+  try {
+    const umur = Date.now() - statSync(folder).mtimeMs;
+    if (umur > maxAgeMs) {
+      return {
+        ok: false,
+        reason: `berasal dari folder lampiran lama (${Math.round(umur / 60_000)} menit), ` +
+          "bukan dari pesan ini",
+        offending: [folder],
+      };
+    }
+  } catch {
+    return { ok: false, reason: "folder lampiran tidak terbaca", offending: [folder] };
+  }
+
+  return { ok: true };
 }
 
 const PERSONA = {
@@ -294,7 +366,7 @@ export default defineToolPlugin({
               mediaUnsupported: mediaPaths.filter(
                 (p) => !SUPPORTED_EXTENSIONS.has(extname(p).toLowerCase()),
               ),
-              mediaOutsideInbound: mediaPaths.filter((p) => !isInsideInbound(p)),
+              mediaVerdict: verifyInbound(mediaPaths),
             });
 
             const missing = mediaPaths.filter((p) => !existsSync(p));
@@ -319,13 +391,13 @@ export default defineToolPlugin({
             // Path dari model wajib berada di dalam folder lampiran OpenClaw.
             // Tanpa ini, satu string dari LLM bisa menyuruh plugin menyalin file
             // mana pun yang terbaca proses gateway ke workspace user.
-            const diLuar = mediaPaths.filter((p) => !isInsideInbound(p));
-            if (diLuar.length > 0) {
+            const verdict = verifyInbound(mediaPaths);
+            if (!verdict.ok) {
               return fail(
-                `Path berikut berada di luar folder lampiran OpenClaw dan ditolak: ` +
-                  `${diLuar.join(", ")}. Hanya file yang benar-benar diupload di chat ini ` +
-                  `yang boleh dipakai.`,
-                { error: "media_outside_inbound", outside: diLuar },
+                `Lampiran ditolak: ${verdict.reason}. Hanya file yang diupload pada ` +
+                  `pesan ini yang boleh dipakai. Detail: ${verdict.offending.join(", ")}`,
+                { error: "media_not_from_this_message", reason: verdict.reason,
+                  offending: verdict.offending },
               );
             }
 
