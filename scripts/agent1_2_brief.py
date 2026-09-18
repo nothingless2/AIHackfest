@@ -336,6 +336,7 @@ def run():
     # Potongan bertimestamp disimpan supaya renderer bisa membuat subtitle yang
     # pas dengan ucapan asli, bukan memakai timing karangan LLM.
     brief["transcript_segments"] = {nama: d["segments"] for nama, d in rinci.items()}
+    brief["transcript_words"] = {nama: d.get("words") or [] for nama, d in rinci.items()}
     brief["media_assets"] = resolve_assets(asset_names)
     brief["asset_names"] = asset_names
     brief["brief_id"] = f"brief_{now_iso()}"

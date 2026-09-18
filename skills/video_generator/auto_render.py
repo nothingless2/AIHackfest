@@ -210,6 +210,42 @@ def escape_drawtext(text):
 # fontsize 52 mengisi penuh 1080 px -> 1080/34/52 = 0,61. Dipakai 0,62 + lebar
 # aman 88% supaya ada margin untuk huruf lebar (M, W) dan tepi tidak tersentuh.
 CHAR_WIDTH_RATIO = 0.62
+
+# --- Gaya subtitle ---------------------------------------------------------
+# Ukuran font adalah FRAKSI tinggi kanvas, bukan piksel tetap. Dengan begitu ia
+# otomatis benar untuk 9:16, 1:1, dan 16:9 tanpa disetel ulang. Nilai lama 52 px
+# pada tinggi 1920 = 2,7% -- terlalu kecil untuk ditonton di HP; patokan caption
+# sosial media 4-5%.
+SUBTITLE_SIZE_RATIO = float(os.getenv("SUBTITLE_SIZE_RATIO", "0.045"))
+SUBTITLE_MAX_LINES = int(os.getenv("SUBTITLE_MAX_LINES", "2"))
+# Jarak aman dari tepi bawah (zona UI Reels/TikTok/Shorts) sebagai fraksi tinggi.
+SAFE_BOTTOM_RATIO = float(os.getenv("SAFE_BOTTOM_RATIO", "0.156"))
+
+SUBTITLE_STYLES = {
+    "putih-kotak":  {"color": "white",  "box": "black@0.55", "pad": 24},
+    "kuning-kotak": {"color": "yellow", "box": "black@0.55", "pad": 24},
+    "putih-tebal":  {"color": "white",  "border": 5},
+    "kuning":       {"color": "yellow", "border": 4},  # gaya lama
+}
+SUBTITLE_STYLE = os.getenv("SUBTITLE_STYLE", "putih-kotak")
+
+
+def subtitle_style():
+    """Gaya terpilih. Nama tak dikenal -> peringatan + default, bukan diam-diam."""
+    gaya = SUBTITLE_STYLES.get(SUBTITLE_STYLE)
+    if gaya is None:
+        print(f"[warn] SUBTITLE_STYLE tidak dikenal ({SUBTITLE_STYLE!r}), memakai "
+              f"'putih-kotak'. Pilihan: {', '.join(sorted(SUBTITLE_STYLES))}.")
+        return SUBTITLE_STYLES["putih-kotak"]
+    return gaya
+
+
+def subtitle_geometry(video_width, video_height):
+    """(fontsize, y) untuk subtitle dua baris di sepertiga bawah, di atas zona aman."""
+    fs = max(16, round(video_height * SUBTITLE_SIZE_RATIO))
+    tinggi_blok = SUBTITLE_MAX_LINES * fs * 1.25
+    y = round(video_height - video_height * SAFE_BOTTOM_RATIO - tinggi_blok)
+    return fs, max(0, y)
 MAX_SUBTITLE_LINES = 3
 
 
@@ -244,29 +280,67 @@ def wrap_text(teks, fontsize, video_width, *, max_lines=MAX_SUBTITLE_LINES):
     return "\n".join(baris)
 
 
-def build_drawtext_chain(scenes, video_height):
-    """Satu filter drawtext berantai per scene, tampil sesuai rentang waktu masing-masing."""
-    y_pos = min(SAFE_TOP_MARGIN_PX, video_height - SAFE_BOTTOM_MARGIN_PX - 120)
+def _drawtext(teks, fs, y, gaya, enable, alpha=None):
+    bagian = [
+        "drawtext=",
+        f"fontfile={FONT_PATH}:text='{teks}':fontsize={fs}:",
+        f"fontcolor={gaya['color']}:line_spacing=8:x=(w-text_w)/2:y={y}",
+    ]
+    if gaya.get("box"):
+        bagian.append(f":box=1:boxcolor={gaya['box']}:boxborderw={gaya.get('pad', 24)}")
+    else:
+        bagian.append(f":bordercolor=black:borderw={gaya.get('border', 4)}")
+    if alpha:
+        bagian.append(f":alpha='{alpha}'")
+    bagian.append(f":enable='{enable}'")
+    return "".join(bagian)
+
+
+def build_drawtext_chain(scenes, video_height, video_width=None):
+    """Filter drawtext per scene, dengan animasi.
+
+    Dua mode:
+    - Scene punya `words` (dari timestamp per-kata Whisper): teks muncul KATA DEMI
+      KATA persis saat diucapkan. Tiap keadaan adalah satu drawtext berisi kata
+      yang sudah terucap, aktif dari kata itu muncul sampai kata berikutnya.
+    - Tanpa `words` (naskah tulisan LLM): satu drawtext per scene dengan fade
+      masuk singkat, supaya tidak muncul mendadak.
+    """
+    W = video_width or TARGET_W
+    fs, y = subtitle_geometry(W, video_height)
+    gaya = subtitle_style()
+
     filters = []
     for sc in scenes:
         text = sc.get("text")
-        start = sc.get("start", 0)
-        end = sc.get("end")
+        start, end = sc.get("start", 0), sc.get("end")
         if not text or end is None or end <= start:
             continue
-        safe_text = escape_drawtext(wrap_text(text, 52, TARGET_W))
-        filters.append(
-            "drawtext="
-            f"fontfile={FONT_PATH}:text='{safe_text}':fontsize=52:fontcolor=yellow:"
-            "bordercolor=black:borderw=4:line_spacing=6:"
-            f"x=(w-text_w)/2:y={y_pos}:"
-            f"enable='between(t,{start},{end})'"
-        )
+
+        kata = sc.get("words") or []
+        if kata:
+            for i, w in enumerate(kata):
+                terucap = " ".join(k["word"] for k in kata[: i + 1])
+                aktif_dari = float(w.get("start", start))
+                aktif_sampai = float(kata[i + 1]["start"]) if i + 1 < len(kata) else float(end)
+                if aktif_sampai <= aktif_dari:
+                    continue
+                filters.append(_drawtext(
+                    escape_drawtext(wrap_text(terucap, fs, W, max_lines=SUBTITLE_MAX_LINES)),
+                    fs, y, gaya, f"between(t,{aktif_dari},{aktif_sampai})",
+                ))
+        else:
+            # Fade masuk 0,25 detik; dijepit ke 1 supaya tetap penuh setelahnya.
+            alpha = f"min(1,(t-{start})/0.25)"
+            filters.append(_drawtext(
+                escape_drawtext(wrap_text(text, fs, W, max_lines=SUBTITLE_MAX_LINES)),
+                fs, y, gaya, f"between(t,{start},{end})", alpha=alpha,
+            ))
     return filters
 
 
 def apply_text_overlay(input_path, scenes, output_path):
-    filters = build_drawtext_chain(scenes, TARGET_H)
+    filters = build_drawtext_chain(scenes, TARGET_H, TARGET_W)
     if not filters:
         os.replace(input_path, output_path)
         return
@@ -331,52 +405,104 @@ def split_for_subtitle(teks, fontsize, video_width, *, max_lines=MAX_SUBTITLE_LI
     return bagian or [teks]
 
 
-def subtitle_scenes(data, assets, durasi_klip):
-    """Ubah transkrip bertimestamp jadi scene subtitle dengan waktu ABSOLUT.
+def chunk_words(words, fs, video_width, *, max_lines=None):
+    """Kelompokkan kata jadi tampilan subtitle yang muat di layar.
+
+    Lebih akurat daripada membagi durasi kalimat secara proporsional: waktu tiap
+    tampilan diambil dari kata pertama dan terakhirnya sendiri.
+    """
+    baris_maks = max_lines or SUBTITLE_MAX_LINES
+    per_baris = max(8, int(video_width * 0.88 / (fs * CHAR_WIDTH_RATIO)))
+    per_tampilan = int(per_baris * baris_maks * 0.9)
+
+    kelompok, sekarang = [], []
+    for w in words:
+        calon = " ".join(x["word"] for x in sekarang + [w])
+        if sekarang and len(calon) > per_tampilan:
+            kelompok.append(sekarang)
+            sekarang = [w]
+        else:
+            sekarang.append(w)
+    if sekarang:
+        kelompok.append(sekarang)
+    return kelompok
+
+
+def subtitle_scenes(data, assets, durasi_klip, video_width=None, video_height=None):
+    """Ubah transkrip jadi scene subtitle dengan waktu ABSOLUT.
 
     Whisper memberi timestamp relatif terhadap awal TIAP klip. Di video gabungan,
     klip ke-i mulai pada jumlah durasi klip sebelumnya — jadi tiap potongan harus
-    digeser sebesar offset itu. Tanpa penggeseran, semua subtitle akan menumpuk
-    di detik-detik awal video.
+    digeser sebesar offset itu. Tanpa penggeseran, semua subtitle menumpuk di
+    detik-detik awal video.
+
+    Kalau ada timestamp per KATA, scene dibangun dari kata (lebih akurat dan
+    memungkinkan animasi per-kata). Kalau hanya ada potongan kalimat, kalimat
+    panjang dipecah dengan durasi dibagi menurut jumlah kata.
 
     Return [] kalau tidak ada transkrip; pemanggil lalu memakai scenes dari brief.
     """
-    per_aset = data.get("transcript_segments") or {}
-    if not per_aset:
+    W = video_width or TARGET_W
+    H = video_height or TARGET_H
+    fs, _ = subtitle_geometry(W, H)
+
+    per_kata = data.get("transcript_words") or {}
+    per_segmen = data.get("transcript_segments") or {}
+    if not per_kata and not per_segmen:
         return []
 
     hasil = []
     offset = 0.0
     for i, path in enumerate(assets):
-        for seg in per_aset.get(os.path.basename(path), []):
-            teks = (seg.get("text") or "").strip()
-            mulai, selesai = float(seg.get("start", 0)), float(seg.get("end", 0))
-            if not teks or selesai <= mulai:
-                continue
-            # Jepit ke panjang klipnya: transkrip bisa sedikit melewati batas,
-            # dan subtitle yang muncul setelah klipnya berganti akan menyesatkan.
-            mulai = min(mulai, durasi_klip[i])
-            selesai = min(selesai, durasi_klip[i])
-            if selesai <= mulai:
-                continue
-            # Kalimat panjang dipecah, durasinya dibagi rata menurut jumlah kata
-            # tiap bagian — mendekati tempo bicara tanpa perlu timestamp per kata.
-            bagian = split_for_subtitle(teks, 52, TARGET_W)
-            total_kata = sum(len(b.split()) for b in bagian) or 1
-            jalan = offset + mulai
-            rentang = selesai - mulai
-            for b in bagian:
-                porsi = rentang * (len(b.split()) / total_kata)
+        nama = os.path.basename(path)
+        batas = durasi_klip[i]
+        kata = per_kata.get(nama) or []
+
+        if kata:
+            for kelompok in chunk_words(kata, fs, W):
+                mulai = min(float(kelompok[0].get("start", 0)), batas)
+                selesai = min(float(kelompok[-1].get("end", 0)), batas)
+                if selesai <= mulai:
+                    continue
                 hasil.append({
-                    "start": round(jalan, 2),
-                    "end": round(jalan + porsi, 2),
-                    "text": b,
+                    "start": round(offset + mulai, 2),
+                    "end": round(offset + selesai, 2),
+                    "text": " ".join(k["word"] for k in kelompok),
+                    "words": [
+                        {"word": k["word"],
+                         "start": round(offset + min(float(k.get("start", 0)), batas), 2),
+                         "end": round(offset + min(float(k.get("end", 0)), batas), 2)}
+                        for k in kelompok
+                    ],
                 })
-                jalan += porsi
-        offset += durasi_klip[i]
+        else:
+            for seg in per_segmen.get(nama, []):
+                teks = (seg.get("text") or "").strip()
+                mulai, selesai = float(seg.get("start", 0)), float(seg.get("end", 0))
+                if not teks or selesai <= mulai:
+                    continue
+                # Dijepit ke panjang klip: transkrip bisa sedikit melewati batas,
+                # dan subtitle yang muncul setelah klipnya berganti menyesatkan.
+                mulai, selesai = min(mulai, batas), min(selesai, batas)
+                if selesai <= mulai:
+                    continue
+                bagian = split_for_subtitle(teks, fs, W)
+                total_kata = sum(len(b.split()) for b in bagian) or 1
+                jalan, rentang = offset + mulai, selesai - mulai
+                for b in bagian:
+                    porsi = rentang * (len(b.split()) / total_kata)
+                    hasil.append({
+                        "start": round(jalan, 2),
+                        "end": round(jalan + porsi, 2),
+                        "text": b,
+                    })
+                    jalan += porsi
+        offset += batas
 
     if hasil:
-        print(f"📝 {len(hasil)} subtitle dibuat dari ucapan asli user.")
+        berkata = sum(1 for h in hasil if h.get("words"))
+        print(f"📝 {len(hasil)} subtitle dari ucapan asli"
+              + (f" ({berkata} dengan animasi per-kata)" if berkata else ""))
     return hasil
 
 
@@ -426,7 +552,8 @@ def render_from_agent_script(
         ]
         durasi_klip = [d if d > 0 else IMAGE_CLIP_SECONDS for d in durasi_klip]
         total_duration = sum(durasi_klip)
-        scenes = subtitle_scenes(data, existing_assets, durasi_klip) or scenes
+        scenes = subtitle_scenes(data, existing_assets, durasi_klip,
+                                 TARGET_W, TARGET_H) or scenes
         print(f"⏱️ Durasi total dari {len(existing_assets)} bahan: {total_duration:.1f} detik")
     else:
         print("🎙️ Menghasilkan Voice-Over AI secara dinamis...")

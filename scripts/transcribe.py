@@ -99,6 +99,10 @@ def transcribe_file_detailed(audio_path, *, durasi=0.0):
         with open(audio_path, "rb") as f:
             return client.audio.transcriptions.create(
                 model=TRANSCRIBE_MODEL, file=f, response_format="verbose_json",
+                # Granularitas KATA dipakai untuk animasi teks yang muncul
+                # mengikuti ucapan. Tidak menambah biaya: data ini datang dari
+                # panggilan transkripsi yang sama.
+                timestamp_granularities=["segment", "word"],
             )
 
     hasil = with_retry(
@@ -109,6 +113,18 @@ def transcribe_file_detailed(audio_path, *, durasi=0.0):
     )
 
     teks = (getattr(hasil, "text", "") or "").strip()
+
+    kata = []
+    for w in (getattr(hasil, "words", None) or []):
+        isi = (getattr(w, "word", "") or "").strip()
+        if not isi:
+            continue
+        kata.append({
+            "start": float(getattr(w, "start", 0) or 0),
+            "end": float(getattr(w, "end", 0) or 0),
+            "word": isi,
+        })
+
     potongan = []
     for seg in (getattr(hasil, "segments", None) or []):
         isi = (getattr(seg, "text", "") or "").strip()
@@ -121,7 +137,7 @@ def transcribe_file_detailed(audio_path, *, durasi=0.0):
         })
 
     _catat_biaya(durasi, teks)
-    return {"text": teks, "segments": potongan}
+    return {"text": teks, "segments": potongan, "words": kata}
 
 
 def _catat_biaya(durasi_detik, teks):
@@ -193,6 +209,7 @@ def transcribe_assets_detailed(paths, *, max_assets=None):
                 hasil[os.path.basename(path)] = {
                     "text": teks,
                     "segments": data.get("segments") or [],
+                    "words": data.get("words") or [],
                     "duration": durasi,
                 }
                 print(f"[info] transcribe: {os.path.basename(path)} -> {len(teks)} karakter, "
