@@ -1,9 +1,10 @@
 import { Type } from "typebox";
 import { defineToolPlugin } from "openclaw/plugin-sdk/tool-plugin";
 import { spawn } from "node:child_process";
-import { existsSync, copyFileSync, mkdirSync, appendFileSync } from "node:fs";
+import { existsSync, copyFileSync, mkdirSync, appendFileSync, realpathSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { basename, extname, resolve } from "node:path";
+import { basename, extname, resolve, relative, isAbsolute } from "node:path";
+import { homedir } from "node:os";
 
 const SUPPORTED_EXTENSIONS = new Set([
   ".jpg",
@@ -16,6 +17,41 @@ const SUPPORTED_EXTENSIONS = new Set([
   ".avi",
   ".mkv",
 ]);
+
+/**
+ * Folder tempat OpenClaw menyimpan lampiran masuk. Path dari model adalah input
+ * TIDAK TEPERCAYA -- ia cuma string yang ditulis LLM.
+ *
+ * Idealnya path diambil dari metadata lampiran milik runtime, bukan dari model.
+ * Sudah diperiksa: `OpenClawPluginToolContext` di SDK TIDAK menyediakannya (tipe
+ * `attachments` ada di SDK, tapi untuk hook dan ACP runtime, tidak diekspos ke
+ * tool plugin). Jadi satu-satunya jalan adalah menerima path dari model LALU
+ * memvalidasinya dengan ketat.
+ *
+ * Yang SENGAJA TIDAK dilakukan: memindai folder ini atau memakai "file terbaru"
+ * sebagai fallback. Folder ini dipakai BERSAMA oleh semua user, jadi menebak file
+ * berarti satu user bisa memakai lampiran milik user lain.
+ */
+const INBOUND_DIR = resolve(
+  process.env.OPENCLAW_MEDIA_INBOUND?.trim() ||
+    resolve(homedir(), ".openclaw", "media", "inbound"),
+);
+
+/**
+ * True kalau `p` benar-benar berada DI DALAM folder inbound setelah symlink
+ * diselesaikan. realpathSync penting: tanpa itu, symlink di dalam inbound yang
+ * menunjuk ke /etc/passwd akan lolos pemeriksaan prefix string biasa.
+ */
+function isInsideInbound(p: string): boolean {
+  let real: string;
+  try {
+    real = realpathSync(p);
+  } catch {
+    return false; // tidak ada / tidak terbaca -> perlakukan sebagai tidak sah
+  }
+  const rel = relative(INBOUND_DIR, real);
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+}
 
 const PERSONA = {
   contentInsight: "📊 ContentInsight",
@@ -85,22 +121,71 @@ function resolveProjectRoot(configuredRoot?: string): string {
   return root;
 }
 
+const SYSTEMD_RUN = ["/usr/bin/systemd-run", "/bin/systemd-run"].find((p) =>
+  existsSync(p),
+);
+
 /**
- * Render butuh 2-4 menit, jauh melebihi batas waktu eksekusi tool (~90 detik).
- * Kalau ditunggu, prosesnya dibunuh di tengah jalan dan menyisakan MP4 rusak.
- * Jadi pipeline dilepas sebagai proses detached: ia bertahan setelah tool selesai
- * dan mengirim progress + video hasilnya sendiri ke Telegram.
+ * Render butuh 2-4 menit, jauh melebihi batas waktu eksekusi tool
+ * (TOOL_TIMEOUT_MS = 120 detik). Kalau ditunggu, prosesnya dibunuh di tengah
+ * jalan dan menyisakan MP4 rusak. Jadi pipeline dilepas sebagai proses terpisah.
+ *
+ * `detached: true` + `child.unref()` SAJA TIDAK CUKUP, dan ini terbukti merusak
+ * data: gateway berjalan sebagai service systemd dengan KillMode=mixed, jadi saat
+ * service di-restart systemd mengirim SIGKILL ke SELURUH cgroup-nya. Proses render
+ * yang "detached" tetap berada di cgroup itu dan ikut mati — tanpa run_finished,
+ * tanpa pesan ke user. Satu render nyata hilang persis begitu, satu langkah
+ * sebelum selesai.
+ *
+ * `systemd-run --user --scope` menaruh pipeline di scope unit TRANSIEN miliknya
+ * sendiri, di luar cgroup service, sehingga restart gateway tidak menyentuhnya.
+ * Mode --scope (bukan --service) dipilih supaya environment ikut terwariskan
+ * apa adanya: CONTENT_FACTORY_CHAT_ID, _ASSETS, dan kawan-kawan dikirim lewat env.
  */
 function startPipelineDetached(
   projectRoot: string,
   extraEnv: Record<string, string> = {},
 ): number | undefined {
-  const child = spawn("python3", ["scripts/run_and_deliver.py"], {
+  const env = { ...process.env, ...extraEnv };
+  const opts = {
     cwd: projectRoot,
-    env: { ...process.env, ...extraEnv },
+    env,
     detached: true,
-    stdio: "ignore",
-  });
+    stdio: "ignore" as const,
+  };
+
+  if (SYSTEMD_RUN) {
+    try {
+      const child = spawn(
+        SYSTEMD_RUN,
+        ["--user", "--scope", "--collect", "--quiet", "python3", "scripts/run_and_deliver.py"],
+        opts,
+      );
+      // Kalau systemd-run gagal setelah spawn (mis. tidak ada session bus),
+      // jangan biarkan run hilang diam-diam — jatuh ke cara lama + peringatan.
+      child.on("error", (e) => {
+        console.warn(
+          `[content-factory] systemd-run gagal (${e.message}); ` +
+            "jatuh ke spawn biasa. Render TIDAK akan selamat dari restart gateway.",
+        );
+        spawn("python3", ["scripts/run_and_deliver.py"], opts).unref();
+      });
+      child.unref();
+      return child.pid;
+    } catch (e) {
+      console.warn(
+        `[content-factory] systemd-run tidak bisa dijalankan (${String(e)}); ` +
+          "jatuh ke spawn biasa. Render TIDAK akan selamat dari restart gateway.",
+      );
+    }
+  } else {
+    console.warn(
+      "[content-factory] systemd-run tidak ditemukan; memakai spawn biasa. " +
+        "Render TIDAK akan selamat dari restart gateway.",
+    );
+  }
+
+  const child = spawn("python3", ["scripts/run_and_deliver.py"], opts);
   child.unref();
   return child.pid;
 }
@@ -209,6 +294,7 @@ export default defineToolPlugin({
               mediaUnsupported: mediaPaths.filter(
                 (p) => !SUPPORTED_EXTENSIONS.has(extname(p).toLowerCase()),
               ),
+              mediaOutsideInbound: mediaPaths.filter((p) => !isInsideInbound(p)),
             });
 
             const missing = mediaPaths.filter((p) => !existsSync(p));
@@ -227,6 +313,19 @@ export default defineToolPlugin({
                 `Format tidak didukung: ${unsupported.join(", ")}. ` +
                   "Gunakan gambar (jpg/png/webp/bmp) atau video (mp4/mov/avi/mkv).",
                 { error: "unsupported_format", unsupported },
+              );
+            }
+
+            // Path dari model wajib berada di dalam folder lampiran OpenClaw.
+            // Tanpa ini, satu string dari LLM bisa menyuruh plugin menyalin file
+            // mana pun yang terbaca proses gateway ke workspace user.
+            const diLuar = mediaPaths.filter((p) => !isInsideInbound(p));
+            if (diLuar.length > 0) {
+              return fail(
+                `Path berikut berada di luar folder lampiran OpenClaw dan ditolak: ` +
+                  `${diLuar.join(", ")}. Hanya file yang benar-benar diupload di chat ini ` +
+                  `yang boleh dipakai.`,
+                { error: "media_outside_inbound", outside: diLuar },
               );
             }
 

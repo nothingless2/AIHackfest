@@ -19,6 +19,11 @@
 #
 set -euo pipefail
 
+# Diselesaikan ABSOLUT di awal, sebelum `cd` mana pun. Skrip ini berpindah
+# direktori dua kali (folder plugin, lalu staging), jadi path relatif ke skrip
+# lain akan gagal di langkah-langkah berikutnya.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 PLUGIN_DIR="${PLUGIN_DIR:-/root/AIHackfest/openclaw-plugin}"
 STAGING_DIR="${STAGING_DIR:-/tmp/content-factory-plugin-staging}"
 
@@ -67,6 +72,18 @@ fi
 echo "plugin terpasang terverifikasi (manifest ada + build terbaru)"
 
 step "6/6 Restart gateway"
+# Restart gateway MEMBUNUH pekerjaan yang sedang berjalan: service-nya memakai
+# KillMode=mixed, jadi systemd mengirim SIGKILL ke seluruh cgroup. Satu render
+# nyata pernah hilang persis begitu -- satu langkah sebelum selesai, tanpa
+# run_finished dan tanpa pesan ke user.
+if [ "${SKIP_LOCK_CHECK:-0}" = "1" ]; then
+  echo "SKIP_LOCK_CHECK=1 — pemeriksaan lock dilewati atas permintaan eksplisit."
+elif ! python3 "$SCRIPT_DIR/check_locks.py"; then
+  echo >&2
+  echo "Gateway TIDAK di-restart. Plugin sudah terpasang dan akan aktif pada start berikutnya." >&2
+  exit 1
+fi
+
 openclaw gateway restart
 sleep 15
 systemctl --user is-active openclaw-gateway.service
