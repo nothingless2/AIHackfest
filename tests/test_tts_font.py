@@ -23,9 +23,13 @@ def test_penyedia_default_openai():
 
 
 def test_instruksi_gaya_ada_isinya():
-    """Itu yang membedakan gpt-4o-mini-tts dari TTS lama yang membaca datar."""
+    """Itu yang membedakan gpt-4o-mini-tts dari TTS lama yang membaca datar.
+    Diperiksa SIFATNYA (menyebut bahasa dan tempo), bukan kata tertentu — supaya
+    test tidak pecah setiap kali kalimat instruksinya disempurnakan."""
     assert len(ar.TTS_INSTRUCTIONS) > 40
-    assert "natural" in ar.TTS_INSTRUCTIONS.lower()
+    teks = ar.TTS_INSTRUCTIONS.lower()
+    assert "indonesia" in teks, "instruksi harus menyebut bahasanya"
+    assert "tempo" in teks, "instruksi harus mengarahkan tempo bicara"
 
 
 def test_openai_gagal_jatuh_ke_edge(tmp_path, monkeypatch):

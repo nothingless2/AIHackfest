@@ -166,6 +166,21 @@ const runParams = Type.Object({
         "ke voice-over AI supaya videonya tidak sunyi.",
     }),
   ),
+  voicePersona: Type.Optional(
+    Type.Union(
+      [Type.Literal("ramah"), Type.Literal("profesional"), Type.Literal("energik"),
+       Type.Literal("tenang"), Type.Literal("bercerita")],
+      {
+        description:
+          "Gaya suara voice-over AI, kalau user memintanya. 'ramah' akrab, " +
+          "'profesional' tenang berwibawa, 'energik' bersemangat untuk promosi, " +
+          "'tenang' pelan dan lembut, 'bercerita' dengan jeda dramatis. " +
+          "Kosongkan kalau user tidak menyebut soal gaya suara. " +
+          "Hanya berpengaruh saat voice-over AI dipakai — secara default sistem " +
+          "memakai suara ASLI dari video user.",
+      },
+    ),
+  ),
   userContext: Type.Optional(
     Type.String({
       maxLength: 2000,
@@ -334,7 +349,12 @@ export default defineToolPlugin({
           parameters: runParams,
           async execute(
             toolCallId: string,
-            params: { mediaPaths: string[]; userContext?: string; audioMode?: "ai" | "original" },
+            params: {
+              mediaPaths: string[];
+              userContext?: string;
+              audioMode?: "ai" | "original";
+              voicePersona?: string;
+            },
           ) {
             const fail = (text: string, details: Record<string, unknown>) => ({
               content: [{ type: "text" as const, text }],
@@ -352,7 +372,7 @@ export default defineToolPlugin({
               });
             }
 
-            const { mediaPaths, userContext, audioMode } = params;
+            const { mediaPaths, userContext, audioMode, voicePersona } = params;
 
             // Dicatat SEBELUM validasi apa pun, supaya tetap ada bukti walau
             // permintaan nanti ditolak (file hilang / format tidak didukung).
@@ -370,6 +390,7 @@ export default defineToolPlugin({
               mediaCount: mediaPaths.length,
               hasUserContext: Boolean((userContext ?? "").trim()),
               audioMode: audioMode ?? null,
+              voicePersona: voicePersona ?? null,
               // Path yang BENAR-BENAR dikirim model, plus hasil validasinya.
               // Tanpa ini, penolakan "file tidak ditemukan" tidak bisa didiagnosis
               // dari log sama sekali -- yang tercatat cuma jumlahnya.
@@ -456,6 +477,9 @@ export default defineToolPlugin({
             // pipeline harus menebak semuanya dari piksel.
             if (audioMode) {
               pipelineEnv.CONTENT_FACTORY_AUDIO_MODE = audioMode;
+            }
+            if (voicePersona) {
+              pipelineEnv.TTS_PERSONA = voicePersona;
             }
 
             const konteks = (userContext ?? "").trim();

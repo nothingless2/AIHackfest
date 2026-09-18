@@ -8,7 +8,7 @@ import json
 import os
 import sys
 
-from audio_mode import requested_mode, resolve_audio_mode
+from audio_mode import mode_eksplisit, requested_mode, resolve_audio_mode
 from transcribe import transcribe_assets_detailed
 from vision import build_image_parts
 
@@ -290,7 +290,8 @@ def run():
 
     # Mode audio diputuskan DI SINI karena di sinilah kita tahu apakah bahan
     # benar-benar berisi ucapan: transkrip yang tidak kosong adalah buktinya.
-    mode_audio, alasan_audio = resolve_audio_mode(requested_mode(), transkrip)
+    mode_audio, alasan_audio = resolve_audio_mode(
+        requested_mode(), transkrip, eksplisit=mode_eksplisit())
     print(f"[info] mode audio: {mode_audio} — {alasan_audio}")
 
     pool = read_json(TREND_POOL_PATH, {}) or {}

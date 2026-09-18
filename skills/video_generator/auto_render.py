@@ -146,13 +146,59 @@ TTS_ATTEMPT_TIMEOUT = int(os.getenv("TTS_ATTEMPT_TIMEOUT_SECONDS", "30"))
 # sebagai cadangan: gratis, dan satu-satunya yang tetap jalan kalau kredit habis.
 TTS_PROVIDER = (os.getenv("TTS_PROVIDER") or "openai").strip().lower()
 TTS_MODEL = os.getenv("TTS_MODEL", "gpt-4o-mini-tts")
-TTS_VOICE = os.getenv("TTS_VOICE", "nova")
-TTS_INSTRUCTIONS = os.getenv(
-    "TTS_INSTRUCTIONS",
-    "Bicara dalam Bahasa Indonesia yang natural dan hangat, seperti menjelaskan "
-    "ke teman. Tempo sedang, jangan datar, jangan seperti membaca teks. Beri "
-    "penekanan wajar pada kata penting dan jeda singkat di akhir kalimat.",
-)
+
+# Persona = pasangan SUARA + GAYA BICARA. Dipisah jadi nama supaya user bisa
+# meminta lewat chat ("pakai suara profesional") tanpa tahu nama suara OpenAI.
+# Kedelapan suara di bawah sudah diverifikasi bekerja lewat relay.
+VOICE_PERSONAS = {
+    "ramah": {
+        "voice": "nova",
+        "instructions": "Bicara Bahasa Indonesia yang hangat dan akrab, seperti "
+                        "menjelaskan ke teman. Tempo sedang, jangan datar.",
+    },
+    "profesional": {
+        "voice": "onyx",
+        "instructions": "Bicara Bahasa Indonesia yang tenang, jelas, dan berwibawa "
+                        "seperti presenter bisnis. Tempo mantap, artikulasi tegas.",
+    },
+    "energik": {
+        "voice": "shimmer",
+        "instructions": "Bicara Bahasa Indonesia dengan antusias dan bersemangat "
+                        "seperti konten promosi. Tempo agak cepat, intonasi naik-turun.",
+    },
+    "tenang": {
+        "voice": "alloy",
+        "instructions": "Bicara Bahasa Indonesia dengan tenang dan lembut, tempo "
+                        "pelan, cocok untuk penjelasan yang perlu dicerna.",
+    },
+    "bercerita": {
+        "voice": "fable",
+        "instructions": "Bicara Bahasa Indonesia seperti bercerita: ada jeda "
+                        "dramatis, penekanan pada bagian penting, tidak terburu-buru.",
+    },
+}
+TTS_PERSONA = (os.getenv("TTS_PERSONA") or "ramah").strip().lower()
+
+
+def voice_persona():
+    """(suara, instruksi) untuk run ini.
+
+    Urutan: TTS_VOICE/TTS_INSTRUCTIONS eksplisit menimpa persona, supaya kamu bisa
+    memakai suara yang belum ada di daftar tanpa mengubah kode. Nama persona tak
+    dikenal -> peringatan + default, bukan diam-diam berganti gaya.
+    """
+    p = VOICE_PERSONAS.get(TTS_PERSONA)
+    if p is None:
+        print(f"[warn] TTS_PERSONA tidak dikenal ({TTS_PERSONA!r}), memakai 'ramah'. "
+              f"Pilihan: {', '.join(sorted(VOICE_PERSONAS))}.")
+        p = VOICE_PERSONAS["ramah"]
+    return (
+        os.getenv("TTS_VOICE") or p["voice"],
+        os.getenv("TTS_INSTRUCTIONS") or p["instructions"],
+    )
+
+
+TTS_VOICE, TTS_INSTRUCTIONS = voice_persona()
 EDGE_VOICE = os.getenv("EDGE_TTS_VOICE", "id-ID-GadisNeural")
 EDGE_RATE = os.getenv("EDGE_TTS_RATE", "+5%")
 

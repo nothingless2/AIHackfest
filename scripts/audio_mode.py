@@ -24,7 +24,15 @@ MODE_ORIGINAL = "original"
 MODE_AUTO = "auto"
 VALID_MODES = {MODE_AI, MODE_ORIGINAL, MODE_AUTO}
 
-AUDIO_MODE_DEFAULT = (os.getenv("AUDIO_MODE") or MODE_AUTO).strip().lower()
+# DEFAULT: pakai suara asli video. Voice-over AI hanya kalau user memintanya,
+# ATAU kalau bahan ternyata tidak ada ucapannya sama sekali (mis. hanya foto) --
+# di situ "suara asli" berarti video sunyi, jadi jatuh ke AI adalah yang benar.
+AUDIO_MODE_DEFAULT = (os.getenv("AUDIO_MODE") or MODE_ORIGINAL).strip().lower()
+
+
+def mode_eksplisit():
+    """True kalau mode datang dari permintaan user (parameter tool), bukan default."""
+    return bool((os.getenv("CONTENT_FACTORY_AUDIO_MODE") or "").strip())
 
 
 def requested_mode():
@@ -43,23 +51,22 @@ def requested_mode():
     return diminta
 
 
-def resolve_audio_mode(diminta, transkrip):
+def resolve_audio_mode(diminta, transkrip, *, eksplisit=False):
     """Putuskan mode final. Return (mode, alasan).
 
-    `transkrip` adalah hasil transkripsi ({nama: ...}); kosong berarti tidak ada
-    ucapan yang terdeteksi di bahan.
+    `transkrip` kosong berarti tidak ada ucapan yang terdeteksi di bahan.
+    `eksplisit` menandai apakah mode datang dari permintaan user atau dari
+    default — supaya alasannya jujur dan tidak mengaku "user minta" padahal tidak.
     """
     ada_ucapan = bool(transkrip)
+    asal = "diminta user" if eksplisit else "default"
 
     if diminta == MODE_ORIGINAL:
         if ada_ucapan:
-            return MODE_ORIGINAL, "user minta tanpa voice-over AI dan ada ucapan di bahan"
+            return MODE_ORIGINAL, f"pakai suara asli video ({asal}); ada ucapan di bahan"
         return MODE_AI, (
-            "user minta tanpa voice-over AI, TAPI tidak ada ucapan yang terdeteksi "
-            "di bahan — memakai voice-over AI supaya videonya tidak sunyi"
+            f"suara asli ({asal}), TAPI tidak ada ucapan yang terdeteksi di bahan — "
+            "memakai voice-over AI supaya videonya tidak sunyi"
         )
 
-    if diminta == MODE_AI:
-        return MODE_AI, "user meminta voice-over AI"
-
-    return MODE_AI, "tidak ada permintaan khusus — voice-over AI (default)"
+    return MODE_AI, f"voice-over AI ({asal})"

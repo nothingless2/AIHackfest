@@ -36,11 +36,21 @@ def test_minta_ai_tetap_ai_walau_ada_ucapan():
     assert mode == am.MODE_AI
 
 
-def test_tanpa_permintaan_tetap_voice_over_ai():
-    """Perilaku lama tidak boleh berubah untuk user yang tidak minta apa-apa."""
-    mode, alasan = am.resolve_audio_mode(am.MODE_AUTO, {"v.mp4": "halo"})
-    assert mode == am.MODE_AI
+def test_default_kini_suara_asli_bukan_voice_over():
+    """Default DIUBAH atas permintaan user: pakai suara asli video, kecuali
+    diminta voice-over AI atau bahan tidak ada ucapannya."""
+    assert am.AUDIO_MODE_DEFAULT == am.MODE_ORIGINAL
+    mode, alasan = am.resolve_audio_mode(am.AUDIO_MODE_DEFAULT, {"v.mp4": "halo"})
+    assert mode == am.MODE_ORIGINAL
     assert "default" in alasan
+
+
+def test_alasan_jujur_membedakan_default_dan_permintaan_user():
+    """Jangan mengaku 'user minta' padahal itu cuma nilai default."""
+    _, default = am.resolve_audio_mode(am.MODE_ORIGINAL, {"a": "x"})
+    _, diminta = am.resolve_audio_mode(am.MODE_ORIGINAL, {"a": "x"}, eksplisit=True)
+    assert "default" in default and "diminta user" not in default
+    assert "diminta user" in diminta
 
 
 def test_mode_diminta_dari_env(monkeypatch):
@@ -194,3 +204,34 @@ def test_subtitle_bergeser_saat_jeda_dipotong():
     kata = [w for s_ in sc for w in s_["words"]]
     assert kata[0]["start"] == 0.5
     assert kata[1]["start"] == 3.0, "harus maju 4 detik karena jeda dibuang"
+
+
+# ---------- persona suara ----------
+
+def test_persona_default_ramah():
+    import auto_render as ar
+    assert ar.TTS_PERSONA == "ramah"
+    assert ar.TTS_VOICE == "nova"
+
+
+def test_setiap_persona_punya_suara_dan_instruksi():
+    import auto_render as ar
+    for nama, p in ar.VOICE_PERSONAS.items():
+        assert p.get("voice"), nama
+        assert len(p.get("instructions", "")) > 30, nama
+
+
+def test_persona_tak_dikenal_pakai_default_dengan_peringatan(monkeypatch, capsys):
+    import auto_render as ar
+    monkeypatch.setattr(ar, "TTS_PERSONA", "persona-karangan")
+    suara, _ = ar.voice_persona()
+    assert suara == "nova"
+    assert "tidak dikenal" in capsys.readouterr().out
+
+
+def test_suara_eksplisit_menimpa_persona(monkeypatch):
+    """Supaya suara yang belum ada di daftar tetap bisa dipakai tanpa ubah kode."""
+    import auto_render as ar
+    monkeypatch.setenv("TTS_VOICE", "sage")
+    suara, _ = ar.voice_persona()
+    assert suara == "sage"
