@@ -27,6 +27,9 @@ sys.path.insert(
     os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "scripts"),
 )
 from retry import with_retry_async  # noqa: E402
+from trim_silence import (  # noqa: E402
+    TRIM_SILENCE, detect_silence, keep_ranges, map_time, total_kept,
+)
 from moviepy import AudioFileClip
 
 TARGET_W, TARGET_H = 1080, 1920
@@ -136,7 +139,8 @@ def scale_crop_filter():
     )
 
 
-def build_segment(asset_path, duration, segment_path, *, keep_audio=False):
+def build_segment(asset_path, duration, segment_path, *, keep_audio=False,
+                  potong=None):
     """Satu bahan mentah (gambar atau video) -> satu segmen 9:16 sepanjang `duration`.
 
     `keep_audio=True` (mode audio asli) mempertahankan suara asli video, dan
@@ -147,6 +151,10 @@ def build_segment(asset_path, duration, segment_path, *, keep_audio=False):
     ext = os.path.splitext(asset_path)[1].lower()
     vf = scale_crop_filter()
     audio_enc = ["-c:a", "aac", "-ar", AUDIO_RATE, "-ac", AUDIO_CHANNELS]
+    # `potong` = (mulai, selesai) untuk mengambil sepotong klip saja (pemotongan
+    # jeda). -ss diletakkan SEBELUM -i supaya ffmpeg mencari cepat ke posisi itu
+    # alih-alih mendekode dari awal.
+    iris = ["-ss", f"{potong[0]:.3f}", "-to", f"{potong[1]:.3f}"] if potong else []
 
     if ext in IMAGE_EXTENSIONS:
         args = ["-loop", "1", "-i", asset_path]
@@ -162,7 +170,7 @@ def build_segment(asset_path, duration, segment_path, *, keep_audio=False):
         if keep_audio:
             # TANPA -stream_loop: di mode audio asli klip main sepanjang durasi
             # aslinya. Mengulang video berarti mengulang ucapannya juga.
-            args = ["-i", asset_path, "-vf", vf,
+            args = [*iris, "-i", asset_path, "-vf", vf,
                     "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "fast", *audio_enc]
         else:
             # -stream_loop -1 mengulang video kalau lebih pendek dari `duration`;
@@ -428,19 +436,19 @@ def chunk_words(words, fs, video_width, *, max_lines=None):
     return kelompok
 
 
-def subtitle_scenes(data, assets, durasi_klip, video_width=None, video_height=None):
-    """Ubah transkrip jadi scene subtitle dengan waktu ABSOLUT.
+def subtitle_scenes(data, rencana, video_width=None, video_height=None):
+    """Ubah transkrip jadi scene subtitle dengan waktu ABSOLUT di video hasil.
 
-    Whisper memberi timestamp relatif terhadap awal TIAP klip. Di video gabungan,
-    klip ke-i mulai pada jumlah durasi klip sebelumnya — jadi tiap potongan harus
-    digeser sebesar offset itu. Tanpa penggeseran, semua subtitle menumpuk di
-    detik-detik awal video.
+    `rencana` adalah daftar {"path", "ranges", "durasi"} per klip: `ranges` adalah
+    bagian yang DIPERTAHANKAN setelah jeda dipotong, `durasi` panjangnya setelah
+    dipotong.
 
-    Kalau ada timestamp per KATA, scene dibangun dari kata (lebih akurat dan
-    memungkinkan animasi per-kata). Kalau hanya ada potongan kalimat, kalimat
-    panjang dipecah dengan durasi dibagi menurut jumlah kata.
+    Dua penggeseran harus dilakukan bersama, dan keduanya wajib:
+    1. `map_time` — waktu Whisper mengacu ke audio ASLI. Setiap jeda yang dibuang
+       memajukan semua ucapan sesudahnya.
+    2. offset klip — klip ke-i mulai setelah jumlah durasi klip sebelumnya.
 
-    Return [] kalau tidak ada transkrip; pemanggil lalu memakai scenes dari brief.
+    Melewatkan salah satunya membuat subtitle melenceng makin jauh ke belakang.
     """
     W = video_width or TARGET_W
     H = video_height or TARGET_H
@@ -453,49 +461,45 @@ def subtitle_scenes(data, assets, durasi_klip, video_width=None, video_height=No
 
     hasil = []
     offset = 0.0
-    for i, path in enumerate(assets):
-        nama = os.path.basename(path)
-        batas = durasi_klip[i]
-        kata = per_kata.get(nama) or []
+    for item in rencana:
+        nama = os.path.basename(item["path"])
+        ranges = item["ranges"]
+        batas = item["durasi"]
 
+        def geser(t):
+            return offset + min(map_time(float(t or 0), ranges), batas)
+
+        kata = per_kata.get(nama) or []
         if kata:
             for kelompok in chunk_words(kata, fs, W):
-                mulai = min(float(kelompok[0].get("start", 0)), batas)
-                selesai = min(float(kelompok[-1].get("end", 0)), batas)
-                if selesai <= mulai:
+                mulai_w = geser(kelompok[0].get("start", 0))
+                selesai_w = geser(kelompok[-1].get("end", 0))
+                if selesai_w <= mulai_w:
                     continue
                 hasil.append({
-                    "start": round(offset + mulai, 2),
-                    "end": round(offset + selesai, 2),
+                    "start": round(mulai_w, 2),
+                    "end": round(selesai_w, 2),
                     "text": " ".join(k["word"] for k in kelompok),
                     "words": [
                         {"word": k["word"],
-                         "start": round(offset + min(float(k.get("start", 0)), batas), 2),
-                         "end": round(offset + min(float(k.get("end", 0)), batas), 2)}
+                         "start": round(geser(k.get("start", 0)), 2),
+                         "end": round(geser(k.get("end", 0)), 2)}
                         for k in kelompok
                     ],
                 })
         else:
             for seg in per_segmen.get(nama, []):
                 teks = (seg.get("text") or "").strip()
-                mulai, selesai = float(seg.get("start", 0)), float(seg.get("end", 0))
-                if not teks or selesai <= mulai:
-                    continue
-                # Dijepit ke panjang klip: transkrip bisa sedikit melewati batas,
-                # dan subtitle yang muncul setelah klipnya berganti menyesatkan.
-                mulai, selesai = min(mulai, batas), min(selesai, batas)
-                if selesai <= mulai:
+                m, sel = geser(seg.get("start", 0)), geser(seg.get("end", 0))
+                if not teks or sel <= m:
                     continue
                 bagian = split_for_subtitle(teks, fs, W)
                 total_kata = sum(len(b.split()) for b in bagian) or 1
-                jalan, rentang = offset + mulai, selesai - mulai
+                jalan, rentang = m, sel - m
                 for b in bagian:
                     porsi = rentang * (len(b.split()) / total_kata)
-                    hasil.append({
-                        "start": round(jalan, 2),
-                        "end": round(jalan + porsi, 2),
-                        "text": b,
-                    })
+                    hasil.append({"start": round(jalan, 2),
+                                  "end": round(jalan + porsi, 2), "text": b})
                     jalan += porsi
         offset += batas
 
@@ -545,15 +549,24 @@ def render_from_agent_script(
         # Durasi ditentukan bahan, bukan TTS: tiap klip main sepanjang aslinya
         # supaya ucapan user tidak terpotong di tengah kalimat.
         print("🔊 Memakai AUDIO ASLI dari video user (tanpa voice-over AI).")
-        durasi_klip = [
-            media_duration(p) if os.path.splitext(p)[1].lower() in VIDEO_EXTENSIONS
-            else IMAGE_CLIP_SECONDS
-            for p in existing_assets
-        ]
-        durasi_klip = [d if d > 0 else IMAGE_CLIP_SECONDS for d in durasi_klip]
+        rencana, dibuang = [], 0.0
+        for path in existing_assets:
+            adalah_video = os.path.splitext(path)[1].lower() in VIDEO_EXTENSIONS
+            asli = media_duration(path) if adalah_video else IMAGE_CLIP_SECONDS
+            asli = asli if asli > 0 else IMAGE_CLIP_SECONDS
+            if TRIM_SILENCE and adalah_video:
+                ranges = keep_ranges(asli, detect_silence(path))
+            else:
+                ranges = [(0.0, asli)]
+            baru = total_kept(ranges)
+            dibuang += asli - baru
+            rencana.append({"path": path, "ranges": ranges, "durasi": baru})
+
+        durasi_klip = [r["durasi"] for r in rencana]
         total_duration = sum(durasi_klip)
-        scenes = subtitle_scenes(data, existing_assets, durasi_klip,
-                                 TARGET_W, TARGET_H) or scenes
+        if dibuang > 0.05:
+            print(f"✂️ {dibuang:.1f} detik jeda dipotong dari {len(rencana)} bahan.")
+        scenes = subtitle_scenes(data, rencana, TARGET_W, TARGET_H) or scenes
         print(f"⏱️ Durasi total dari {len(existing_assets)} bahan: {total_duration:.1f} detik")
     else:
         print("🎙️ Menghasilkan Voice-Over AI secara dinamis...")
@@ -565,10 +578,20 @@ def render_from_agent_script(
         print(f"🖼️ Menyusun {len(existing_assets)} bahan mentah user ({per:.1f} detik per bahan)")
 
     segment_paths = []
-    for i, asset_path in enumerate(existing_assets):
-        seg_path = os.path.join(output_dir, f"_segment_{i}.mp4")
-        build_segment(asset_path, durasi_klip[i], seg_path, keep_audio=pakai_audio_asli)
-        segment_paths.append(seg_path)
+    if pakai_audio_asli:
+        # Satu segmen per rentang yang dipertahankan: klip dengan jeda di tengah
+        # jadi beberapa potong, dan concat menyambungnya kembali tanpa jeda itu.
+        for i, item in enumerate(rencana):
+            for j, (a, b) in enumerate(item["ranges"]):
+                seg_path = os.path.join(output_dir, f"_segment_{i}_{j}.mp4")
+                build_segment(item["path"], b - a, seg_path,
+                              keep_audio=True, potong=(a, b))
+                segment_paths.append(seg_path)
+    else:
+        for i, asset_path in enumerate(existing_assets):
+            seg_path = os.path.join(output_dir, f"_segment_{i}.mp4")
+            build_segment(asset_path, durasi_klip[i], seg_path, keep_audio=False)
+            segment_paths.append(seg_path)
 
     silent_combined = os.path.join(output_dir, "_combined_silent.mp4")
     if len(segment_paths) > 1:
