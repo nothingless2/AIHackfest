@@ -23,6 +23,7 @@ import os
 import sys
 
 from canvas import CanvasError, resolve_canvas
+from duration import requested_duration
 from common import (
     brief_path_for_run,
     chat_allowed,
@@ -124,6 +125,16 @@ def main():
         log_event("run_rejected", run_id, chat_id=chat_id, reason="canvas_invalid")
         notify("pipeline", f"konfigurasi video tidak valid: {e}", chat_id=chat_id)
         return os.EX_CONFIG
+
+    # Durasi dijepit DI SINI juga, bukan ditolak: permintaan di luar rentang
+    # tetap dikerjakan pada batas terdekat, dan user diberi tahu nilai yang
+    # benar-benar dipakai supaya hasilnya tidak terasa diam-diam diubah.
+    target_durasi, pesan_durasi = requested_duration()
+    if pesan_durasi:
+        print(f"[info] {pesan_durasi}")
+        notify("pipeline", pesan_durasi, chat_id=chat_id)
+    if target_durasi:
+        os.environ["CONTENT_FACTORY_DURATION"] = str(target_durasi)
 
     try:
         status, detail = run_core_stages_locked(

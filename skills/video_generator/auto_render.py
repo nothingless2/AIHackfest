@@ -29,7 +29,11 @@ sys.path.insert(
 from canvas import (  # noqa: E402
     ASPECT_PRESETS, FIT_MODES, CanvasError, resolve_canvas,
 )
+from duration import (  # noqa: E402
+    DURATION_TOLERANCE, off_target, word_target,
+)
 from retry import with_retry_async  # noqa: E402
+from spoken import prompt_rule, spoken_text  # noqa: E402
 from thumbnail import (  # noqa: E402
     THUMBNAIL_ENABLED, extract_thumbnail, thumbnail_time,
 )
@@ -744,6 +748,104 @@ def subtitle_scenes(data, rencana, video_width=None, video_height=None):
     return hasil
 
 
+
+DURATION_FIX_MODEL = os.getenv("DURATION_FIX_MODEL", "gpt-4o")
+DURATION_FIX_TIMEOUT = float(os.getenv("DURATION_FIX_TIMEOUT_SECONDS", "25"))
+
+
+def bagi_durasi(assets, total_duration):
+    """(aset_dipakai, durasi_per_klip). ATURAN TETAP: durasi video = durasi audio.
+
+    `per_clip = total / n` apa adanya. Kalau hasilnya di bawah MIN_CLIP_DURATION,
+    yang dikurangi adalah JUMLAH ASET, bukan per_clip-nya.
+
+    Versi lama memakai `max(MIN_CLIP_DURATION, total/n)`, yang membuat video
+    MELEBIHI audio saat asetnya banyak; `-shortest` lalu memotongnya, jadi aset
+    terakhir hilang di tengah. `min(...)` juga salah dengan cara sebaliknya:
+    audio 30 detik dengan 3 aset akan jadi video 4,5 detik.
+    """
+    n = len(assets)
+    if not n or total_duration <= 0:
+        return assets, [0.0] * n
+    if total_duration / n < MIN_CLIP_DURATION:
+        muat = max(1, int(total_duration // MIN_CLIP_DURATION))
+        if muat < n:
+            print(f"⚠️ {n} bahan terlalu banyak untuk {total_duration:.1f} detik "
+                  f"(min {MIN_CLIP_DURATION} dtk/klip) — dipakai {muat} bahan pertama.")
+            assets = assets[:muat]
+    per = total_duration / len(assets)
+    return assets, [per] * len(assets)
+
+
+def clamp_scenes(scenes, total_duration):
+    """Jepit scene ke durasi video yang sebenarnya.
+
+    Scene dengan end=30 di video 22 detik hanya berhenti saat videonya habis,
+    dan scene yang MULAI setelah akhir tidak pernah tampil sama sekali — dua-duanya
+    membuat timing teks terlihat benar di JSON tapi salah di layar.
+    """
+    if not total_duration or total_duration <= 0:
+        return scenes
+    hasil = []
+    for sc in scenes or []:
+        mulai = float(sc.get("start") or 0)
+        selesai = sc.get("end")
+        if mulai >= total_duration:
+            continue
+        selesai = total_duration if selesai is None else min(float(selesai), total_duration)
+        if selesai <= mulai:
+            continue
+        hasil.append({**sc, "start": mulai, "end": selesai})
+    return hasil
+
+
+def perbaiki_durasi(data, aktual, target):
+    """Satu kali penulisan ulang naskah supaya durasinya mendekati target.
+
+    Mengembalikan dict berisi full_voice_over / voice_over_spoken / scenes yang
+    baru, atau None kalau gagal. Naskah DAN scenes ditulis ulang bersama: kalau
+    hanya naskahnya yang dipendekkan, timing scene ikut salah.
+
+    Satu percobaan dengan timeout pendek, dan kegagalannya TIDAK menggagalkan
+    render — lebih baik video dengan durasi meleset daripada tidak ada video.
+    """
+    kmin, kmax = word_target(target)
+    arah = "PENDEKKAN" if aktual > target else "PANJANGKAN"
+    kata_sekarang = len((data.get("full_voice_over") or "").split())
+    pesan = (
+        f"Naskah voice-over ini {kata_sekarang} kata dan menghasilkan audio "
+        f"{aktual:.1f} detik, padahal target {target} detik. {arah} naskahnya "
+        f"menjadi {kmin}-{kmax} kata.\n"
+        f"WAJIB: jumlah kata \"full_voice_over\" harus berada di dalam rentang "
+        f"{kmin}-{kmax}. Jangan kurang dari {kmin} kata dan jangan lebih dari "
+        f"{kmax} kata — hitung sebelum menjawab. Pertahankan makna, gaya, dan "
+        f"struktur Hook-Masalah-Solusi-CTA.\n\n"
+        f"Naskah sekarang:\n{data.get('full_voice_over', '')}\n\n"
+        f"Scenes sekarang:\n{json.dumps(data.get('scenes', []), ensure_ascii=False)}\n\n"
+        "Balas HANYA JSON: {\"full_voice_over\": \"...\", "
+        "\"voice_over_spoken\": \"versi fonetis untuk TTS\", "
+        "\"scenes\": [{\"start\": 0, \"end\": 3, \"text\": \"...\"}]}. "
+        "Waktu scene harus muat di dalam target durasi."
+    )
+    # Aturan lafal ikut dibawa: tanpa ini naskah hasil koreksi kehilangan ejaan
+    # fonetisnya dan TTS kembali membaca "leads" jadi "lid".
+    aturan = prompt_rule()
+    if aturan:
+        pesan = f"{pesan}\n\n{aturan}"
+    try:
+        from common import chat_json
+        return chat_json(
+            [{"role": "user", "content": pesan}],
+            model=DURATION_FIX_MODEL,
+            label="koreksi durasi naskah",
+            max_attempts=1,
+            timeout=DURATION_FIX_TIMEOUT,
+        )
+    except Exception as e:
+        print(f"[warn] koreksi durasi gagal ({e}); lanjut dengan naskah asli.")
+        return None
+
+
 def render_from_agent_script(
     json_path="workspace/drafts/script.json",
     image_path="",
@@ -764,6 +866,9 @@ def render_from_agent_script(
 
     scenes = data.get("scenes", [])
     media_assets = data.get("media_assets", [])
+
+    target_duration = data.get("target_duration")
+    durasi_dikoreksi = False
 
     output_dir = os.path.dirname(output_video) or "."
     os.makedirs(output_dir, exist_ok=True)
@@ -803,13 +908,37 @@ def render_from_agent_script(
         scenes = subtitle_scenes(data, rencana, TARGET_W, TARGET_H) or scenes
         print(f"⏱️ Durasi total dari {len(existing_assets)} bahan: {total_duration:.1f} detik")
     else:
+        # Yang DIBACAKAN adalah voice_over_spoken (ejaan fonetis), yang DITULIS
+        # di subtitle tetap full_voice_over. Tertukar = subtitle salah eja.
+        ucapan = spoken_text(data)
+        if ucapan != full_vo:
+            print("🗣️ Memakai naskah lafal (voice_over_spoken) untuk TTS.")
         print("🎙️ Menghasilkan Voice-Over AI secara dinamis...")
-        asyncio.run(generate_voice(full_vo, temp_audio))
+        asyncio.run(generate_voice(ucapan, temp_audio))
         total_duration = AudioFileClip(temp_audio).duration
         print(f"⏱️ Durasi Voice-Over: {total_duration:.1f} detik")
-        per = max(MIN_CLIP_DURATION, total_duration / len(existing_assets))
-        durasi_klip = [per] * len(existing_assets)
+
+        # Koreksi HANYA kalau user benar-benar meminta durasi. Tanpa permintaan:
+        # tidak ada pengecekan, tidak ada panggilan LLM tambahan, perilaku lama utuh.
+        if off_target(total_duration, target_duration):
+            print(f"⚠️ Durasi {total_duration:.1f} dtk meleset dari target "
+                  f"{target_duration} dtk (toleransi {DURATION_TOLERANCE:.0%}) — "
+                  "naskah ditulis ulang sekali.")
+            revisi = perbaiki_durasi(data, total_duration, target_duration)
+            if revisi and revisi.get("full_voice_over"):
+                data = {**data, **{k: v for k, v in revisi.items() if v}}
+                full_vo = data["full_voice_over"]
+                scenes = data.get("scenes", scenes)
+                asyncio.run(generate_voice(spoken_text(data), temp_audio))
+                total_duration = AudioFileClip(temp_audio).duration
+                durasi_dikoreksi = True
+                print(f"⏱️ Durasi setelah koreksi: {total_duration:.1f} detik")
+
+        existing_assets, durasi_klip = bagi_durasi(existing_assets, total_duration)
+        per = durasi_klip[0] if durasi_klip else 0.0
         print(f"🖼️ Menyusun {len(existing_assets)} bahan mentah user ({per:.1f} detik per bahan)")
+
+    scenes = clamp_scenes(scenes, total_duration)
 
     segment_paths = []
     if pakai_audio_asli:
@@ -869,6 +998,9 @@ def render_from_agent_script(
         file_path=output_video,
         thumb_path=thumb_path,
         duration=total_duration,
+        target_duration=target_duration,
+        actual_duration=round(total_duration, 2),
+        duration_adjusted=durasi_dikoreksi,
         audio_mode=audio_mode,
         judul=data.get("judul"),
         scene_count=len(scenes),

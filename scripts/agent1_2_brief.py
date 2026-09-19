@@ -9,6 +9,8 @@ import os
 import sys
 
 from audio_mode import mode_eksplisit, requested_mode, resolve_audio_mode
+from duration import duration_text, requested_duration
+from spoken import SPOKEN_REWRITE, prompt_rule
 from transcribe import transcribe_assets_detailed
 from vision import build_image_parts
 
@@ -164,7 +166,16 @@ def build_transcript_note(transkrip):
 
 
 def build_prompt(asset_names, performance, *, jumlah_gambar, pool=None, konteks="",
-                 transkrip=None):
+                 transkrip=None, target_duration=None):
+    # Durasi & aturan lafal disuntikkan, bukan hardcode: tanpa permintaan user,
+    # duration_text() mengembalikan kalimat lama kata per kata sehingga brief
+    # untuk run yang tidak meminta durasi tidak berubah sama sekali.
+    durasi_note = duration_text(target_duration)
+    lafal_note = prompt_rule()
+    baris_spoken = (
+        '    "voice_over_spoken": "naskah yang sama, ejaan fonetis untuk TTS",\n'
+        if SPOKEN_REWRITE else ""
+    )
     performance_note = build_performance_note(performance)
     trend_note, _ = build_trend_note(pool)
     transcript_note = build_transcript_note(transkrip)
@@ -225,8 +236,9 @@ Nama file bahan (urutan boleh disusun ulang; gambar di atas berurutan sesuai daf
 Aturan keras:
 - Hanya boleh memakai nama file dari daftar di atas. DILARANG mengarang nama file lain.
 - DILARANG menyebut objek, orang, tempat, atau aktivitas yang TIDAK terlihat di gambar.
-- Naskah voice-over harus Bahasa Indonesia, natural saat dibacakan, 20-35 detik
-  (kira-kira 55-95 kata), berstruktur Hook - Masalah - Solusi - CTA.
+- Naskah voice-over harus Bahasa Indonesia, natural saat dibacakan, {durasi_note},
+  berstruktur Hook - Masalah - Solusi - CTA.
+{lafal_note}
 - "deskripsi" ditulis untuk dibaca calon penonton di kolom deskripsi platform,
   bukan ringkasan internal. Jangan mengulang judul apa adanya.
 - "scenes" adalah teks on-screen singkat (maksimal 6 kata per scene), bukan salinan
@@ -247,7 +259,7 @@ Balas HANYA JSON murni dengan struktur persis berikut:
     "deskripsi": "deskripsi konten 2-3 kalimat untuk kolom caption/description platform: apa isinya, untuk siapa, dan apa yang didapat penonton. Berbeda dari judul (pendek) dan dari hashtags.",
     "target_trend": "string",
     "full_voice_over": "string",
-    "scenes": [
+{baris_spoken}    "scenes": [
       {{"start": 0, "end": 4, "text": "teks on-screen singkat"}}
     ],
     "hashtags": ["#contoh"]
@@ -297,9 +309,15 @@ def run():
     pool = read_json(TREND_POOL_PATH, {}) or {}
     if konteks:
         print(f"[info] konteks user dipakai -> {konteks[:80]!r}")
+
+    target_durasi, pesan_durasi = requested_duration(context=konteks)
+    if target_durasi:
+        print(f"[info] durasi diminta: {target_durasi} detik"
+              + (f" ({pesan_durasi})" if pesan_durasi else ""))
+
     prompt_text = build_prompt(
         asset_names, performance, jumlah_gambar=len(image_parts), pool=pool,
-        konteks=konteks, transkrip=transkrip,
+        konteks=konteks, transkrip=transkrip, target_duration=target_durasi,
     )
     result = chat_json(
         [{"role": "user",
@@ -346,6 +364,10 @@ def run():
     brief["media_assets"] = resolve_assets(asset_names)
     brief["asset_names"] = asset_names
     brief["brief_id"] = f"brief_{now_iso()}"
+    # Renderer perlu tahu targetnya untuk memutuskan apakah naskah perlu
+    # dikoreksi setelah TTS. None = user tidak meminta durasi = tidak ada
+    # pengecekan sama sekali (perilaku lama utuh).
+    brief["target_duration"] = target_durasi
     brief["generated_at"] = now_iso()
 
     if not brief.get("full_voice_over"):

@@ -418,18 +418,22 @@ def openai_retry_after(exc):
         return None
 
 
-def chat_json(messages, *, model, label="panggilan LLM"):
+def chat_json(messages, *, model, label="panggilan LLM", max_attempts=None, timeout=None):
     """Panggil chat completion yang mengembalikan JSON, dengan retry.
 
     max_retries=0 mematikan retry BAWAAN SDK (defaultnya 2). Tanpa itu, retry
     bersarang: SDK mencoba 3x di dalam tiap percobaan kita, jadi total 9 kali
     dengan jeda yang tidak kita kendalikan dan melewati timeout tahap.
+
+    `max_attempts`/`timeout` dipakai pemanggil yang anggaran waktunya sempit
+    (mis. koreksi durasi di tengah render, yang harus 1 percobaan singkat dan
+    boleh gagal tanpa menggagalkan render).
     """
     import json as _json
 
     from retry import with_retry
 
-    client = make_openai_client()
+    client = make_openai_client(timeout=timeout)
 
     def sekali():
         resp = client.chat.completions.create(
@@ -439,11 +443,13 @@ def chat_json(messages, *, model, label="panggilan LLM"):
         _catat_pemakaian_llm(model, resp, label)
         return _json.loads(resp.choices[0].message.content)
 
+    kw = {} if max_attempts is None else {"max_attempts": max_attempts}
     return with_retry(
         sekali,
         is_retriable=openai_is_retriable,
         extract_retry_after=openai_retry_after,
         label=label,
+        **kw,
     )
 
 

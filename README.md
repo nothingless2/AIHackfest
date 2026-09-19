@@ -48,6 +48,9 @@ jatuh ke default):
 | `TRIM_SILENCE` | `1` | potong jeda/silence dari video user |
 | `TRANSITION` | `fade` | transisi antar klip |
 | `THUMBNAIL_ENABLED` | `1` | ambil cover JPG dari tengah scene pertama & lampirkan ke video Telegram |
+| `DURATION_MIN` / `DURATION_MAX` | `10` / `60` | rentang durasi yang boleh diminta user; di luar itu dijepit dan user diberi tahu |
+| `DURATION_TOLERANCE` | `0.20` | meleset lebih dari ini memicu SATU kali penulisan ulang naskah |
+| `SPOKEN_REWRITE` | `1` | brief menulis `voice_over_spoken` (ejaan fonetis untuk TTS) terpisah dari `full_voice_over` (ejaan benar untuk subtitle/caption) |
 
 ## Cara menjalankan
 

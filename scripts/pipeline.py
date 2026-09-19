@@ -13,6 +13,7 @@ import os
 import sys
 
 from canvas import CanvasError, resolve_canvas
+from duration import requested_duration
 from common import CLI_CHAT_ID, chat_allowed, ensure_dirs, log_error, notify
 from gateway_check import warn_if_gateway_polling
 from orchestrator import install_signal_handlers, run_core_stages_locked, run_stage
@@ -81,6 +82,13 @@ def main():
         print(f"[error] {e}")
         log_event("run_rejected", run_id, chat_id=chat_id, reason="canvas_invalid")
         return os.EX_CONFIG
+
+    # Sama seperti jalur plugin: di luar rentang dijepit, bukan ditolak.
+    target_durasi, pesan_durasi = requested_duration()
+    if pesan_durasi:
+        print(f"[info] {pesan_durasi}")
+    if target_durasi:
+        os.environ["CONTENT_FACTORY_DURATION"] = str(target_durasi)
 
     try:
         status, detail = run_core_stages_locked(

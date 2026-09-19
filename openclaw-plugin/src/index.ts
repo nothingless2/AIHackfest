@@ -166,6 +166,18 @@ const runParams = Type.Object({
         "ke voice-over AI supaya videonya tidak sunyi.",
     }),
   ),
+  durationSeconds: Type.Optional(
+    Type.Integer({
+      minimum: 10,
+      maximum: 60,
+      description:
+        "Durasi video yang diminta user, dalam DETIK. Isi HANYA kalau user " +
+        "menyebut panjang videonya (mis. 'bikin 15 detik saja', 'sekitar setengah " +
+        "menit'). Jangan menebak kalau user tidak menyebutkannya — tanpa angka, " +
+        "sistem memakai panjang bawaan 20-35 detik. Di luar 10-60 akan dijepit ke " +
+        "batas terdekat dan user diberi tahu.",
+    }),
+  ),
   aspectRatio: Type.Optional(
     Type.Union(
       [Type.Literal("9:16"), Type.Literal("1:1"), Type.Literal("16:9")],
@@ -379,6 +391,7 @@ export default defineToolPlugin({
               voicePersona?: string;
               aspectRatio?: string;
               fitMode?: string;
+              durationSeconds?: number;
             },
           ) {
             const fail = (text: string, details: Record<string, unknown>) => ({
@@ -397,7 +410,10 @@ export default defineToolPlugin({
               });
             }
 
-            const { mediaPaths, userContext, audioMode, voicePersona, aspectRatio, fitMode } =
+            const {
+              mediaPaths, userContext, audioMode, voicePersona, aspectRatio, fitMode,
+              durationSeconds,
+            } =
               params;
 
             // Dicatat SEBELUM validasi apa pun, supaya tetap ada bukti walau
@@ -419,6 +435,7 @@ export default defineToolPlugin({
               voicePersona: voicePersona ?? null,
               aspectRatio: aspectRatio ?? null,
               fitMode: fitMode ?? null,
+              durationSeconds: durationSeconds ?? null,
               // Path yang BENAR-BENAR dikirim model, plus hasil validasinya.
               // Tanpa ini, penolakan "file tidak ditemukan" tidak bisa didiagnosis
               // dari log sama sekali -- yang tercatat cuma jumlahnya.
@@ -511,6 +528,11 @@ export default defineToolPlugin({
             }
             if (aspectRatio) {
               pipelineEnv.VIDEO_ASPECT = aspectRatio;
+            }
+            if (typeof durationSeconds === "number" && Number.isFinite(durationSeconds)) {
+              // Dikirim apa adanya; penjepitan ke 10-60 dilakukan Python di titik
+              // masuk supaya jalur CLI dan jalur plugin memakai aturan yang sama.
+              pipelineEnv.CONTENT_FACTORY_DURATION = String(Math.round(durationSeconds));
             }
             if (fitMode) {
               pipelineEnv.FIT_MODE = fitMode;

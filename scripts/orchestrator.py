@@ -38,7 +38,16 @@ CORE_STAGES = [
     # tanpa data tren, bukan berhenti.
     ("agent5_insight.py", "ContentInsight", False, 90),
     ("agent1_2_brief.py", "TrendAnalysts & BrainIdea", True, 255),
-    ("agent3_render.py", "ContentMakers", True, 300),
+    # 360 detik (naik dari 300) — dihitung ulang setelah 2.1 menambah kemungkinan
+    # TTS KEDUA. Anggaran terburuk:
+    #   TTS  3 percobaan x 30 dtk + backoff 3 dtk          =  93
+    #   koreksi durasi 1 panggilan LLM x 25 dtk            =  25
+    #   TTS kedua (naskah hasil koreksi)                   =  93
+    #   render terberat yang diukur (16:9 blur)            =  67
+    #   cover 2 panggilan ffmpeg                           =   3
+    #   -------------------------------------------------------
+    #                                                        281  -> margin ~28%
+    ("agent3_render.py", "ContentMakers", True, 360),
 ]
 
 _active_proc = None  # ditulis run_stage() tepat setelah Popen; dibaca signal handler
