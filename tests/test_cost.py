@@ -102,6 +102,24 @@ def test_model_yang_dipakai_pipeline_punya_harga():
     import agent1_2_brief
 
     harga = ce.load_pricing()
-    assert agent1_2_brief.MODEL in (harga.get("llm") or {}), (
-        f"{agent1_2_brief.MODEL} tidak ada di config/pricing.json"
+    model = agent1_2_brief.MODEL
+    berharga = model in (harga.get("llm") or {})
+    dinyatakan = (harga.get("tanpa_harga_per_token") or {}).get(model)
+    # Boleh tanpa harga, tapi HARUS dinyatakan eksplisit dengan alasannya --
+    # yang dilarang adalah biaya berhenti terhitung tanpa ada yang memutuskannya.
+    assert berharga or dinyatakan, (
+        f"{model} tidak ada di config/pricing.json (bagian 'llm') dan tidak "
+        "dinyatakan di 'tanpa_harga_per_token'"
     )
+    if dinyatakan:
+        assert len(dinyatakan) > 40, "alasan tanpa-harga harus dijelaskan, bukan satu kata"
+
+
+def test_biaya_tidak_diketahui_bukan_nol(monkeypatch):
+    """Seluruh panggilan tanpa harga -> 'tidak diketahui', BUKAN '$0.0000' yang
+    terbaca seperti gratis."""
+    monkeypatch.setattr(ce, "run_cost", lambda run_id: (0.0, 4))
+    monkeypatch.setattr(ce, "month_to_date_cost", lambda: (0.0, 0))
+    teks = ce.ringkasan_biaya("run1")
+    assert "tidak diketahui" in teks
+    assert "$0.0000" not in teks

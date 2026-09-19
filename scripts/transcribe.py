@@ -151,7 +151,7 @@ def transcribe_file_detailed(audio_path, *, durasi=0.0, vocab_prompt=None):
 
     from common import make_openai_client, openai_is_retriable, openai_retry_after
 
-    client = make_openai_client(timeout=TRANSCRIBE_TIMEOUT)
+    client = make_openai_client(timeout=TRANSCRIBE_TIMEOUT, service="TRANSCRIBE")
 
     def sekali():
         with open(audio_path, "rb") as f:
@@ -190,11 +190,19 @@ def transcribe_file_detailed(audio_path, *, durasi=0.0, vocab_prompt=None):
         isi = (getattr(seg, "text", "") or "").strip()
         if not isi:
             continue
-        potongan.append({
+        item = {
             "start": float(getattr(seg, "start", 0) or 0),
             "end": float(getattr(seg, "end", 0) or 0),
             "text": isi,
-        })
+        }
+        # Metrik keyakinan bawaan Whisper, disimpan HANYA kalau ada. Dipakai
+        # seleksi konten untuk menandai bagian yang ucapannya tidak jelas --
+        # ambangnya juga bawaan Whisper (lihat edit_plan.py), bukan karangan.
+        for kunci in ("avg_logprob", "no_speech_prob", "compression_ratio"):
+            nilai = getattr(seg, kunci, None)
+            if nilai is not None:
+                item[kunci] = float(nilai)
+        potongan.append(item)
 
     _catat_biaya(durasi, teks)
     return {
@@ -205,6 +213,43 @@ def transcribe_file_detailed(audio_path, *, durasi=0.0, vocab_prompt=None):
         # naskah/subtitle perlu menyesuaikan bahasa bahan.
         "language": getattr(hasil, "language", None),
     }
+
+
+def alasan_gagal(exc):
+    """Kode alasan singkat untuk sebuah kegagalan transkripsi.
+
+    Dipisah dari pesan mentah karena user perlu tahu PENYEBAB yang bisa ia
+    tindak lanjuti: "saldo habis" berarti isi ulang, "timeout" berarti coba
+    lagi, dan keduanya jauh berbeda dari "klip itu memang tidak ada ucapannya".
+    Sebelum ini semuanya sama-sama jadi baris [warn] di keluaran yang tertangkap,
+    sehingga yang terlihat user hanya subtitle yang hilang.
+    """
+    pesan = str(exc)
+    kode = str(getattr(exc, "code", "") or "") + " " + pesan
+    if "insufficient_quota" in kode or "credit_balance_exhausted" in kode:
+        return "kuota_habis"
+    if "timed out" in pesan.lower() or type(exc).__name__ in ("APITimeoutError", "TimeoutError"):
+        return "timeout"
+    if type(exc).__name__ in ("InternalServerError",) or "503" in pesan or "502" in pesan:
+        return "layanan_tidak_tersedia"
+    if type(exc).__name__ in ("AuthenticationError", "PermissionDeniedError"):
+        return "akses_ditolak"
+    return "error_api"
+
+
+ALASAN_TEKS = {
+    "tanpa_audio": "tidak punya trek audio",
+    "terlalu_panjang": "terlalu panjang untuk ditranskrip",
+    "gagal_ekstrak": "audio gagal diekstrak",
+    "tanpa_ucapan": "tidak ada ucapan terdeteksi",
+    "kuota_habis": "saldo/kuota API habis",
+    "timeout": "waktu habis (layanan lambat)",
+    "layanan_tidak_tersedia": "layanan transkripsi sedang tidak tersedia",
+    "akses_ditolak": "akses API ditolak",
+    "error_api": "error dari layanan transkripsi",
+    "tidak_selesai": "tidak selesai dalam anggaran waktu",
+    "tidak_diproses": "melebihi batas jumlah bahan yang ditranskrip",
+}
 
 
 def _catat_biaya(durasi_detik, teks):
@@ -250,9 +295,25 @@ def transcribe_assets_detailed(paths, *, max_assets=None, konteks=""):
     berisi yang BERHASIL dan tidak kosong. Bahan tanpa audio, gagal ekstrak, atau
     gagal transkrip tidak muncul, sehingga pemanggil tidak pernah menyangka ada
     teks padahal tidak ada.
+
+    Pemanggil yang perlu tahu KENAPA sebuah bahan tidak muncul memakai
+    transcribe_assets_report().
     """
+    return transcribe_assets_report(paths, max_assets=max_assets, konteks=konteks)[0]
+
+
+def transcribe_assets_report(paths, *, max_assets=None, konteks=""):
+    """(hasil, gagal): `hasil` seperti transcribe_assets_detailed, `gagal` adalah
+    {nama_file: kode_alasan} untuk SETIAP bahan yang tidak menghasilkan transkrip.
+
+    Alasan dicatat karena "subtitle hilang" punya penyebab yang sangat berbeda
+    dan tindak lanjutnya pun berbeda: saldo API habis (isi ulang), layanan lambat
+    (coba lagi), atau klip memang tanpa ucapan (tidak ada yang perlu dilakukan).
+    Lihat ALASAN_TEKS untuk kode yang mungkin.
+    """
+    gagal = {}
     if not TRANSCRIBE_ENABLED or not OPENAI_API_KEY:
-        return {}
+        return {}, gagal
 
     batas = TRANSCRIBE_MAX_ASSETS if max_assets is None else max_assets
     vocab = build_vocab_prompt(konteks)
@@ -261,17 +322,20 @@ def transcribe_assets_detailed(paths, *, max_assets=None, konteks=""):
     # --- Tahap 1 (lokal, cepat): siapkan audio untuk tiap bahan yang layak.
     siap = []
     for path in paths[:batas]:
+        nama = os.path.basename(path)
         ext = os.path.splitext(path)[1].lower()
         if ext not in VIDEO_EXTENSIONS and ext not in AUDIO_EXTENSIONS:
             continue
         if not has_audio(path):
-            print(f"[info] transcribe: {os.path.basename(path)} tidak punya trek audio, dilewati.")
+            print(f"[info] transcribe: {nama} tidak punya trek audio, dilewati.")
+            gagal[nama] = "tanpa_audio"
             continue
 
         durasi = media_duration(path)
         if durasi > TRANSCRIBE_MAX_SECONDS:
-            print(f"[warn] transcribe: {os.path.basename(path)} {durasi:.0f} dtk "
+            print(f"[warn] transcribe: {nama} {durasi:.0f} dtk "
                   f"melebihi batas {TRANSCRIBE_MAX_SECONDS} dtk, dilewati.")
+            gagal[nama] = "terlalu_panjang"
             continue
 
         tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
@@ -280,9 +344,10 @@ def transcribe_assets_detailed(paths, *, max_assets=None, konteks=""):
             siap.append((path, tmp.name, durasi))
         else:
             _buang(tmp.name)
+            gagal[nama] = "gagal_ekstrak"
 
     if not siap:
-        return hasil
+        return hasil, gagal
 
     # --- Tahap 2 (jaringan, lambat): semua dikirim bersamaan, dengan anggaran
     # waktu KERAS. Yang belum selesai saat anggaran habis dilepas begitu saja.
@@ -292,6 +357,7 @@ def transcribe_assets_detailed(paths, *, max_assets=None, konteks=""):
     print(f"[info] transcribe: {len(siap)} bahan, anggaran {TRANSCRIBE_BUDGET} detik "
           f"({TRANSCRIBE_CONCURRENCY} permintaan bersamaan).")
 
+    durasi_per_path = {p: d for p, _, d in siap}
     with cf.ThreadPoolExecutor(max_workers=TRANSCRIBE_CONCURRENCY) as pool:
         futures = {
             pool.submit(transcribe_file_detailed, audio, durasi=durasi, vocab_prompt=vocab): (path, audio)
@@ -305,18 +371,21 @@ def transcribe_assets_detailed(paths, *, max_assets=None, konteks=""):
             try:
                 data = fut.result() or {}
             except Exception as e:
-                print(f"[warn] transcribe: {nama} gagal: {type(e).__name__}: {e}")
+                kode = alasan_gagal(e)
+                gagal[nama] = kode
+                print(f"[warn] transcribe: {nama} gagal ({ALASAN_TEKS[kode]}): "
+                      f"{type(e).__name__}: {str(e)[:200]}")
                 continue
             teks = (data.get("text") or "").strip()
             if not teks:
+                gagal[nama] = "tanpa_ucapan"
                 continue
-            durasi = dict((p, d) for p, _, d in siap).get(path, 0.0)
             hasil[nama] = {
                 "text": teks,
                 "segments": data.get("segments") or [],
                 "words": data.get("words") or [],
                 "language": data.get("language"),
-                "duration": durasi,
+                "duration": durasi_per_path.get(path, 0.0),
             }
             print(f"[info] transcribe: {nama} -> {len(teks)} karakter, "
                   f"{len(data.get('segments') or [])} potongan bertimestamp")
@@ -328,6 +397,7 @@ def transcribe_assets_detailed(paths, *, max_assets=None, konteks=""):
                   f"{TRANSCRIBE_BUDGET} detik dan dilepas — video tetap dibuat, "
                   f"tapi bagian itu tanpa subtitle.")
             for fut in tertunda:
+                gagal[os.path.basename(futures[fut][0])] = "tidak_selesai"
                 fut.cancel()
 
     for _, audio, _ in siap:
@@ -336,4 +406,4 @@ def transcribe_assets_detailed(paths, *, max_assets=None, konteks=""):
     print(f"[info] transcribe: {len(hasil)}/{len(siap)} bahan selesai "
           f"dalam {time.time() - t0:.0f} detik.")
 
-    return hasil
+    return hasil, gagal

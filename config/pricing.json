@@ -31,5 +31,8 @@
       "sumber": "https://openai.com/api/pricing/",
       "catatan": "Ditagih per MENIT audio, bukan per token. Dibulatkan ke atas oleh OpenAI."
     }
+  },
+  "tanpa_harga_per_token": {
+    "anthropic/claude-haiku-4.5": "Dipakai lewat Snifox (19 Sep 2026). Snifox menjual paket berlangganan berkuota token/hari dan PAYG; harga per-token per model hanya ada di katalog dashboard mereka, tidak bisa diambil lewat API. Sengaja TIDAK diisi dengan harga resmi Anthropic karena Snifox menyatakan 'hingga 95% di bawah harga resmi'. Biayanya dilaporkan null, bukan dikarang. Isi bagian 'llm' kalau harga dari dashboard sudah diketahui."
   }
 }

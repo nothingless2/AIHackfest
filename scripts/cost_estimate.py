@@ -142,6 +142,11 @@ def ringkasan_biaya(run_id):
     """Satu baris ringkasan untuk dikirim ke user. None kalau tidak ada data."""
     biaya, tanpa_harga = run_cost(run_id)
     bulan, _ = month_to_date_cost()
+    if biaya <= 0 and tanpa_harga:
+        # Seluruh panggilan run ini memakai model tanpa harga per-token. Menulis
+        # "$0.0000" di sini terbaca seperti GRATIS, padahal artinya tidak diketahui.
+        return (f"💰 Biaya konten ini: tidak diketahui — {tanpa_harga} panggilan memakai "
+                "model tanpa harga per-token di pricing.json (mis. paket langganan).")
     if biaya <= 0 and bulan <= 0:
         return None
 

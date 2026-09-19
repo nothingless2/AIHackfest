@@ -44,6 +44,23 @@ from retention import sweep_old_run_files
 from run_log import log_event
 
 
+def _sebab_subtitle(alasan):
+    """" — saldo/kuota API habis (3), tidak ada ucapan terdeteksi (1)" atau "".
+
+    Dikelompokkan per penyebab dan diurutkan dari yang terbanyak supaya
+    penyebab utamanya terbaca pertama.
+    """
+    if not alasan:
+        return ""
+    from transcribe import ALASAN_TEKS
+    hitung = {}
+    for kode in alasan.values():
+        hitung[kode] = hitung.get(kode, 0) + 1
+    bagian = [f"{ALASAN_TEKS.get(k, k)} ({n})"
+              for k, n in sorted(hitung.items(), key=lambda kv: -kv[1])]
+    return " — " + ", ".join(bagian)
+
+
 def deliver_plugin(run_id, chat_id):
     video_path = draft_video_path_for_run(run_id)
     thumb_path = draft_thumb_path_for_run(run_id)
@@ -62,11 +79,11 @@ def deliver_plugin(run_id, chat_id):
     cakupan = brief.get("transcript_coverage") or {}
     kurang = len(cakupan.get("tanpa_subtitle") or [])
     if kurang:
-        # Dilaporkan, bukan didiamkan: user berhak tahu bagian mana yang tanpa
-        # teks, alih-alih mengira subtitle-nya rusak.
+        # Dilaporkan DENGAN PENYEBABNYA, bukan sekadar jumlahnya: "saldo API
+        # habis" berarti isi ulang, "waktu habis" berarti coba lagi, dan "tidak
+        # ada ucapan" berarti tidak ada yang perlu dilakukan.
         bagian += ["", f"ℹ️ {kurang} dari {cakupan.get('total_bahan')} bahan tampil "
-                       "tanpa subtitle (ucapannya tidak terdeteksi atau tidak sempat "
-                       "ditranskrip)."]
+                       f"tanpa subtitle{_sebab_subtitle(cakupan.get('alasan'))}."]
     if biaya:
         bagian += ["", biaya]
     bagian += ["", "Balas APPROVE untuk menyetujui atau REVISI untuk perbaikan."]

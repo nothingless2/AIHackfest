@@ -16,6 +16,7 @@ import os
 import sys
 
 from common import (
+    LLM_MODEL,
     ensure_dirs,
     log_error,
     notify,
@@ -38,7 +39,7 @@ from fetch_trends import gather  # noqa: E402
 sys.path.insert(0, os.path.join(PROJECT_ROOT, "scripts"))
 from vision import build_image_parts  # noqa: E402
 
-KEYWORD_MODEL = os.getenv("KEYWORD_MODEL", "gpt-4o")
+KEYWORD_MODEL = os.getenv("KEYWORD_MODEL") or LLM_MODEL
 KEYWORD_MAX_ASSETS = int(os.getenv("KEYWORD_MAX_ASSETS", "3"))
 
 

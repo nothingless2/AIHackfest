@@ -352,25 +352,41 @@ OPENAI_TIMEOUT_SECONDS = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "45"))
 # diganti tanpa menyentuh kode.
 OPENAI_BASE_URL = (os.getenv("OPENAI_BASE_URL") or "").strip() or None
 
+# Satu nama model untuk SEMUA panggilan chat (brief, seleksi, koreksi durasi,
+# kata kunci tren). Dulu "gpt-4o" tertulis mati di empat tempat, jadi pindah
+# penyedia berarti mengedit kode. Tiap pemanggil masih bisa menimpanya sendiri
+# (BRIEF_MODEL, EDIT_MODEL, KEYWORD_MODEL, DURATION_FIX_MODEL).
+LLM_MODEL = (os.getenv("LLM_MODEL") or "").strip() or "gpt-4o"
 
-def make_openai_client(*, timeout=None):
+
+def make_openai_client(*, timeout=None, service=None):
     """Satu-satunya tempat client OpenAI dibuat.
 
     Dipusatkan supaya base_url, mematikan retry bawaan SDK, dan timeout tidak
     perlu diulang di tiap pemanggil — dan supaya pindah penyedia cukup mengubah
     satu variabel .env.
+
+    `service` ("TRANSCRIBE" atau "TTS") memungkinkan layanan itu memakai penyedia
+    SENDIRI lewat {SERVICE}_BASE_URL / {SERVICE}_API_KEY. Perlu karena tidak
+    semua penyedia menyediakan semuanya: Snifox hanya punya model chat, tanpa
+    Whisper dan tanpa TTS, sehingga chat bisa ke satu penyedia sementara
+    transkripsi tetap ke penyedia lain. Kosong = pakai penyedia utama.
     """
     from openai import OpenAI
 
+    kunci, basis = OPENAI_API_KEY, OPENAI_BASE_URL
+    if service:
+        kunci = (os.getenv(f"{service}_API_KEY") or "").strip() or kunci
+        basis = (os.getenv(f"{service}_BASE_URL") or "").strip() or basis
     kw = {
-        "api_key": OPENAI_API_KEY,
+        "api_key": kunci,
         # Retry bawaan SDK dimatikan; retry kita sendiri yang mengatur jeda dan
         # klasifikasi. Tanpa ini, retry bersarang jadi 9 percobaan.
         "max_retries": 0,
         "timeout": timeout if timeout is not None else OPENAI_TIMEOUT_SECONDS,
     }
-    if OPENAI_BASE_URL:
-        kw["base_url"] = OPENAI_BASE_URL
+    if basis:
+        kw["base_url"] = basis
     return OpenAI(**kw)
 
 
@@ -418,6 +434,32 @@ def openai_retry_after(exc):
         return None
 
 
+def parse_json_lenient(teks):
+    """JSON dari jawaban LLM, toleran terhadap pagar kode.
+
+    `response_format=json_object` dihormati OpenAI, tapi tidak oleh semua model
+    di balik gateway kompatibel-OpenAI: terukur Claude Haiku dan Gemini
+    membungkus jawabannya dengan ```json ... ```, yang membuat json.loads gagal
+    padahal isinya benar. Yang dilonggarkan hanya pembungkusnya -- isi yang
+    memang bukan JSON tetap melempar.
+    """
+    import json as _j
+    import re as _re
+
+    mentah = (teks or "").strip()
+    try:
+        return _j.loads(mentah)
+    except _j.JSONDecodeError:
+        pass
+    pagar = _re.search(r"```(?:json)?\s*(.*?)```", mentah, _re.DOTALL | _re.IGNORECASE)
+    if pagar:
+        return _j.loads(pagar.group(1).strip())
+    awal, akhir = mentah.find("{"), mentah.rfind("}")
+    if awal != -1 and akhir > awal:
+        return _j.loads(mentah[awal:akhir + 1])
+    raise _j.JSONDecodeError("jawaban bukan JSON", mentah, 0)
+
+
 def chat_json(messages, *, model, label="panggilan LLM", max_attempts=None, timeout=None):
     """Panggil chat completion yang mengembalikan JSON, dengan retry.
 
@@ -441,7 +483,7 @@ def chat_json(messages, *, model, label="panggilan LLM", max_attempts=None, time
             response_format={"type": "json_object"},
         )
         _catat_pemakaian_llm(model, resp, label)
-        return _json.loads(resp.choices[0].message.content)
+        return parse_json_lenient(resp.choices[0].message.content)
 
     kw = {} if max_attempts is None else {"max_attempts": max_attempts}
     return with_retry(

@@ -11,10 +11,11 @@ import sys
 from audio_mode import mode_eksplisit, requested_mode, resolve_audio_mode
 from duration import duration_text, requested_duration
 from spoken import SPOKEN_REWRITE, prompt_rule
-from transcribe import transcribe_assets_detailed
+from transcribe import transcribe_assets_report
 from vision import build_image_parts
 
 from common import (
+    LLM_MODEL,
     BRIEF_PATH,
     ensure_dirs,
     list_raw_assets,
@@ -32,7 +33,7 @@ from common import (
     write_json,
 )
 
-MODEL = "gpt-4o"
+MODEL = os.getenv("BRIEF_MODEL") or LLM_MODEL
 
 
 def select_assets():
@@ -295,7 +296,7 @@ def run():
     performance = read_json(PERFORMANCE_PATH)
 
     konteks = (os.getenv("CONTENT_FACTORY_USER_CONTEXT") or "").strip()
-    rinci = transcribe_assets_detailed(asset_paths, konteks=konteks)
+    rinci, gagal_transkrip = transcribe_assets_report(asset_paths, konteks=konteks)
     transkrip = {nama: d["text"] for nama, d in rinci.items()}
     if transkrip:
         print(f"[info] {len(transkrip)} bahan berhasil ditranskrip — isi ucapan ikut dikirim.")
@@ -368,6 +369,10 @@ def run():
         "ditranskrip": len(rinci),
         "total_bahan": len(asset_names),
         "tanpa_subtitle": [n for n in asset_names if n not in rinci],
+        # KENAPA tiap bahan tidak bersubtitle. Bahan yang tidak ada di transkrip
+        # maupun di daftar gagal berarti tidak pernah diproses (batas jumlah).
+        "alasan": {n: gagal_transkrip.get(n, "tidak_diproses")
+                   for n in asset_names if n not in rinci},
     }
     brief["media_assets"] = resolve_assets(asset_names)
     brief["asset_names"] = asset_names

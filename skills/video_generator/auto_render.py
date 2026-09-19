@@ -248,7 +248,7 @@ async def _voice_openai(text, output_audio):
     from common import make_openai_client, openai_is_retriable, openai_retry_after
     from retry import with_retry
 
-    client = make_openai_client(timeout=TTS_ATTEMPT_TIMEOUT * 2)
+    client = make_openai_client(timeout=TTS_ATTEMPT_TIMEOUT * 2, service="TTS")
 
     def sekali():
         kw = {}
@@ -848,7 +848,9 @@ def subtitle_scenes(data, rencana, video_width=None, video_height=None):
 
 
 
-DURATION_FIX_MODEL = os.getenv("DURATION_FIX_MODEL", "gpt-4o")
+# None = pakai LLM_MODEL. Dipilih SAAT DIPANGGIL, bukan saat import: .env baru
+# terbaca ketika `common` diimpor, dan urutan impor tidak boleh menentukan modelnya.
+DURATION_FIX_MODEL = os.getenv("DURATION_FIX_MODEL") or None
 DURATION_FIX_TIMEOUT = float(os.getenv("DURATION_FIX_TIMEOUT_SECONDS", "25"))
 
 
@@ -932,10 +934,10 @@ def perbaiki_durasi(data, aktual, target):
     if aturan:
         pesan = f"{pesan}\n\n{aturan}"
     try:
-        from common import chat_json
+        from common import LLM_MODEL, chat_json
         return chat_json(
             [{"role": "user", "content": pesan}],
-            model=DURATION_FIX_MODEL,
+            model=DURATION_FIX_MODEL or LLM_MODEL,
             label="koreksi durasi naskah",
             max_attempts=1,
             timeout=DURATION_FIX_TIMEOUT,
