@@ -174,3 +174,13 @@ dari staging -> restart gateway, dengan verifikasi manifest & build di tiap lang
   sehingga frame 0 punya YAVG 16. Setelah fade masuk dibuang dari segmen pertama,
   thumbnail server jadi 7.739 byte berisi gambar asli. Cover JPG tetap dibuat sebagai
   artefak (dipakai di `published/` dan untuk publikasi ke platform lain).
+
+## Backlog dari 2.4 (cover)
+
+- **Tempelkan teks hook ke file JPG cover**, bukan menggeser subtitle. Keputusan user
+  19 Sep: timing teks harus mengikuti ucapan; pengalaman menonton tidak boleh dirusak
+  demi preview. Cover JPG adalah file terpisah, jadi hook bisa dibakar ke situ tanpa
+  menyentuh video. Catatan: preview Telegram sendiri tetap dari frame pertama video
+  (cover diabaikan), jadi manfaat langsungnya ada di `published/` dan publikasi ke
+  platform lain — bukan di chat.
+- Cover via model gambar: tidak diaktifkan, tetap di backlog.

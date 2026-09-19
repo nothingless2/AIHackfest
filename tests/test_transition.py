@@ -10,6 +10,8 @@ sambungan itu ~2,8 detik pergeseran, dan semua subtitle sesudahnya melenceng --
 padahal sinkronisasi itu baru dibangun lewat map_time().
 """
 
+import subprocess
+
 import pytest
 
 import auto_render as ar
@@ -103,3 +105,49 @@ def test_fade_audio_tetap_ada_di_segmen_pertama():
 def test_klip_berikutnya_tetap_fade_masuk():
     vf, _ = ar.fade_filters(4.0, keep_audio=True, fade_in=True)
     assert "fade=t=in:st=0" in vf
+
+
+# ---------- penjaga regresi: frame 0 diukur, bukan diperiksa lewat string filter ----------
+
+def _yavg_frame_pertama(path):
+    """Kecerahan rata-rata (luma) frame pertama, diukur ffmpeg signalstats.
+
+    Rentang video: 16 = hitam penuh, 235 = putih penuh.
+    """
+    hasil = subprocess.run(
+        ["ffprobe", "-v", "error", "-f", "lavfi", "-i", f"movie={path},signalstats",
+         "-show_entries", "frame_tags=lavfi.signalstats.YAVG",
+         "-read_intervals", "%+0.1", "-of", "csv=p=0"],
+        check=True, capture_output=True, text=True,
+    )
+    return float(hasil.stdout.strip().splitlines()[0])
+
+
+@pytest.fixture(scope="module")
+def sumber_terang(tmp_path_factory):
+    """Klip abu-abu terang 2 detik — kalau frame 0 gelap, itu ulah fade, bukan bahannya."""
+    out = str(tmp_path_factory.mktemp("src") / "terang.mp4")
+    subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+         "-i", "color=c=gray:size=320x568:rate=24:duration=2",
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", out],
+        check=True, capture_output=True,
+    )
+    return out
+
+
+def test_frame_pertama_video_TIDAK_gelap(sumber_terang, tmp_path):
+    """Regresi yang dijaga: frame 0 hitam membuat Telegram menampilkan preview hitam
+    polos, karena ia mengabaikan cover kita dan memakai frame pertama video."""
+    seg = str(tmp_path / "seg0.mp4")
+    ar.build_segment(sumber_terang, 2.0, seg, keep_audio=False, fade_in=False)
+    assert _yavg_frame_pertama(seg) > 60, "frame pertama tidak boleh gelap"
+
+
+def test_kontrol_positif_fade_masuk_memang_menggelapkan(sumber_terang, tmp_path):
+    """Kontrol positif untuk test di atas: dengan fade masuk, alat ukur yang sama
+    HARUS melihat frame 0 gelap. Tanpa ini, 'terang' bisa saja berarti
+    pengukurannya yang tidak bekerja."""
+    seg = str(tmp_path / "seg_fade.mp4")
+    ar.build_segment(sumber_terang, 2.0, seg, keep_audio=False, fade_in=True)
+    assert _yavg_frame_pertama(seg) < 30, "kontrol positif gagal: alat ukur tidak mendeteksi fade"
