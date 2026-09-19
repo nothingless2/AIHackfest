@@ -874,12 +874,23 @@ def build_drawtext_chain(scenes, video_height, video_width=None):
                     fs, y, gaya, f"between(t,{aktif_dari},{aktif_sampai})",
                 ))
         else:
-            # Fade masuk 0,25 detik; dijepit ke 1 supaya tetap penuh setelahnya.
-            alpha = f"min(1,(t-{start})/0.25)"
-            filters.append(_drawtext(
-                escape_drawtext(wrap_text(text, fs, W, max_lines=SUBTITLE_MAX_LINES)),
-                fs, y, gaya, f"between(t,{start},{end})", alpha=alpha,
-            ))
+            # Teks TANPA timestamp kata (teks on-screen tulisan LLM). Dipecah jadi
+            # beberapa tampilan yang masing-masing muat, waktunya dibagi menurut
+            # jumlah kata -- BUKAN dipangkas dengan "...". Versi lama memakai
+            # wrap_text langsung, sehingga "Ratusan orang berkumpul, diskusi aktif"
+            # tampil sebagai "Ratusan orang berkumpul,..." (terlihat di video nyata).
+            bagian = split_for_subtitle(text, fs, W, max_lines=SUBTITLE_MAX_LINES)
+            total_kata = sum(len(b.split()) for b in bagian) or 1
+            jalan, rentang = float(start), float(end) - float(start)
+            for b in bagian:
+                porsi = rentang * (len(b.split()) / total_kata)
+                # Fade masuk 0,25 detik; dijepit ke 1 supaya tetap penuh setelahnya.
+                alpha = f"min(1,(t-{jalan:.3f})/0.25)"
+                filters.append(_drawtext(
+                    escape_drawtext(wrap_text(b, fs, W, max_lines=SUBTITLE_MAX_LINES)),
+                    fs, y, gaya, f"between(t,{jalan:.3f},{jalan + porsi:.3f})", alpha=alpha,
+                ))
+                jalan += porsi
     return filters
 
 

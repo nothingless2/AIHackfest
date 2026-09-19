@@ -214,3 +214,15 @@ dari staging -> restart gateway, dengan verifikasi manifest & build di tiap lang
 
 ### Backlog
 - Seleksi visual (klip buram/gelap) — sekarang seleksi hanya dari transkrip.
+
+- **Video B-roll food court gagal (19 Sep, 20:27 WIB) — dua bug berbeda.** Klip berisi keramaian tanpa
+  ucapan. (1) Whisper menghalusinasi "You" / "Thank you for watching!" / "." pada audio tanpa ucapan
+  (no_speech_prob 0,81-0,89; aturan bawaan Whisper `no_speech>0,6 DAN logprob<-1,0` tidak menangkapnya
+  karena logprob -0,88/-0,95). "." lolos sebagai transkrip, prompt menyebutnya "sumber kebenaran UTAMA",
+  model brief menolak -> "jawaban bukan JSON". Sekarang `saring_ucapan()` membuang segmen tanpa huruf atau
+  dengan no_speech_prob > 0,6. (2) Tanpa ucapan, sistem mengganti suara asli dengan voice-over AI "supaya
+  tidak sunyi" padahal audionya keramaian -15 dB. Sekarang bahan yang BERSUARA tetap memakai suara asli;
+  hanya yang benar-benar hening yang jatuh ke suara AI. Juga: teks on-screen tanpa timestamp dipecah, bukan
+  dipangkas "..."; prompt diberi durasi nyata tiap klip supaya scene menempel di klipnya; caption memberi
+  tahu bahwa teks dibuat dari tampilan saja. Deskripsi tool plugin ditulis ulang (dulu menyebut
+  "voice-over AI" dan tidak menyebut apa yang tidak ada, sehingga bot menjanjikan koreksi warna dsb).

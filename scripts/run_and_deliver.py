@@ -76,6 +76,15 @@ def deliver_plugin(run_id, chat_id):
         bagian += ["", f"Deskripsi: {deskripsi}"]
     if hashtags:
         bagian += ["", hashtags]
+    alasan_sub = (brief.get("transcript_coverage") or {}).get("alasan") or {}
+    if alasan_sub and all(k == "tanpa_ucapan" for k in alasan_sub.values()) \
+            and brief.get("audio_mode") == "original":
+        # Jujur soal batasnya: tanpa ucapan, judul dan teks hanya bisa ditebak dari
+        # gambar. Lebih baik user tahu sebelum mempublikasikan.
+        bagian += ["", "ℹ️ Bahan tidak berisi ucapan (hanya suara suasana), jadi judul dan teks "
+                       "dibuat dari TAMPILAN saja dan bisa meleset dari maksudmu. Beri tahu "
+                       "konteks acaranya kalau mau saya sesuaikan."]
+
     if brief.get("edit_summary"):
         # Angkanya dihitung KODE dari rencana yang diverifikasi; hanya alasan
         # per potongan yang berasal dari LLM.

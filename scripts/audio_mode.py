@@ -32,6 +32,38 @@ import os
 ALASAN_PASTI_TANPA_UCAPAN = {"tanpa_audio", "tanpa_ucapan"}
 
 
+# Rata-rata volume (dB) di atas ini = ADA SUARA (keramaian, musik, mesin), bukan hening.
+# Diukur: klip suasana food court -15 dB dan -27 dB; ruangan sepi ~ -50 dB ke bawah.
+AMBANG_ADA_SUARA_DB = float(os.getenv("AUDIO_ADA_SUARA_DB", "-45"))
+
+
+def bahan_punya_suara(paths):
+    """True kalau ada bahan VIDEO yang terdengar (rata-rata volume di atas ambang).
+
+    Hanya video dengan trek audio yang bisa terdengar; gambar tidak pernah.
+    Return None kalau tidak ada satu pun bahan video (tidak ada yang bisa diukur),
+    supaya pemanggil membedakan "hening" (False) dari "tidak bisa diukur" (None).
+    """
+    import re
+    import subprocess
+
+    ada_video, terdengar = False, False
+    for p in paths:
+        if os.path.splitext(p)[1].lower() not in (".mp4", ".mov", ".mkv", ".avi", ".webm"):
+            continue
+        ada_video = True
+        try:
+            o = subprocess.run(["ffmpeg", "-hide_banner", "-i", p, "-af", "volumedetect",
+                                "-vn", "-f", "null", "-"], capture_output=True, text=True,
+                               timeout=60)
+        except (subprocess.SubprocessError, OSError):
+            continue
+        m = re.search(r"mean_volume:\s*(-?\d+(?:\.\d+)?) dB", o.stderr)
+        if m and float(m.group(1)) > AMBANG_ADA_SUARA_DB:
+            terdengar = True
+    return terdengar if ada_video else None
+
+
 class TranscriptionUnavailable(RuntimeError):
     """Suara asli diminta, tapi transkripsi gagal sehingga tidak diketahui apakah
     ada ucapan. Pesannya ditulis untuk DIBACA USER (ikut tampil di chat)."""
@@ -69,7 +101,7 @@ def requested_mode():
     return diminta
 
 
-def resolve_audio_mode(diminta, transkrip, *, eksplisit=False, gagal=None):
+def resolve_audio_mode(diminta, transkrip, *, eksplisit=False, gagal=None, ada_suara=None):
     """Putuskan mode final. Return (mode, alasan).
 
     `transkrip` kosong berarti tidak ada ucapan yang terdeteksi di bahan.
@@ -98,6 +130,13 @@ def resolve_audio_mode(diminta, transkrip, *, eksplisit=False, gagal=None):
     if diminta == MODE_ORIGINAL:
         if ada_ucapan:
             return MODE_ORIGINAL, f"pakai suara asli video ({asal}); ada ucapan di bahan"
+        if ada_suara:
+            # Tidak ada ucapan, tapi bahan BERSUARA (keramaian, musik, suasana). Versi
+            # awal mengganti ini dengan voice-over AI "supaya tidak sunyi" -- padahal
+            # videonya tidak sunyi, dan default user adalah suara asli tanpa AI.
+            return MODE_ORIGINAL, (
+                f"suara asli ({asal}); tidak ada ucapan, tapi bahan memiliki suara "
+                "suasana/musik — dipertahankan tanpa subtitle dan tanpa voice-over AI")
         return MODE_AI, (
             f"suara asli ({asal}), TAPI tidak ada ucapan yang terdeteksi di bahan — "
             "memakai voice-over AI supaya videonya tidak sunyi"

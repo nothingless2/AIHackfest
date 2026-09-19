@@ -8,11 +8,11 @@ import json
 import os
 import sys
 
-from audio_mode import mode_eksplisit, requested_mode, resolve_audio_mode
+from audio_mode import bahan_punya_suara, mode_eksplisit, requested_mode, resolve_audio_mode
 from duration import duration_text, requested_duration
 from edit_plan import buat_rencana, ringkas as ringkas_edit
 from spoken import SPOKEN_REWRITE, prompt_rule
-from transcribe import transcribe_assets_report
+from transcribe import media_duration, transcribe_assets_report
 from vision import build_image_parts
 
 from common import (
@@ -154,8 +154,12 @@ def build_transcript_note(transkrip):
     sebenarnya seluruhnya ada di ucapan.
     """
     if not transkrip:
-        return ("TIDAK ADA transkrip (bahan berupa gambar, tanpa audio, atau transkripsi "
-                "gagal). Bertumpu pada gambar saja.")
+        return ("TIDAK ADA ucapan di bahan (gambar, video tanpa suara, atau hanya suara "
+                "suasana/musik). Bertumpu pada apa yang TERLIHAT di gambar saja. JANGAN "
+                "mengarang dialog atau klaim yang seolah-olah diucapkan siapa pun. JANGAN "
+                "menyebut jenis acara, tujuan, nama, atau jumlah orang yang tidak bisa "
+                "dipastikan dari gambar -- kalau ragu, pakai kata netral (mis. 'suasana ramai', "
+                "'orang-orang berkumpul') dan biarkan user yang menambahkan konteksnya.")
     baris = [f'- "{teks}"' for teks in transkrip.values()]
     return (
         "UCAPAN ASLI user di dalam video (hasil transkripsi, BUKAN tebakan):\n"
@@ -167,8 +171,29 @@ def build_transcript_note(transkrip):
     )
 
 
+def build_durasi_note(durasi_bahan):
+    """Durasi NYATA tiap bahan, supaya scene mengikuti batas antar klip.
+
+    Tanpa ini model menulis waktu scene sesuka hati (0-5, 5-10, ...) dan teks satu
+    klip terus tampil di klip berikutnya -- terlihat di video nyata: "Persiapan
+    materi edukasi" masih tampil pada detik 5 padahal klip pertama selesai di 3,6.
+    Angkanya diukur kode (ffprobe), bukan dikarang.
+    """
+    if not durasi_bahan:
+        return ""
+    total = sum(durasi_bahan)
+    daftar = ", ".join(f"bahan {i} = {d:.1f} dtk" for i, d in enumerate(durasi_bahan, 1))
+    return (
+        f"DURASI NYATA TIAP BAHAN (urutan sama dengan gambar): {daftar}; total {total:.1f} dtk.\n"
+        f"Video akhir berdurasi sekitar {total:.0f} dtk dan SUARA ASLI dipertahankan, jadi "
+        "'full_voice_over' TIDAK dibacakan (hanya draf caption; tidak perlu 20-35 detik). "
+        "Buat 'scenes' yang mengikuti batas antar bahan: satu scene per bahan, dengan "
+        "start/end sesuai durasi di atas, dan scene terakhir berakhir <= total."
+    )
+
+
 def build_prompt(asset_names, performance, *, jumlah_gambar, pool=None, konteks="",
-                 transkrip=None, target_duration=None):
+                 transkrip=None, target_duration=None, durasi_bahan=None):
     # Durasi & aturan lafal disuntikkan, bukan hardcode: tanpa permintaan user,
     # duration_text() mengembalikan kalimat lama kata per kata sehingga brief
     # untuk run yang tidak meminta durasi tidak berubah sama sekali.
@@ -181,6 +206,7 @@ def build_prompt(asset_names, performance, *, jumlah_gambar, pool=None, konteks=
     performance_note = build_performance_note(performance)
     trend_note, _ = build_trend_note(pool)
     transcript_note = build_transcript_note(transkrip)
+    klip_note = build_durasi_note(durasi_bahan)
     konteks_note = (
         f'PERMINTAAN USER (apa adanya): "{konteks}"\n'
         "Ini yang user benar-benar inginkan. Judul, sudut, dan naskah WAJIB melayani\n"
@@ -218,6 +244,8 @@ BATAS PENGETAHUANMU (penting, jangan dilanggar):
 {konteks_note}
 
 {transcript_note}
+
+{klip_note}
 
 Data performa konten sebelumnya:
 {performance_note}
@@ -304,8 +332,10 @@ def run():
 
     # Mode audio diputuskan DI SINI karena di sinilah kita tahu apakah bahan
     # benar-benar berisi ucapan: transkrip yang tidak kosong adalah buktinya.
+    ada_suara = None if transkrip else bahan_punya_suara(asset_paths)
     mode_audio, alasan_audio = resolve_audio_mode(
-        requested_mode(), transkrip, eksplisit=mode_eksplisit(), gagal=gagal_transkrip)
+        requested_mode(), transkrip, eksplisit=mode_eksplisit(), gagal=gagal_transkrip,
+        ada_suara=ada_suara)
     print(f"[info] mode audio: {mode_audio} — {alasan_audio}")
 
     pool = read_json(TREND_POOL_PATH, {}) or {}
@@ -317,9 +347,13 @@ def run():
         print(f"[info] durasi diminta: {target_durasi} detik"
               + (f" ({pesan_durasi})" if pesan_durasi else ""))
 
+    durasi_bahan = None
+    if mode_audio == "original":
+        durasi_bahan = [d for d in (media_duration(p) for p in asset_paths) if d and d > 0]
     prompt_text = build_prompt(
         asset_names, performance, jumlah_gambar=len(image_parts), pool=pool,
         konteks=konteks, transkrip=transkrip, target_duration=target_durasi,
+        durasi_bahan=durasi_bahan,
     )
     result = chat_json(
         [{"role": "user",

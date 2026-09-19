@@ -414,12 +414,30 @@ export default defineToolPlugin({
       name: "content_factory_run",
       label: "Content Factory Run",
       description:
-        "Gabungkan/susun beberapa gambar dan/atau video mentah (foto produk, klip, slideshow) " +
-        "yang diupload user pada pesan chat ini menjadi SATU draft konten sosial media 9:16 " +
-        "lengkap dengan voice-over AI, lalu kirim draft itu balik ke chat untuk approval. " +
-        "Pakai tool ini ketika user minta bahan-bahan mereka disusun jadi konten. Ini BEDA dari " +
-        "video_generate yang membuat video baru hasil sintesis AI — tool ini menyusun ulang " +
-        "bahan mentah milik user apa adanya.",
+        "Edit gambar dan/atau video mentah yang diupload user pada pesan chat ini menjadi SATU " +
+        "draft konten sosial media (9:16 bawaan; juga 1:1 dan 16:9), lalu kirim draft itu balik " +
+        "ke chat untuk approval. Pakai ketika user minta bahan mereka diedit atau disusun jadi " +
+        "konten Reels/TikTok/Shorts. Ini BEDA dari video_generate yang membuat video sintesis AI — " +
+        "tool ini mengolah bahan milik user.\n\n" +
+        "YANG BENAR-BENAR DIKERJAKAN pipeline ini:\n" +
+        "- Suara ASLI video dipertahankan (bawaan). Voice-over AI hanya kalau user memintanya " +
+        "(audioMode='ai').\n" +
+        "- Ucapan ditranskrip di mesin ini lalu jadi subtitle karaoke (frasa diam, kata yang " +
+        "sedang diucapkan menyala kuning). Bahan tanpa ucapan tidak dapat subtitle.\n" +
+        "- Jeda diam dipotong. Untuk video berucapan, editor AI memilih dan mengurutkan potongan " +
+        "ucapan terbaik dan membuang take ulang serta bagian tidak jelas (editMode='full' memakai " +
+        "semua bahan).\n" +
+        "- Transisi: hard cut di dalam satu klip, fade hanya di pergantian topik.\n" +
+        "- Musik latar hanya kalau pemilik sistem sudah menaruh berkas musik; levelnya mengikuti " +
+        "kenyaringan video dan otomatis mengecil saat ada yang bicara.\n" +
+        "- Rasio, durasi 10-60 detik, gaya subtitle, dan cover JPG.\n\n" +
+        "YANG TIDAK ADA — JANGAN dijanjikan ke user: koreksi warna/color grading, stabilisasi, " +
+        "efek atau filter, stiker, pemilihan thumbnail 'frame paling tajam', musik tanpa " +
+        "ducking, memilih lagu tren, dubbing bahasa lain, upload otomatis ke platform.\n\n" +
+        "Pipeline sendiri mengirim laporan hasilnya (video, cover, dan catatan) ke chat. Cukup " +
+        "konfirmasi singkat apa yang diminta user dan bahwa hasil dikirim otomatis; jangan " +
+        "merinci pengaturan yang tidak ada di daftar di atas dan jangan menebak hasilnya " +
+        "sebelum terkirim.",
       parameters: runParams,
       optional: true,
       factory({ api, toolContext }) {

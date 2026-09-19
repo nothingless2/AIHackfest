@@ -457,7 +457,11 @@ def parse_json_lenient(teks):
     awal, akhir = mentah.find("{"), mentah.rfind("}")
     if awal != -1 and akhir > awal:
         return _j.loads(mentah[awal:akhir + 1])
-    raise _j.JSONDecodeError("jawaban bukan JSON", mentah, 0)
+    # Sertakan cuplikan jawabannya: pesan lama ("line 1 column 1 (char 0)") tidak
+    # memberi tahu apa-apa, padahal jawabannya ternyata PENOLAKAN model yang
+    # menjelaskan persis apa yang kurang ("there is no audio transcription...").
+    cuplikan = " ".join(mentah.split())[:180] or "(kosong)"
+    raise _j.JSONDecodeError(f"jawaban model bukan JSON — isinya: {cuplikan!r}", mentah, 0)
 
 
 def chat_json(messages, *, model, label="panggilan LLM", max_attempts=None, timeout=None):

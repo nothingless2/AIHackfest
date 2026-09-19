@@ -182,9 +182,15 @@ def test_transkrip_jadi_sumber_kebenaran_utama():
 
 
 def test_tanpa_transkrip_dinyatakan_jelas():
+    """Yang dijaga: dinyatakan terang-terangan, bertumpu pada yang TERLIHAT, dan
+    melarang mengarang dialog. (Kata "transkripsi gagal" sengaja dihapus dari
+    daftar penyebab: kegagalan sekarang menghentikan run, jadi sampai di sini
+    berarti Whisper BERJALAN dan memang tidak menemukan ucapan.)"""
     note = brief.build_transcript_note({})
-    assert "TIDAK ADA transkrip" in note
-    assert "Bertumpu pada gambar saja" in note
+    assert "TIDAK ADA ucapan" in note
+    assert "TERLIHAT" in note
+    assert "mengarang dialog" in note
+    assert "gagal" not in note.lower()
 
 
 def test_prompt_memuat_transkrip():

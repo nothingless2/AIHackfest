@@ -241,3 +241,83 @@ def test_kotak_hitam_benar_benar_membungkus_teks(latar, tmp_path):
     yk, xk = np.where(gelap & (np.arange(H)[:, None] > 1300))
     assert xk.min() < xs.min() - 10 and xk.max() > xs.max() + 10
     assert yk.min() < ys.min() - 5 and yk.max() > ys.max() + 5
+
+
+# ---------- teks on-screen TANPA timestamp: dipecah, tidak dipangkas ----------
+
+def test_teks_tanpa_timestamp_tidak_dipangkas_dengan_titik_tiga():
+    """Terlihat di video nyata: 'Ratusan orang berkumpul, diskusi aktif' tampil
+    sebagai 'Ratusan orang berkumpul,...' karena jalur ini memakai wrap_text langsung."""
+    teks = "Ratusan orang berkumpul, diskusi aktif"
+    f = ar.build_drawtext_chain([{"start": 10, "end": 15, "text": teks}], H, W)
+    assert f, "harus ada filter"
+    assert not any("..." in x for x in f), "tidak boleh ada teks yang dipangkas"
+    tampil = " ".join(x.split("text='")[1].split("':")[0] for x in f).replace("\n", " ")
+    assert all(k in tampil for k in teks.replace(",", "").split()), f"kata hilang: {tampil!r}"
+
+
+def test_pecahan_teks_membagi_waktu_dan_berurutan_tanpa_tumpang_tindih():
+    f = ar.build_drawtext_chain(
+        [{"start": 10.0, "end": 15.0, "text": "Ratusan orang berkumpul, diskusi aktif sekali"}], H, W)
+    import re
+    rentang = [tuple(map(float, re.search(r"between\(t,([\d.]+),([\d.]+)\)", x).groups())) for x in f]
+    assert len(rentang) >= 2
+    assert rentang[0][0] == pytest.approx(10.0) and rentang[-1][1] == pytest.approx(15.0, abs=0.01)
+    for (a1, b1), (a2, b2) in zip(rentang, rentang[1:]):
+        assert b1 == pytest.approx(a2, abs=0.01), "pecahan harus bersambung tanpa celah/tumpang tindih"
+
+
+def test_teks_pendek_tetap_satu_tampilan():
+    f = ar.build_drawtext_chain([{"start": 0, "end": 3, "text": "Halo dunia"}], H, W)
+    assert len(f) == 1
+
+
+# ---------- prompt brief: durasi klip nyata ----------
+
+def test_durasi_bahan_ikut_ke_prompt_sebagai_fakta_terukur():
+    import agent1_2_brief as brief
+    p = brief.build_prompt(["a.mp4", "b.mp4", "c.mp4"], {}, jumlah_gambar=3,
+                           transkrip={}, durasi_bahan=[3.6, 6.4, 5.5])
+    assert "bahan 1 = 3.6 dtk" in p and "bahan 3 = 5.5 dtk" in p and "total 15.5 dtk" in p
+    assert "TIDAK dibacakan" in p, "mode suara asli: naskah bukan untuk dibacakan"
+
+
+def test_tanpa_durasi_bahan_prompt_lama_tidak_berubah():
+    import agent1_2_brief as brief
+    p = brief.build_prompt(["a.mp4"], {}, jumlah_gambar=1)
+    assert "DURASI NYATA" not in p
+    assert "natural saat dibacakan, 20-35 detik (kira-kira 55-95 kata)," in p
+
+
+def test_kalimat_naskah_tidak_rusak_saat_ada_durasi_bahan():
+    """Regresi dari kesalahan saya sendiri: variabel durasi_note sempat tertimpa
+    catatan klip sehingga kalimat '...natural saat dibacakan, {durasi}' jadi kacau."""
+    import agent1_2_brief as brief
+    p = brief.build_prompt(["a.mp4"], {}, jumlah_gambar=1, durasi_bahan=[5.0])
+    assert "natural saat dibacakan, 20-35 detik (kira-kira 55-95 kata)," in p
+
+
+def test_prompt_tanpa_ucapan_melarang_menebak_jenis_acara():
+    import agent1_2_brief as brief
+    note = brief.build_transcript_note({})
+    assert "jenis acara" in note and "kata netral" in note
+
+
+# ---------- caption jujur soal batas ----------
+
+def test_caption_mengingatkan_teks_dibuat_dari_tampilan_saja(monkeypatch, tmp_path):
+    import run_and_deliver as rd
+    brief = {"judul": "Uji", "hashtags": [], "audio_mode": "original",
+             "transcript_coverage": {"ditranskrip": 0, "total_bahan": 3,
+                                     "tanpa_subtitle": ["a", "b", "c"],
+                                     "alasan": {"a": "tanpa_ucapan", "b": "tanpa_ucapan", "c": "tanpa_ucapan"}}}
+    terkirim = {}
+    monkeypatch.setattr(rd, "read_json", lambda *a, **k: brief)
+    monkeypatch.setattr(rd, "ringkasan_biaya", lambda run_id: "")
+    monkeypatch.setattr(rd, "log_event", lambda *a, **k: None)
+    monkeypatch.setattr(rd, "draft_video_path_for_run", lambda r: str(tmp_path / "v.mp4"))
+    monkeypatch.setattr(rd, "draft_thumb_path_for_run", lambda r: str(tmp_path / "v.jpg"))
+    monkeypatch.setattr(rd, "send_video",
+                        lambda c, p, *, chat_id, thumb_path=None: terkirim.setdefault("caption", c) or True)
+    rd.deliver_plugin("run1", "123")
+    assert "TAMPILAN saja" in terkirim["caption"]

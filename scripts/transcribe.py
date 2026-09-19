@@ -282,6 +282,50 @@ ALASAN_TEKS = {
 }
 
 
+# Segmen dengan no_speech_prob di atas ini dianggap BUKAN ucapan. Ucapan asli hampir
+# selalu di bawah 0,1. Diukur pada klip suasana food court nyata (19 Sep): Whisper
+# menulis "You" (0,89), "Thank you for watching!" (0,81) dan "." untuk audio
+# keramaian tanpa satu pun orang bicara -- halusinasi Whisper yang terkenal.
+# CATATAN: aturan bawaan Whisper (no_speech > 0,6 DAN avg_logprob < -1,0) TIDAK
+# menangkapnya, karena logprob-nya -0,88 dan -0,95. Karena itu no_speech dipakai sendiri.
+NO_SPEECH_MAX = float(os.getenv("TRANSCRIBE_NO_SPEECH_MAX", "0.6"))
+
+
+def _ada_huruf(teks):
+    return any(c.isalnum() for c in (teks or ""))
+
+
+def saring_ucapan(data):
+    """Buang segmen yang jelas bukan ucapan; hitung ulang teks dan kata.
+
+    Dibuang: segmen tanpa satu pun huruf/angka (mis. "."), dan segmen dengan
+    no_speech_prob > NO_SPEECH_MAX. Metrik yang tidak tersedia TIDAK dianggap
+    mencurigakan -- tanpa data kita tidak menuduh apa pun.
+
+    Sebelum ini, "." dari Whisper lolos sebagai transkrip, prompt menyebutnya
+    "sumber kebenaran UTAMA", dan model brief menolak mengerjakannya.
+    """
+    segmen = data.get("segments") or []
+    if not segmen:
+        teks = (data.get("text") or "").strip()
+        return data if _ada_huruf(teks) else {**data, "text": ""}
+
+    simpan, buang = [], []
+    for s in segmen:
+        mencurigakan = (
+            not _ada_huruf(s.get("text"))
+            or (s.get("no_speech_prob") is not None and s["no_speech_prob"] > NO_SPEECH_MAX)
+        )
+        (buang if mencurigakan else simpan).append(s)
+    if not buang:
+        return data
+
+    kata = [w for w in (data.get("words") or [])
+            if not any(b["start"] - 0.05 <= w["start"] and w["end"] <= b["end"] + 0.05 for b in buang)]
+    return {**data, "segments": simpan, "words": kata,
+            "text": " ".join(s["text"] for s in simpan).strip()}
+
+
 def local_available():
     """Worker dan python venv-nya ada? (Belum membuktikan paketnya bisa diimpor --
     itu ketahuan saat worker dijalankan, dan auto akan jatuh ke API.)"""
@@ -465,7 +509,12 @@ def transcribe_assets_report(paths, *, max_assets=None, konteks=""):
     def terima(path, data, *, lokal):
         """Catat satu hasil. Return True kalau ada ucapan."""
         nama = os.path.basename(path)
+        mentah = (data.get("text") or "").strip()
+        data = saring_ucapan(data)
         teks = (data.get("text") or "").strip()
+        if mentah and not teks:
+            print(f"[info] transcribe: {nama} hanya berisi {mentah[:40]!r} — halusinasi pada "
+                  "audio tanpa ucapan, dianggap tidak ada ucapan.")
         if not teks:
             gagal[nama] = "tanpa_ucapan"
             return False
