@@ -33,6 +33,10 @@ from duration import (  # noqa: E402
     DURATION_TOLERANCE, off_target, word_target,
 )
 from retry import with_retry_async  # noqa: E402
+from music import (  # noqa: E402
+    MusicError, auto_volume, build_filter as music_filter, has_audio_stream,
+    music_wanted, pick_track, requested_mood,
+)
 from spoken import prompt_rule, spoken_text  # noqa: E402
 from thumbnail import (  # noqa: E402
     THUMBNAIL_ENABLED, extract_thumbnail, thumbnail_time,
@@ -846,6 +850,30 @@ def perbaiki_durasi(data, aktual, target):
         return None
 
 
+
+def tambah_musik(video_path, track, out_path, durasi):
+    """Campur musik latar ke audio video, dengan ducking otomatis.
+
+    Musik di-loop kalau lebih pendek dari video, dan `-shortest` memastikan
+    hasilnya tidak ikut memanjang mengikuti musik.
+    `-c:v copy`: videonya tidak disentuh sama sekali, jadi tahap ini tidak
+    menambah kerugian kualitas dan waktunya hanya beberapa detik.
+    """
+    punya = has_audio_stream(video_path)
+    # Volume diukur dari loudness video ini, bukan angka tetap: gain tetap
+    # membuat musik tenggelam di rekaman keras dan terlalu maju di rekaman pelan.
+    vol = auto_volume(video_path, track) if punya else None
+    run_ffmpeg(
+        ["-i", video_path, "-stream_loop", "-1", "-i", track,
+         "-filter_complex", music_filter(durasi, punya_ucapan=punya, volume=vol),
+         "-map", "0:v", "-map", "[aout]",
+         "-c:v", "copy", "-c:a", "aac", "-ar", AUDIO_RATE, "-ac", AUDIO_CHANNELS,
+         "-shortest", out_path],
+        "musik latar",
+    )
+    return out_path
+
+
 def render_from_agent_script(
     json_path="workspace/drafts/script.json",
     image_path="",
@@ -976,6 +1004,33 @@ def render_from_agent_script(
         print("🚀 Menggabungkan voice-over...")
         mux_audio(with_text, temp_audio, output_video)
 
+    # Musik ditambahkan SETELAH audio final terbentuk (mode apa pun), dan
+    # SEBELUM cover diambil supaya artefaknya berasal dari berkas yang sama
+    # dengan yang dikirim ke user.
+    musik_dipakai = None
+    if music_wanted():
+        try:
+            track = pick_track(requested_mood(),
+                               run_id=os.getenv("CONTENT_FACTORY_RUN_ID") or "")
+        except MusicError as e:
+            print(f"[warn] {e} — video dibuat TANPA musik.")
+            track = None
+        if track:
+            sementara = os.path.join(output_dir, "_with_music.mp4")
+            try:
+                tambah_musik(output_video, track, sementara, total_duration)
+                os.replace(sementara, output_video)
+                musik_dipakai = os.path.basename(track)
+                print(f"🎵 Musik latar: {musik_dipakai} "
+                  f"(level menyesuaikan suara video + auto-ducking)")
+            except Exception as e:
+                # Musik itu hiasan: video yang sudah jadi jauh lebih berharga.
+                print(f"[warn] gagal menambahkan musik ({e}); video tetap dipakai tanpa musik.")
+                if os.path.exists(sementara):
+                    os.remove(sementara)
+        else:
+            print("[info] belum ada track di assets/music/ — video dibuat tanpa musik.")
+
     # Cover diambil SETELAH mux dan SEBELUM cleanup: hanya `output_video` yang
     # sudah punya teks terbakar, rasio kanvas, dan encoding final. Mengambilnya
     # dari segmen atau bahan mentah akan menghasilkan gambar tanpa hook.
@@ -1001,6 +1056,7 @@ def render_from_agent_script(
         target_duration=target_duration,
         actual_duration=round(total_duration, 2),
         duration_adjusted=durasi_dikoreksi,
+        music=musik_dipakai,
         audio_mode=audio_mode,
         judul=data.get("judul"),
         scene_count=len(scenes),

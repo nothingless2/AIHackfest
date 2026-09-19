@@ -166,6 +166,27 @@ const runParams = Type.Object({
         "ke voice-over AI supaya videonya tidak sunyi.",
     }),
   ),
+  music: Type.Optional(
+    Type.Union(
+      [Type.Literal("on"), Type.Literal("off")],
+      {
+        description:
+          "Musik latar. 'off' kalau user minta tanpa musik. Musik hanya bisa " +
+          "dipakai kalau pemilik sistem sudah menaruh berkasnya di assets/music/ " +
+          "— kalau kosong, video tetap dibuat tanpa musik dan itu dilaporkan.",
+      },
+    ),
+  ),
+  musicMood: Type.Optional(
+    Type.String({
+      maxLength: 40,
+      description:
+        "Nuansa musik yang diminta user, mis. 'lofi', 'akustik', 'upbeat'. " +
+        "Dicocokkan dengan NAMA BERKAS di pustaka musik. Isi hanya kalau user " +
+        "menyebutkannya; kalau tidak ada yang cocok, permintaan DITOLAK dengan " +
+        "daftar yang tersedia, bukan diganti diam-diam dengan lagu lain.",
+    }),
+  ),
   durationSeconds: Type.Optional(
     Type.Integer({
       minimum: 10,
@@ -392,6 +413,8 @@ export default defineToolPlugin({
               aspectRatio?: string;
               fitMode?: string;
               durationSeconds?: number;
+              music?: string;
+              musicMood?: string;
             },
           ) {
             const fail = (text: string, details: Record<string, unknown>) => ({
@@ -412,7 +435,7 @@ export default defineToolPlugin({
 
             const {
               mediaPaths, userContext, audioMode, voicePersona, aspectRatio, fitMode,
-              durationSeconds,
+              durationSeconds, music, musicMood,
             } =
               params;
 
@@ -436,6 +459,8 @@ export default defineToolPlugin({
               aspectRatio: aspectRatio ?? null,
               fitMode: fitMode ?? null,
               durationSeconds: durationSeconds ?? null,
+              music: music ?? null,
+              musicMood: musicMood ?? null,
               // Path yang BENAR-BENAR dikirim model, plus hasil validasinya.
               // Tanpa ini, penolakan "file tidak ditemukan" tidak bisa didiagnosis
               // dari log sama sekali -- yang tercatat cuma jumlahnya.
@@ -528,6 +553,12 @@ export default defineToolPlugin({
             }
             if (aspectRatio) {
               pipelineEnv.VIDEO_ASPECT = aspectRatio;
+            }
+            if (music) {
+              pipelineEnv.CONTENT_FACTORY_MUSIC = music;
+            }
+            if (musicMood) {
+              pipelineEnv.CONTENT_FACTORY_MUSIC_MOOD = musicMood;
             }
             if (typeof durationSeconds === "number" && Number.isFinite(durationSeconds)) {
               // Dikirim apa adanya; penjepitan ke 10-60 dilakukan Python di titik

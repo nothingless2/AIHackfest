@@ -24,6 +24,7 @@ import sys
 
 from canvas import CanvasError, resolve_canvas
 from duration import requested_duration
+from music import MusicError, music_wanted, pick_track, requested_mood
 from common import (
     brief_path_for_run,
     chat_allowed,
@@ -129,6 +130,17 @@ def main():
     # Durasi dijepit DI SINI juga, bukan ditolak: permintaan di luar rentang
     # tetap dikerjakan pada batas terdekat, dan user diberi tahu nilai yang
     # benar-benar dipakai supaya hasilnya tidak terasa diam-diam diubah.
+    # Mood musik divalidasi di sini juga: minta "lofi" padahal pustaka hanya
+    # berisi "akustik" harus ketahuan SEKARANG, bukan setelah render selesai.
+    try:
+        if music_wanted():
+            pick_track(requested_mood(), run_id=run_id)
+    except MusicError as e:
+        print(f"[error] {e}")
+        log_event("run_rejected", run_id, chat_id=chat_id, reason="music_mood_invalid")
+        notify("pipeline", str(e), chat_id=chat_id)
+        return os.EX_CONFIG
+
     target_durasi, pesan_durasi = requested_duration()
     if pesan_durasi:
         print(f"[info] {pesan_durasi}")

@@ -14,6 +14,7 @@ import sys
 
 from canvas import CanvasError, resolve_canvas
 from duration import requested_duration
+from music import MusicError, music_wanted, pick_track, requested_mood
 from common import CLI_CHAT_ID, chat_allowed, ensure_dirs, log_error, notify
 from gateway_check import warn_if_gateway_polling
 from orchestrator import install_signal_handlers, run_core_stages_locked, run_stage
@@ -81,6 +82,16 @@ def main():
     except CanvasError as e:
         print(f"[error] {e}")
         log_event("run_rejected", run_id, chat_id=chat_id, reason="canvas_invalid")
+        return os.EX_CONFIG
+
+    # Mood musik divalidasi di sini juga: minta "lofi" padahal pustaka hanya
+    # berisi "akustik" harus ketahuan SEKARANG, bukan setelah render selesai.
+    try:
+        if music_wanted():
+            pick_track(requested_mood(), run_id=run_id)
+    except MusicError as e:
+        print(f"[error] {e}")
+        log_event("run_rejected", run_id, chat_id=chat_id, reason="music_mood_invalid")
         return os.EX_CONFIG
 
     # Sama seperti jalur plugin: di luar rentang dijepit, bukan ditolak.

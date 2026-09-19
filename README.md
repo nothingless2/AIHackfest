@@ -50,6 +50,9 @@ jatuh ke default):
 | `THUMBNAIL_ENABLED` | `1` | ambil cover JPG dari tengah scene pertama & lampirkan ke video Telegram |
 | `DURATION_MIN` / `DURATION_MAX` | `10` / `60` | rentang durasi yang boleh diminta user; di luar itu dijepit dan user diberi tahu |
 | `DURATION_TOLERANCE` | `0.20` | meleset lebih dari ini memicu SATU kali penulisan ulang naskah |
+| `MUSIC_ENABLED` | `1` | musik latar, kalau ada berkas di `assets/music/` (lihat README di folder itu) |
+| `MUSIC_BELOW_SPEECH_DB` | `10` | seberapa jauh musik di bawah ucapan; level dihitung dari loudness video, bukan gain tetap |
+| `MUSIC_DUCK_RATIO` / `MUSIC_DUCK_SIDECHAIN_GAIN` | `12` / `8` | kekuatan auto-ducking saat ada yang bicara |
 | `SPOKEN_REWRITE` | `1` | brief menulis `voice_over_spoken` (ejaan fonetis untuk TTS) terpisah dari `full_voice_over` (ejaan benar untuk subtitle/caption) |
 
 ## Cara menjalankan
