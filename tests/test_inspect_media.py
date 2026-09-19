@@ -87,7 +87,7 @@ def test_durasi_yang_sudah_disebut_tidak_ditanyakan_lagi():
     assert "platform_durasi" not in _kode(q)
 
 
-def test_maksimal_empat_pertanyaan():
+def test_maksimal_lima_pertanyaan():
     ringk = _ringk(n_video=5, n_berucap=5, n_tanpa_ucapan=0, n_suasana=0, n_horizontal=5)
     q = im.susun_pertanyaan(ringk, _tahu("edit"))
     assert 1 <= len(q) <= im.MAKS_PERTANYAAN
@@ -96,6 +96,98 @@ def test_maksimal_empat_pertanyaan():
 def test_setiap_pertanyaan_punya_default_dan_alasan():
     for p in im.susun_pertanyaan(_ringk(n_horizontal=3), _tahu("edit")):
         assert p["default"] and p["alasan"] and p["tanya"]
+
+
+# ---------- pilihan jawaban dibuat KODE (keluhan user: jangan suruh user menebak) ----------
+
+SEMUA_SKENARIO = [
+    (_ringk(n_horizontal=3), "edit untuk tiktok"),                                   # B-roll
+    (_ringk(n_berucap=5, n_tanpa_ucapan=0, n_suasana=0, n_video=5), "edit"),         # talking-head
+    (_ringk(n_tanpa_ucapan=0, n_tanpa_suara=3, n_suasana=0), "edit untuk reels"),    # bisu
+    (_ringk(n_video=0, n_gambar=4, n_tanpa_ucapan=0, n_suasana=0), "edit"),          # foto
+]
+
+
+def _semua_pertanyaan():
+    for ringk, konteks in SEMUA_SKENARIO:
+        yield from im.susun_pertanyaan(ringk, _tahu(konteks))
+
+
+def test_setiap_pertanyaan_punya_pilihan_bukan_isian_kosong():
+    for p in _semua_pertanyaan():
+        assert len(p["opsi"]) >= 2, f"{p['kode']}: user dipaksa menebak jawaban"
+        assert [o["huruf"] for o in p["opsi"]] == [chr(65 + i) for i in range(len(p["opsi"]))]
+        assert sum(o["rekomendasi"] for o in p["opsi"]) == 1, f"{p['kode']}: harus tepat satu bintang"
+
+
+def test_pemetaan_jawaban_hanya_merujuk_huruf_yang_ada():
+    for p in _semua_pertanyaan():
+        huruf = {o["huruf"] for o in p["opsi"]}
+        assert set(p.get("param", {})) <= huruf, f"{p['kode']}: pemetaan ke pilihan yang tidak ada"
+
+
+def test_pesan_memuat_semua_pilihan_dan_cara_menjawab():
+    q = im.susun_pertanyaan(_ringk(n_horizontal=3), _tahu("edit untuk tiktok"))
+    pesan = im.susun_pesan_pertanyaan(q)
+    for i, p in enumerate(q, 1):
+        assert f"{i}) " in pesan
+        for o in p["opsi"]:
+            assert f"{o['huruf']}. " in pesan and o["label"] in pesan
+    assert "terserah" in pesan and "★" in pesan and "contoh: 1A" in pesan
+
+
+def test_pesan_aman_untuk_telegram_tanpa_markdown():
+    """Telegram menolak/merusak pesan bila markdown-nya tidak seimbang; format sengaja teks biasa."""
+    for ringk, konteks in SEMUA_SKENARIO:
+        q = im.susun_pertanyaan(ringk, _tahu(konteks))
+        if q:
+            pesan = im.susun_pesan_pertanyaan(q)
+            assert not any(c in pesan for c in "*_`[]<>"), f"karakter markdown di pesan: {pesan!r}"
+
+
+def test_pilihan_bawaan_bintang_sama_dengan_default_yang_dijanjikan():
+    """'terserah' berarti pilihan bintang; harus sama dengan default yang dicatat kode."""
+    fit = [p for p in im.susun_pertanyaan(_ringk(n_horizontal=3), _tahu("tiktok")) if p["kode"] == "fit"][0]
+    bintang = [o for o in fit["opsi"] if o["rekomendasi"]][0]
+    assert bintang["huruf"] == "A" and "tengah" in fit["default"] and "tengah" in bintang["label"].lower()
+
+
+def test_teks_agent_melarang_ask_user_dan_memuat_pesan_siap_kirim(tmp_path):
+    """Insiden 19 Sep 22:34-23:05: ask_user menahan giliran, kedaluwarsa 15 menit, dan tiga
+    pertanyaan dalam satu ask_user tidak bisa dijawab dengan satu balasan bebas."""
+    paths, r = _inspeksi(tmp_path)
+    teks = r["teks"]
+    assert "JANGAN memakai ask_user" in teks and "15 menit" in teks
+    assert "<<<PESAN" in teks and "PESAN>>>" in teks and r["pesan"] in teks
+    assert "1A" in teks or "1*" in teks, "pemetaan jawaban -> parameter harus ada"
+
+
+def test_pemetaan_untuk_agent_memuat_parameter_run(tmp_path):
+    q = im.susun_pertanyaan(_ringk(n_horizontal=3), _tahu("edit untuk tiktok"))
+    peta = "\n".join(im.susun_pemetaan(q))
+    assert 'fitMode="blur"' in peta and "staticText=true" in peta
+    assert 'audioMode="original"' in peta and 'music="on"' in peta
+
+
+def test_teks_statis_sudah_disebut_tidak_ditanyakan_lagi():
+    q = im.susun_pertanyaan(_ringk(), _tahu("edit tiktok, teksnya statis saja sepanjang video"))
+    assert "teks_layar" not in _kode(q)
+
+
+def test_bahan_tanpa_ucapan_ditanya_gaya_teks_layar():
+    q = im.susun_pertanyaan(_ringk(), _tahu("edit untuk tiktok"))
+    assert "teks_layar" in _kode(q)
+
+
+def test_bahan_berucap_tidak_ditanya_teks_layar():
+    """Bahan berucap sudah punya subtitle; pertanyaan ini tidak relevan."""
+    q = im.susun_pertanyaan(_ringk(n_berucap=3, n_tanpa_ucapan=0, n_suasana=0), _tahu("edit"))
+    assert "teks_layar" not in _kode(q)
+
+
+def test_inspeksi_mengembalikan_pesan_siap_kirim(tmp_path):
+    paths, r = _inspeksi(tmp_path)
+    assert r["pesan"].startswith("Sebelum saya edit")
 
 
 def test_suasana_tanpa_ucapan_ditanya_audio():
@@ -234,11 +326,11 @@ def test_inspeksi_menyimpan_status_dan_mengembalikan_id(tmp_path):
     assert st["chat_id"] == "111" and st["pertanyaan"] == [p["kode"] for p in r["pertanyaan"]]
 
 
-def test_teks_memuat_id_path_persis_dan_perintah_berhenti(tmp_path):
+def test_teks_memuat_id_path_persis_dan_perintah_akhiri_giliran(tmp_path):
     paths, r = _inspeksi(tmp_path)
     assert r["inspect_id"] in r["teks"]
     assert json.dumps(paths, ensure_ascii=False) in r["teks"]
-    assert "BERHENTI" in r["teks"] and "JANGAN memanggil" in r["teks"]
+    assert "AKHIRI" in r["teks"] and "JANGAN memanggil content_factory_run" in r["teks"]
 
 
 def _vad_berucap(tmp_path, monkeypatch, detik=3.0):
@@ -417,3 +509,15 @@ def test_write_json_gagal_tidak_merusak_isi_lama(tmp_path):
         common.write_json(p, {"tidak_bisa": object()})
     assert json.load(open(p)) == {"lama": True}, "isi lama harus utuh"
     assert [n for n in os.listdir(tmp_path) if n.endswith(".tmp")] == []
+
+
+def test_jalur_darurat_tetap_berpilihan_dan_menghasilkan_pesan(tmp_path, monkeypatch):
+    """Justru saat pemeriksaan otomatis gagal, user tidak boleh dibiarkan menebak."""
+    monkeypatch.setattr(im, "kumpulkan_fakta", lambda p: (_ for _ in ()).throw(RuntimeError("ffprobe mati")))
+    paths = [_video(tmp_path / "v.mp4")]
+    r = im.inspeksi(paths, "edit", "111")
+    assert r["degraded"]
+    for p in r["pertanyaan"]:
+        assert len(p["opsi"]) >= 2 and sum(o["rekomendasi"] for o in p["opsi"]) == 1
+    assert "A. " in r["pesan"] and "★" in r["pesan"]
+    assert "JANGAN memakai ask_user" in r["teks"] and r["inspect_id"] in r["teks"]

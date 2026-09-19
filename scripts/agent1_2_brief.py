@@ -192,8 +192,18 @@ def build_durasi_note(durasi_bahan):
     )
 
 
+def build_teks_statis_note():
+    return (
+        "TEKS ON-SCREEN STATIS: user meminta SATU teks yang sama tampil sepanjang video. Buat "
+        "'scenes' berisi tepat SATU scene (start 0, end sama dengan total durasi) dengan teks "
+        "singkat (maksimal 8 kata) yang menggambarkan acara atau temanya, memakai nama tempat, "
+        "acara, atau brand PERSIS seperti tertulis di permintaan user. Jangan menambah klaim "
+        "yang tidak disebut user."
+    )
+
+
 def build_prompt(asset_names, performance, *, jumlah_gambar, pool=None, konteks="",
-                 transkrip=None, target_duration=None, durasi_bahan=None):
+                 transkrip=None, target_duration=None, durasi_bahan=None, teks_statis=False):
     # Durasi & aturan lafal disuntikkan, bukan hardcode: tanpa permintaan user,
     # duration_text() mengembalikan kalimat lama kata per kata sehingga brief
     # untuk run yang tidak meminta durasi tidak berubah sama sekali.
@@ -207,6 +217,8 @@ def build_prompt(asset_names, performance, *, jumlah_gambar, pool=None, konteks=
     trend_note, _ = build_trend_note(pool)
     transcript_note = build_transcript_note(transkrip)
     klip_note = build_durasi_note(durasi_bahan)
+    if teks_statis:
+        klip_note = (klip_note + "\n\n" if klip_note else "") + build_teks_statis_note()
     konteks_note = (
         f'PERMINTAAN USER (apa adanya): "{konteks}"\n'
         "Ini yang user benar-benar inginkan. Judul, sudut, dan naskah WAJIB melayani\n"
@@ -347,13 +359,14 @@ def run():
         print(f"[info] durasi diminta: {target_durasi} detik"
               + (f" ({pesan_durasi})" if pesan_durasi else ""))
 
+    teks_statis = (os.getenv("CONTENT_FACTORY_STATIC_TEXT") or "").strip().lower() in ("1", "true", "ya", "on")
     durasi_bahan = None
     if mode_audio == "original":
         durasi_bahan = [d for d in (media_duration(p) for p in asset_paths) if d and d > 0]
     prompt_text = build_prompt(
         asset_names, performance, jumlah_gambar=len(image_parts), pool=pool,
         konteks=konteks, transkrip=transkrip, target_duration=target_durasi,
-        durasi_bahan=durasi_bahan,
+        durasi_bahan=durasi_bahan, teks_statis=teks_statis,
     )
     result = chat_json(
         [{"role": "user",
@@ -416,6 +429,8 @@ def run():
     # dikoreksi setelah TTS. None = user tidak meminta durasi = tidak ada
     # pengecekan sama sekali (perilaku lama utuh).
     brief["target_duration"] = target_durasi
+    # User meminta satu teks statis sepanjang video: renderer menyeragamkan scene-nya.
+    brief["static_text"] = teks_statis
     brief["generated_at"] = now_iso()
 
     # --- Seleksi konten: pilih & urutkan potongan ucapan terbaik. Hanya untuk mode

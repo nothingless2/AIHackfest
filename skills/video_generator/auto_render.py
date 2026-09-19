@@ -879,7 +879,16 @@ def build_drawtext_chain(scenes, video_height, video_width=None):
             # jumlah kata -- BUKAN dipangkas dengan "...". Versi lama memakai
             # wrap_text langsung, sehingga "Ratusan orang berkumpul, diskusi aktif"
             # tampil sebagai "Ratusan orang berkumpul,..." (terlihat di video nyata).
-            bagian = split_for_subtitle(text, fs, W, max_lines=SUBTITLE_MAX_LINES)
+            fs_tampil = fs
+            if sc.get("statis"):
+                # Teks STATIS harus tetap SATU tampilan sepanjang video: font dikecilkan
+                # sampai muat, bukan dipecah jadi beberapa tampilan yang berganti.
+                fs_tampil = max(16, int(fs * 0.5))
+                for f2 in range(fs, int(fs * 0.5) - 1, -4):
+                    if len(split_for_subtitle(text, f2, W, max_lines=SUBTITLE_MAX_LINES)) <= 1:
+                        fs_tampil = f2
+                        break
+            bagian = split_for_subtitle(text, fs_tampil, W, max_lines=SUBTITLE_MAX_LINES)
             total_kata = sum(len(b.split()) for b in bagian) or 1
             jalan, rentang = float(start), float(end) - float(start)
             for b in bagian:
@@ -887,8 +896,8 @@ def build_drawtext_chain(scenes, video_height, video_width=None):
                 # Fade masuk 0,25 detik; dijepit ke 1 supaya tetap penuh setelahnya.
                 alpha = f"min(1,(t-{jalan:.3f})/0.25)"
                 filters.append(_drawtext(
-                    escape_drawtext(wrap_text(b, fs, W, max_lines=SUBTITLE_MAX_LINES)),
-                    fs, y, gaya, f"between(t,{jalan:.3f},{jalan + porsi:.3f})", alpha=alpha,
+                    escape_drawtext(wrap_text(b, fs_tampil, W, max_lines=SUBTITLE_MAX_LINES)),
+                    fs_tampil, y, gaya, f"between(t,{jalan:.3f},{jalan + porsi:.3f})", alpha=alpha,
                 ))
                 jalan += porsi
     return filters
@@ -1313,6 +1322,14 @@ def render_from_agent_script(
         existing_assets, durasi_klip = bagi_durasi(existing_assets, total_duration)
         per = durasi_klip[0] if durasi_klip else 0.0
         print(f"🖼️ Menyusun {len(existing_assets)} bahan mentah user ({per:.1f} detik per bahan)")
+
+    # Teks statis: SATU teks sepanjang video, hanya untuk teks tulisan (tanpa timestamp
+    # kata). Bahan berucapan tetap memakai subtitle -- teks statis bukan penggantinya.
+    if data.get("static_text") and not any(s.get("words") for s in scenes):
+        teks_statis = next((s.get("text") for s in scenes if s.get("text")), None) \
+            or data.get("judul") or ""
+        scenes = ([{"start": 0.0, "end": float(total_duration), "text": teks_statis,
+                    "statis": True}] if teks_statis else [])
 
     scenes = clamp_scenes(scenes, total_duration)
 

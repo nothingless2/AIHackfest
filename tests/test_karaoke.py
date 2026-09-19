@@ -321,3 +321,97 @@ def test_caption_mengingatkan_teks_dibuat_dari_tampilan_saja(monkeypatch, tmp_pa
                         lambda c, p, *, chat_id, thumb_path=None: terkirim.setdefault("caption", c) or True)
     rd.deliver_plugin("run1", "123")
     assert "TAMPILAN saja" in terkirim["caption"]
+
+
+# ---------- teks STATIS sepanjang video ----------
+
+def test_teks_statis_tetap_satu_tampilan_dengan_font_mengecil():
+    """Permintaan user: 'teksnya statis saja sepanjang video'. Teks panjang harus mengecil,
+    BUKAN dipecah jadi beberapa tampilan yang berganti."""
+    teks = "Aksi Merah Laksamana Muda — Donor Darah"
+    f = ar.build_drawtext_chain([{"start": 0, "end": 15.5, "text": teks, "statis": True}], H, W)
+    assert len(f) == 1
+    ukuran = int(f[0].split("fontsize=")[1].split(":")[0])
+    assert ukuran < ar.subtitle_geometry(W, H)[0], "font harus mengecil supaya muat"
+
+
+def test_kontrol_tanpa_statis_teks_yang_sama_berganti():
+    """Kontrol untuk tes di atas: tanpa penanda statis teks yang sama dipecah."""
+    f = ar.build_drawtext_chain(
+        [{"start": 0, "end": 15.5, "text": "Aksi Merah Laksamana Muda — Donor Darah"}], H, W)
+    assert len(f) == 2
+
+
+def test_teks_statis_pendek_memakai_ukuran_penuh():
+    f = ar.build_drawtext_chain([{"start": 0, "end": 5, "text": "Aksi Merah", "statis": True}], H, W)
+    assert int(f[0].split("fontsize=")[1].split(":")[0]) == ar.subtitle_geometry(W, H)[0]
+
+
+def test_teks_statis_tampil_sepanjang_durasi_video():
+    import re
+    f = ar.build_drawtext_chain([{"start": 0, "end": 15.5, "text": "Aksi Merah", "statis": True}], H, W)
+    a, b = map(float, re.search(r"between\(t,([\d.]+),([\d.]+)\)", f[0]).groups())
+    assert a == 0.0 and b == pytest.approx(15.5, abs=0.01)
+
+
+def test_prompt_teks_statis_meminta_satu_scene():
+    import agent1_2_brief as brief
+    p = brief.build_prompt(["a.mp4"], {}, jumlah_gambar=1, teks_statis=True)
+    assert "TEKS ON-SCREEN STATIS" in p and "SATU scene" in p and "PERSIS" in p
+
+
+def test_prompt_tanpa_teks_statis_tidak_berubah():
+    import agent1_2_brief as brief
+    assert "TEKS ON-SCREEN STATIS" not in brief.build_prompt(["a.mp4"], {}, jumlah_gambar=1)
+
+
+def _render_statis(tmp_path, monkeypatch, data_tambahan, scenes, words_per_klip=None):
+    import json as _j
+    monkeypatch.setattr(ar, "TARGET_W", 240)
+    monkeypatch.setattr(ar, "TARGET_H", 426)
+    monkeypatch.setattr(ar, "THUMBNAIL_ENABLED", False)
+    monkeypatch.setattr(ar, "TRIM_SILENCE", False)
+    monkeypatch.setenv("CONTENT_FACTORY_MUSIC", "off")
+    v = tmp_path / "a.mp4"
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i",
+                    "color=c=gray:size=240x426:rate=10:duration=4", "-f", "lavfi", "-i",
+                    "anoisesrc=d=4:c=pink:a=0.2", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", "-shortest", str(v)], check=True, capture_output=True)
+    diambil = {}
+    asli = ar.apply_text_overlay
+    ar.apply_text_overlay = lambda i, sc, o: (diambil.setdefault("scenes", sc), asli(i, sc, o))[1]
+    try:
+        data = {"judul": "Judul Uji", "audio_mode": "original", "full_voice_over": "x",
+                "media_assets": [str(v)], "scenes": scenes, **data_tambahan}
+        if words_per_klip:
+            data["transcript_words"] = {"a.mp4": words_per_klip}
+        s = tmp_path / "s.json"
+        s.write_text(_j.dumps(data), encoding="utf-8")
+        ar.render_from_agent_script(str(s), "", str(tmp_path / "h.mp4"))
+    finally:
+        ar.apply_text_overlay = asli
+    return diambil["scenes"]
+
+
+def test_render_teks_statis_menyeragamkan_scene_llm(tmp_path, monkeypatch):
+    scenes = _render_statis(tmp_path, monkeypatch, {"static_text": True},
+                            [{"start": 0, "end": 2, "text": "Donor Darah"},
+                             {"start": 2, "end": 4, "text": "Ramai"}])
+    assert len(scenes) == 1 and scenes[0]["text"] == "Donor Darah" and scenes[0]["statis"] is True
+    assert scenes[0]["start"] == 0.0 and scenes[0]["end"] == pytest.approx(4.0, abs=0.3)
+
+
+def test_render_tanpa_static_text_scene_tetap_berganti(tmp_path, monkeypatch):
+    scenes = _render_statis(tmp_path, monkeypatch, {},
+                            [{"start": 0, "end": 2, "text": "Donor Darah"},
+                             {"start": 2, "end": 4, "text": "Ramai"}])
+    assert len(scenes) == 2 and not any(s.get("statis") for s in scenes)
+
+
+def test_teks_statis_tidak_menggantikan_subtitle_bahan_berucap(tmp_path, monkeypatch):
+    """Bahan berucap tetap memakai subtitle kata-per-kata; teks statis bukan penggantinya."""
+    kata = [{"word": "halo", "start": 0.2, "end": 0.6}, {"word": "dunia", "start": 0.7, "end": 1.2}]
+    scenes = _render_statis(tmp_path, monkeypatch, {"static_text": True,
+                            "transcript_segments": {"a.mp4": [{"start": 0.2, "end": 1.2, "text": "halo dunia"}]}},
+                            [{"start": 0, "end": 4, "text": "Judul"}], words_per_klip=kata)
+    assert any(s.get("words") for s in scenes) and not any(s.get("statis") for s in scenes)

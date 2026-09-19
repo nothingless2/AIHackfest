@@ -246,3 +246,22 @@ dari staging -> restart gateway, dengan verifikasi manifest & build di tiap lang
 - Penolakan `inspect` kini dicatat di `plugin_calls.jsonl` (dulu hanya yang sukses, sehingga empat
   panggilan gagal tidak meninggalkan jejak apa pun).
 - `common.write_json` sekarang atomik (butir #8 rencana Fase 2).
+
+## 19 Sept 22:34-23:05 — uji nyata pertama "agent bertanya dulu" gagal; pelajaran
+
+- **`ask_user` bukan jalur yang cocok.** Log: `question.waitAnswer 899980ms` dua kali — ia menahan
+  giliran agent lalu kedaluwarsa TEPAT 15 menit (tidak bisa diatur di konfigurasi). User membalas
+  setelah 28 menit. Pertanyaan kedua berisi 3 pertanyaan sekaligus (penomoran opsinya diratakan
+  jadi 1-12) dan balasan bebas gagal berulang: `question 'fit_mode' requires an answer`. Lalu
+  `Agent run failed`. Kesimpulan saya sebelumnya ("pakai ask_user") keliru.
+- Rancangan sekarang: pesan biasa yang tidak memblokir. PILIHAN jawaban (huruf, bintang = default)
+  dan pemetaan jawaban -> parameter run dibuat KODE (`susun_pesan_pertanyaan`, `susun_pemetaan`),
+  bukan model. Agent mengirim pesan itu apa adanya lalu mengakhiri giliran; balasan kapan pun
+  dalam 24 jam menjadi giliran baru (kesegaran lampiran dinilai saat inspect).
+- **Kesalahan saya: uji CLI dengan `--channel telegram --to <chat user>` menempel ke sesi utama
+  user** (`agent:main:main`) dan mengganti sessionId-nya menjadi `uji-inspect-N`. Percakapan Telegram
+  user berjalan di atas riwayat berisi pesan ujiku. Dipulihkan dengan `sessions.reset`. JANGAN
+  menjalankan `openclaw agent` dengan `--channel/--to` milik user untuk uji; pakai `--session-id`
+  tanpa `--channel` (sesi `explicit:` terpisah).
+- Fitur baru dari jawaban user: teks STATIS sepanjang video (`staticText`). Teks panjang mengecil,
+  tidak dipecah.

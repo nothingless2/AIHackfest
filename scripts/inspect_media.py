@@ -45,7 +45,7 @@ INSPECT_TTL_HOURS = float(os.getenv("INSPECT_TTL_HOURS", "24"))
 # Gerbang di jalur `run`. "0" mematikannya (mis. untuk skrip/tes).
 REQUIRE_INSPECT = (os.getenv("CONTENT_FACTORY_REQUIRE_INSPECT") or "1").strip().lower() not in (
     "0", "false", "no", "off")
-MAKS_PERTANYAAN = 4
+MAKS_PERTANYAAN = 5
 VAD_TIMEOUT = 40
 
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
@@ -215,6 +215,7 @@ _RASIO = re.compile(r"\b(9\s*:\s*16|1\s*:\s*1|16\s*:\s*9)\b")
 _AUDIO = re.compile(r"(suara\s*ai|voice\s*-?\s*over|voiceover|narasi|dubbing|suara\s*asli|"
                     r"audio\s*asli|tanpa\s*suara|tanpa\s*voice)", re.I)
 _FIT = re.compile(r"\b(blur|buram|crop|potong tengah|letterbox|hitam|penuh layar|isi penuh)\b", re.I)
+_STATIS = re.compile(r"\b(statis|satu teks|teks tetap|tidak berubah|sepanjang video)\b", re.I)
 _MUSIK = re.compile(r"\b(musik|lagu|backsound|bgm|music|soundtrack)\b", re.I)
 _POTONG = re.compile(r"\b(buang|potong|pilih|semua|utuh|apa adanya|jangan dibuang|singkat|"
                      r"padat)\b", re.I)
@@ -230,6 +231,7 @@ def dari_konteks(konteks):
         "rasio": bool(_RASIO.search(k)),
         "rasio_nilai": (re.sub(r"\s", "", _RASIO.search(k).group(1)) if _RASIO.search(k) else None),
         "fit": bool(_FIT.search(k)),
+        "teks_statis": bool(_STATIS.search(k)),
         "durasi": parse_duration(k),
         "audio": bool(_AUDIO.search(k)),
         "musik": bool(_MUSIK.search(k)),
@@ -239,42 +241,75 @@ def dari_konteks(konteks):
 
 # --------------------------------------------------------------- pertanyaan
 
-def susun_pertanyaan(ringk, tahu):
-    """Pertanyaan yang benar-benar kurang, paling penting dulu, maksimal 4.
+def _opsi(*pasang, rekomendasi=0):
+    """Daftar pilihan bernomor huruf. `rekomendasi` = indeks pilihan bertanda bintang."""
+    return [{"huruf": chr(65 + i), "label": label, "rekomendasi": i == rekomendasi}
+            for i, label in enumerate(pasang)]
 
-    Setiap butir: {kode, tanya, default, alasan}. `alasan` menjelaskan KENAPA
-    ditanyakan (dari fakta terukur), supaya agent bisa menyampaikannya jujur.
+
+def susun_pertanyaan(ringk, tahu):
+    """Pertanyaan yang benar-benar kurang, paling penting dulu, maksimal MAKS_PERTANYAAN.
+
+    Setiap butir: {kode, tanya, opsi, default, alasan}. PILIHAN ditulis KODE, bukan
+    diserahkan ke model: user tidak boleh dibiarkan menebak jawaban apa yang diharapkan.
+    `alasan` menjelaskan KENAPA ditanyakan (dari fakta terukur).
     """
     q = []
     nv = ringk["n_video"]
     tanpa_ucapan_semua = nv > 0 and ringk["n_berucap"] == 0
     hanya_gambar = nv == 0 and ringk["n_gambar"] > 0
+    tanpa_ucapan = tanpa_ucapan_semua or hanya_gambar
 
-    if tanpa_ucapan_semua or hanya_gambar:
+    if tanpa_ucapan:
         q.append({
             "kode": "topik",
-            "tanya": ("Bahan ini tidak berisi ucapan, jadi saya tidak tahu ceritanya. Ini tentang "
-                      "apa dan untuk apa (mis. dokumentasi acara, promosi tempat, tips)? Sebutkan "
-                      "nama tempat, brand, atau acara yang harus tertulis persis."),
+            "tanya": "Video ini tentang apa dan untuk apa? (Bahan tidak berisi ucapan, jadi saya "
+                     "tidak tahu ceritanya.)",
+            "opsi": _opsi("Dokumentasi acara — tulis nama acaranya",
+                          "Promosi tempat atau brand — tulis namanya",
+                          "Tips atau edukasi — tulis topiknya",
+                          "Tanpa konteks — teks netral dari apa yang terlihat", rekomendasi=3),
+            "catatan": "Nama tempat, acara, atau brand akan ditulis persis seperti yang kamu ketik.",
+            "param": {},
             "default": "tanpa konteks, teks hanya menggambarkan apa yang terlihat, secara netral",
             "alasan": "tidak ada ucapan di bahan, judul dan teks hanya bisa ditebak dari gambar",
         })
     elif tahu["kata"] < 10:
         q.append({
             "kode": "tujuan",
-            "tanya": ("Tujuan videonya apa (promosi, edukasi, personal branding, lainnya), dan "
-                      "adakah ajakan/CTA di akhir? Ada nama, brand, atau istilah yang harus "
-                      "tertulis persis?"),
+            "tanya": "Tujuan videonya apa?",
+            "opsi": _opsi("Promosi produk atau jasa", "Edukasi atau tips", "Personal branding",
+                          "Serahkan ke saya, simpulkan dari ucapan", rekomendasi=3),
+            "catatan": "Kalau ada ajakan (CTA) di akhir, atau nama/brand/istilah yang harus tertulis "
+                       "persis, tulis juga.",
+            "param": {},
             "default": "disimpulkan dari ucapan; ejaan istilah mengikuti transkrip",
             "alasan": "permintaan singkat; ejaan nama dan istilah sering salah bila tidak diberi tahu",
+        })
+
+    if tanpa_ucapan and not tahu.get("teks_statis"):
+        q.append({
+            "kode": "teks_layar",
+            "tanya": "Teks di layar mau bagaimana? (Tanpa ucapan, tidak ada subtitle otomatis.)",
+            "opsi": _opsi("Berganti mengikuti tiap klip",
+                          "Satu teks statis sepanjang video", rekomendasi=0),
+            "catatan": "",
+            "param": {"B": {"staticText": True}},
+            "default": "teks berganti mengikuti tiap klip",
+            "alasan": "bahan tanpa ucapan: satu-satunya teks di layar adalah yang ditulis untuk video ini",
         })
 
     if not (tahu["platform"] or tahu["rasio"]) and tahu["durasi"] is None:
         total = min(ringk["total_detik"], 60) or None
         q.append({
             "kode": "platform_durasi",
-            "tanya": ("Untuk platform apa dan seberapa panjang? TikTok/Reels/Shorts (9:16), feed "
-                      "Instagram (1:1), atau YouTube (16:9); durasi 10-60 detik."),
+            "tanya": "Untuk platform apa?",
+            "opsi": _opsi("TikTok / Reels / Shorts (9:16), panjang mengikuti bahan"
+                          + (f" (±{total:.0f} dtk)" if total else ""),
+                          "Feed Instagram (1:1)", "YouTube (16:9)", rekomendasi=0),
+            "catatan": "Mau durasi tertentu? Tulis saja (10-60 detik).",
+            "param": {"A": {"aspectRatio": "9:16"}, "B": {"aspectRatio": "1:1"},
+                      "C": {"aspectRatio": "16:9"}},
             "default": "9:16, panjang mengikuti bahan"
                        + (f" (sekitar {total:.0f} dtk)" if total else ""),
             "alasan": "rasio dan durasi belum disebut",
@@ -287,10 +322,14 @@ def susun_pertanyaan(ringk, tahu):
             and not tahu.get("fit")):
         q.append({
             "kode": "fit",
-            "tanya": (f"{ringk['n_horizontal']} dari {nv} video berbentuk horizontal, sedangkan "
-                      "TikTok/Reels vertikal. Mau dipotong di tengah supaya memenuhi layar "
-                      "(sisi kiri-kanan terbuang), seluruh gambar tetap tampil dengan latar "
-                      "blur, atau dengan latar hitam?"),
+            "tanya": f"{ringk['n_horizontal']} dari {nv} video berbentuk horizontal, sedangkan "
+                     "TikTok/Reels vertikal. Bagaimana menyesuaikannya?",
+            "opsi": _opsi("Potong di tengah — memenuhi layar, sisi kiri-kanan terpotong",
+                          "Latar blur — seluruh gambar tetap tampil",
+                          "Latar hitam — seluruh gambar tetap tampil", rekomendasi=0),
+            "catatan": "",
+            "param": {"A": {"fitMode": "crop"}, "B": {"fitMode": "blur"},
+                      "C": {"fitMode": "letterbox"}},
             "default": "dipotong di tengah, memenuhi layar",
             "alasan": "sumber horizontal ke kanvas vertikal: sebagian gambar pasti terbuang atau "
                       "ada ruang kosong",
@@ -300,18 +339,26 @@ def susun_pertanyaan(ringk, tahu):
         if tanpa_ucapan_semua and ringk["n_suasana"] > 0:
             q.append({
                 "kode": "audio",
-                "tanya": ("Videonya berisi suara suasana, bukan ucapan. Mau tetap pakai suara "
-                          "suasana + musik latar ringan, tambahkan voice-over AI yang membacakan "
-                          "narasi, atau hanya teks?"),
+                "tanya": "Audionya bagaimana? (Videonya berisi suara suasana, bukan ucapan.)",
+                "opsi": _opsi("Suara suasana + musik latar ringan",
+                              "Suara suasana saja, tanpa musik",
+                              "Tambahkan voice-over AI (suara suasana tetap ada)", rekomendasi=0),
+                "catatan": "",
+                "param": {"A": {"audioMode": "original", "music": "on"},
+                          "B": {"audioMode": "original", "music": "off"},
+                          "C": {"audioMode": "ai"}},
                 "default": "suara suasana dipertahankan + musik latar ringan (bila tersedia)",
                 "alasan": "ada suara tapi bukan ucapan",
             })
         elif hanya_gambar or (nv > 0 and ringk["n_tanpa_suara"] == nv):
             q.append({
                 "kode": "audio",
-                "tanya": ("Bahannya tidak bersuara. Mau musik latar saja atau voice-over AI? "
-                          "Kalau voice-over, gayanya: ramah, profesional, energik, tenang, atau "
-                          "bercerita?"),
+                "tanya": "Audionya bagaimana? (Bahannya tidak bersuara.)",
+                "opsi": _opsi("Musik latar saja", "Voice-over AI + musik latar", "Tanpa audio",
+                              rekomendasi=0),
+                "catatan": "Kalau voice-over: gayanya ramah, profesional, energik, tenang, atau bercerita?",
+                "param": {"A": {"music": "on"}, "B": {"audioMode": "ai", "music": "on"},
+                          "C": {"music": "off"}},
                 "default": "musik latar saja (bila tersedia), tanpa voice-over",
                 "alasan": "bahan tanpa suara sama sekali",
             })
@@ -319,14 +366,56 @@ def susun_pertanyaan(ringk, tahu):
     if ringk["n_berucap"] >= 4 and not tahu["potong"]:
         q.append({
             "kode": "potong",
-            "tanya": ("Ada beberapa video berucapan. Boleh saya pilih bagian terbaik dan buang "
-                      "take ulang atau bagian tidak jelas, atau semuanya dipakai utuh? Ada "
-                      "bagian yang wajib dipertahankan?"),
+            "tanya": f"Ada {ringk['n_berucap']} video berucapan. Bagaimana memilih bagiannya?",
+            "opsi": _opsi("Pilih bagian terbaik, buang take ulang dan bagian tidak jelas",
+                          "Pakai semuanya utuh, hanya jeda diam dipotong", rekomendasi=0),
+            "catatan": "Ada bagian yang wajib dipertahankan? Tulis saja.",
+            "param": {"A": {"editMode": "auto"}, "B": {"editMode": "full"}},
             "default": "dipilih bagian terbaik, take ulang dan bagian tidak jelas dibuang",
             "alasan": f"{ringk['n_berucap']} video berucapan; pemilihan otomatis bisa membuang "
                       "bagian yang penting bagimu",
         })
     return q[:MAKS_PERTANYAAN]
+
+
+def susun_pemetaan(pertanyaan):
+    """Baris 'jawaban -> parameter run' yang dibuat kode dari pilihan di atas."""
+    baris = []
+    for i, p in enumerate(pertanyaan, 1):
+        for huruf, param in (p.get("param") or {}).items():
+            isi = ", ".join(f"{k}={json.dumps(v, ensure_ascii=False)}" for k, v in param.items())
+            baris.append(f"    {i}{huruf} -> {isi}")
+        if not p.get("param"):
+            baris.append(f"    {i}* -> tidak ada parameter; masukkan jawaban user (nama, brand, "
+                         "istilah) ke userContext APA ADANYA")
+    return baris
+
+
+def susun_pesan_pertanyaan(pertanyaan):
+    """Blok pesan yang dikirim agent ke user APA ADANYA.
+
+    Semua pilihan ditulis di sini, oleh kode. Format teks biasa (tanpa markdown) supaya
+    tidak ada risiko gagal parse di Telegram. Sengaja SATU pesan biasa yang tidak
+    memblokir -- bukan ask_user OpenClaw, yang menahan giliran agent lalu kedaluwarsa
+    tepat 15 menit dan menggagalkan giliran itu (terjadi 19 Sep pukul 22:34-23:05:
+    user membalas setelah 28 menit, dan tiga pertanyaan dalam satu ask_user tidak bisa
+    dijawab dengan satu balasan bebas).
+    """
+    n = len(pertanyaan)
+    contoh = " ".join(f"{i}{p['opsi'][0]['huruf']}" for i, p in enumerate(pertanyaan[:3], 1))
+    baris = [
+        f"Sebelum saya edit, ada {n} hal yang perlu kamu pilih. Balas dengan huruf pilihanmu "
+        f"(contoh: {contoh}) atau tulis jawabanmu sendiri. Ketik \"terserah\" untuk memakai "
+        "semua pilihan bertanda ★.",
+    ]
+    for i, p in enumerate(pertanyaan, 1):
+        baris += ["", f"{i}) {p['tanya']}"]
+        for o in p["opsi"]:
+            tanda = "★ " if o["rekomendasi"] else ""
+            baris.append(f"   {o['huruf']}. {tanda}{o['label']}")
+        if p.get("catatan"):
+            baris.append(f"   ({p['catatan']})")
+    return "\n".join(baris)
 
 
 # -------------------------------------------------------------------- teks
@@ -371,29 +460,30 @@ def susun_teks(fakta, pertanyaan, tahu, ringk, *, inspect_id, paths):
     paths_json = json.dumps(paths, ensure_ascii=False)
     baris.append("")
     if pertanyaan:
-        baris.append("PERTANYAAN yang perlu ditanyakan ke user "
-                     f"({len(pertanyaan)}; sampaikan dalam SATU pesan singkat, tiap butir dengan "
-                     "default-nya, dan izinkan jawaban 'terserah'):")
-        for i, p in enumerate(pertanyaan, 1):
-            baris.append(f"{i}. {p['tanya']}  [default: {p['default']}]  (alasan: {p['alasan']})")
         baris += [
+            "KIRIM PESAN DI BAWAH INI APA ADANYA ke user (satu pesan biasa), lalu AKHIRI "
+            "giliranmu. Pilihan di dalamnya dibuat oleh sistem; jangan mengubah, menambah, "
+            "atau mengurangi.",
+            "<<<PESAN",
+            susun_pesan_pertanyaan(pertanyaan),
+            "PESAN>>>",
             "",
             "ATURAN LANJUTAN:",
-            "- Tanyakan SEKARANG. Pakai tool ask_user kalau tersedia: satu pemanggilan per "
-            "pertanyaan, default-nya jadi opsi pertama berlabel '(Recommended)', dan jawabannya "
-            "kembali di giliran ini sehingga kamu bisa langsung lanjut. Kalau ask_user tidak "
-            "ada, tulis satu pesan singkat lalu BERHENTI dan tunggu jawaban; JANGAN memanggil "
-            "content_factory_run pada giliran itu.",
-            "- Setelah user menjawab (atau bilang 'terserah'/'langsung saja'), panggil "
-            "content_factory_run dengan:",
+            "- JANGAN memakai ask_user untuk ini. ask_user menahan giliran agent lalu "
+            "kedaluwarsa tepat 15 menit dan menggagalkan giliran itu; user boleh membalas kapan "
+            "saja dalam 24 jam.",
+            "- JANGAN memanggil content_factory_run pada giliran ini, dan jangan menanyakan hal "
+            "lain di luar pesan itu.",
+            "- Saat user membalas (huruf seperti '1A 2B', jawaban bebas, atau 'terserah' = semua "
+            "pilihan bertanda ★), terjemahkan ke parameter berikut:",
+            *susun_pemetaan(pertanyaan),
+            "  Pilihan yang tidak disebut user = pilihan bertanda ★. Jawaban bebas yang menyebut "
+            "nama, tempat, atau brand HARUS masuk userContext dengan ejaan user.",
+            "- Lalu panggil content_factory_run dengan:",
             f"    mediaPaths = {paths_json}",
             f"    inspectId = {inspect_id}",
             "    userAnswered = true",
-            "    userContext = permintaan awal + jawaban user, dengan kata-kata user apa adanya "
-            "(nama, brand, istilah harus persis)",
-            "    serta parameter yang jawabannya menyebut (aspectRatio, durationSeconds, "
-            "audioMode, music, editMode, ...).",
-            "- Jangan menambah pertanyaan di luar daftar ini kecuali jawabannya membingungkan.",
+            "    userContext = permintaan awal + jawaban user apa adanya",
         ]
     else:
         baris += [
@@ -445,11 +535,21 @@ def inspeksi(paths, konteks="", chat_id=""):
         degraded = f"{type(e).__name__}: {e}"
         fakta, ringk, tahu = [], {"n": len(paths), "n_video": 0, "n_gambar": 0, "total_detik": 0,
                                   "n_berucap": 0}, dari_konteks(konteks)
+        # Jalur darurat TETAP berpilihan: user tidak boleh dibiarkan menebak, justru saat
+        # pemeriksaan otomatis gagal. (Versi pertama membawa pertanyaan tanpa `opsi` dan
+        # membuat penyusun pesannya meledak -- terlihat di tes.)
         pertanyaan = [
-            {"kode": "tujuan", "tanya": "Ini tentang apa dan untuk apa? Ada nama/brand yang harus "
-                                        "tertulis persis?", "default": "disimpulkan dari bahan",
-             "alasan": "pemeriksaan otomatis gagal"},
-            {"kode": "platform_durasi", "tanya": "Untuk platform apa dan seberapa panjang?",
+            {"kode": "tujuan", "tanya": "Video ini tentang apa dan untuk apa?",
+             "opsi": _opsi("Promosi produk atau jasa", "Edukasi atau tips", "Dokumentasi acara",
+                           "Serahkan ke saya, simpulkan dari bahan", rekomendasi=3),
+             "catatan": "Tulis juga nama, tempat, atau brand yang harus tertulis persis.",
+             "param": {}, "default": "disimpulkan dari bahan", "alasan": "pemeriksaan otomatis gagal"},
+            {"kode": "platform_durasi", "tanya": "Untuk platform apa?",
+             "opsi": _opsi("TikTok / Reels / Shorts (9:16), panjang mengikuti bahan",
+                           "Feed Instagram (1:1)", "YouTube (16:9)", rekomendasi=0),
+             "catatan": "Mau durasi tertentu? Tulis saja (10-60 detik).",
+             "param": {"A": {"aspectRatio": "9:16"}, "B": {"aspectRatio": "1:1"},
+                       "C": {"aspectRatio": "16:9"}},
              "default": "9:16, mengikuti bahan", "alasan": "pemeriksaan otomatis gagal"},
         ]
 
@@ -462,15 +562,21 @@ def inspeksi(paths, konteks="", chat_id=""):
     teks = susun_teks(fakta, pertanyaan, tahu, ringk, inspect_id=inspect_id, paths=paths) \
         if not degraded else _teks_degraded(pertanyaan, inspect_id, paths)
     return {"ok": True, "inspect_id": inspect_id, "pertanyaan": pertanyaan,
+            "pesan": susun_pesan_pertanyaan(pertanyaan) if pertanyaan else "",
             "ringkasan": ringk, "degraded": degraded, "teks": teks}
 
 
 def _teks_degraded(pertanyaan, inspect_id, paths):
-    baris = ["Pemeriksaan otomatis bahan gagal; tanyakan ke user:"]
-    baris += [f"{i}. {p['tanya']}" for i, p in enumerate(pertanyaan, 1)]
-    baris += ["", "Setelah user menjawab, panggil content_factory_run dengan "
-              f"mediaPaths = {json.dumps(paths, ensure_ascii=False)}, inspectId = {inspect_id}, "
-              "userAnswered = true, dan userContext berisi jawaban user."]
+    baris = [
+        "Pemeriksaan otomatis bahan gagal, jadi hanya dua pertanyaan dasar. KIRIM PESAN DI "
+        "BAWAH INI APA ADANYA sebagai pesan biasa lalu AKHIRI giliranmu (JANGAN memakai ask_user):",
+        "<<<PESAN", susun_pesan_pertanyaan(pertanyaan), "PESAN>>>", "",
+        "Setelah user membalas, terjemahkan jawabannya:",
+        *susun_pemetaan(pertanyaan),
+        "lalu panggil content_factory_run dengan "
+        f"mediaPaths = {json.dumps(paths, ensure_ascii=False)}, inspectId = {inspect_id}, "
+        "userAnswered = true, dan userContext berisi jawaban user apa adanya.",
+    ]
     return "\n".join(baris)
 
 

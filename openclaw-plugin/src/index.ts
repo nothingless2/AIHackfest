@@ -237,6 +237,14 @@ const runParams = Type.Object({
       },
     ),
   ),
+  staticText: Type.Optional(
+    Type.Boolean({
+      description:
+        "true kalau user meminta SATU teks yang sama tampil statis sepanjang video (bukan teks " +
+        "yang berganti per klip). Berlaku untuk bahan tanpa ucapan; bahan berucapan tetap " +
+        "memakai subtitle.",
+    }),
+  ),
   editMode: Type.Optional(
     Type.Union(
       [Type.Literal("auto"), Type.Literal("full")],
@@ -492,9 +500,10 @@ export default defineToolPlugin({
         "merinci pengaturan yang tidak ada di daftar di atas dan jangan menebak hasilnya " +
         "sebelum terkirim.\n\n" +
         "ALUR WAJIB: (1) panggil content_factory_inspect PALING PERTAMA dengan bahan yang sama " +
-        "(sebelum bertanya apa pun ke user); (2) tanyakan pertanyaan yang diminta hasilnya " +
-        "(lewat ask_user bila tersedia) dan TUNGGU jawaban; (3) baru panggil tool ini dengan " +
-        "inspectId dan userAnswered=true. Pemanggilan tanpa inspectId yang sah akan ditolak.",
+        "(sebelum bertanya apa pun ke user); (2) kirim pesan pertanyaan dari hasilnya sebagai " +
+        "pesan biasa lalu akhiri giliran (bukan ask_user); (3) setelah user membalas, panggil " +
+        "tool ini dengan inspectId dan userAnswered=true. Pemanggilan tanpa inspectId yang sah " +
+        "akan ditolak.",
       parameters: runParams,
       optional: true,
       factory({ api, toolContext }) {
@@ -523,6 +532,7 @@ export default defineToolPlugin({
               durationSeconds?: number;
               music?: string;
               editMode?: string;
+              staticText?: boolean;
               subtitleStyle?: string;
               musicMood?: string;
             },
@@ -547,7 +557,7 @@ export default defineToolPlugin({
             const {
               mediaPaths, userContext, audioMode, voicePersona, aspectRatio, fitMode,
               durationSeconds, music, musicMood, editMode, subtitleStyle,
-              inspectId, userAnswered,
+              inspectId, userAnswered, staticText,
             } =
               params;
 
@@ -723,6 +733,9 @@ export default defineToolPlugin({
             if (subtitleStyle) {
               pipelineEnv.SUBTITLE_STYLE = subtitleStyle;
             }
+            if (staticText === true) {
+              pipelineEnv.CONTENT_FACTORY_STATIC_TEXT = "1";
+            }
             if (music) {
               pipelineEnv.CONTENT_FACTORY_MUSIC = music;
             }
@@ -787,13 +800,13 @@ export default defineToolPlugin({
         "(b) DAFTAR PERTANYAAN yang benar-benar masih kurang untuk hasil terbaik, dan (c) inspectId.\n\n" +
         "Cepat (beberapa detik), tidak memakai LLM, tidak merender apa pun, tidak mengubah apa pun.\n\n" +
         "CARA MEMAKAINYA: panggil tool ini PALING PERTAMA begitu user mengirim bahan dan meminta " +
-        "diedit — SEBELUM menanyakan apa pun ke user dan SEBELUM memakai ask_user. Pertanyaan " +
-        "harus berasal dari hasil tool ini (berdasarkan fakta terukur), bukan dari tebakanmu; " +
-        "kalau kamu sudah bertanya lebih dulu, user akan ditanyai dua kali. Lalu IKUTI instruksi " +
-        "di hasilnya: tanyakan pertanyaan yang diminta (lewat ask_user bila tersedia), tunggu " +
-        "jawabannya, dan hanya kemudian panggil content_factory_run. Kalau tidak ada pertanyaan, " +
-        "langsung lanjut ke content_factory_run. Jangan menambah pertanyaan sendiri di luar " +
-        "daftar itu.",
+        "diedit — SEBELUM menanyakan apa pun ke user. Pertanyaan dan PILIHAN JAWABANNYA dibuat " +
+        "tool ini dari fakta terukur; kamu tidak menulis pertanyaan sendiri. Hasilnya berisi " +
+        "satu pesan siap kirim: kirim APA ADANYA sebagai pesan biasa lalu AKHIRI giliranmu. " +
+        "JANGAN memakai ask_user (menahan giliran lalu kedaluwarsa dalam 15 menit dan " +
+        "menggagalkan giliran; user boleh membalas kapan saja dalam 24 jam). Saat user " +
+        "membalas, hasil tool ini juga memuat pemetaan jawaban ke parameter content_factory_run. " +
+        "Kalau tidak ada pertanyaan, langsung lanjut ke content_factory_run.",
       parameters: inspectParams,
       optional: true,
       factory({ api, toolContext }) {

@@ -116,6 +116,10 @@ describe("content_factory_inspect", () => {
     expect(r.details.questions.length).toBeGreaterThan(0);
     expect(teks(r)).toContain(r.details.inspectId);
     expect(teks(r)).toContain("PEMERIKSAAN BAHAN");
+    // pesan pertanyaan berpilihan yang dibuat kode, dan larangan ask_user
+    expect(teks(r)).toContain("<<<PESAN");
+    expect(teks(r)).toMatch(/A\. /);
+    expect(teks(r)).toContain("JANGAN memakai ask_user");
     expect(existsSync(join(root, "workspace", "state", "inspect", `${r.details.inspectId}.json`))).toBe(true);
   }, 60_000);
 
@@ -191,7 +195,7 @@ describe("gerbang di content_factory_run", () => {
     const konteks = "Edit ya. Jawaban: ini dokumentasi stan kesehatan di food court, brand Prodia.";
     const r = await tools.content_factory_run.execute("call_run_ok", {
       mediaPaths: berkas(segar, 3), inspectId, userAnswered: true, userContext: konteks,
-      aspectRatio: "9:16", fitMode: "blur", subtitleStyle: "karaoke",
+      aspectRatio: "9:16", fitMode: "blur", subtitleStyle: "karaoke", staticText: true,
     });
     expect(r.details.status).toBe("started");
     expect(await tunggu(() => existsSync(join(root, "workspace", "state", "stub_run.json")))).toBe(true);
@@ -202,6 +206,7 @@ describe("gerbang di content_factory_run", () => {
     expect(env.VIDEO_ASPECT).toBe("9:16");
     expect(env.FIT_MODE).toBe("blur");
     expect(env.SUBTITLE_STYLE).toBe("karaoke");
+    expect(env.CONTENT_FACTORY_STATIC_TEXT).toBe("1");
   }, 30_000);
 
   it("REGRESI: jawaban user yang datang BERJAM-JAM kemudian tetap diterima", async () => {
