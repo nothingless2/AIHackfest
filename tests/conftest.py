@@ -41,6 +41,12 @@ _TELEGRAM_ENV_KEYS = (
 for _key in _TELEGRAM_ENV_KEYS:
     os.environ[_key] = ""
 
+# Transkripsi di test SELALU lewat jalur API yang di-stub. Default produksi ("auto")
+# memilih Whisper LOKAL kalau venv-nya ada, dan itu berarti test benar-benar
+# memuat model 460 MB lalu men-transkrip audio (suite melambat jadi 75 detik) --
+# menyentuh layanan nyata, melanggar aturan #6 CLAUDE.md.
+os.environ["TRANSCRIBE_PROVIDER"] = "api"
+
 
 @pytest.fixture(autouse=True)
 def _tanpa_jaringan(monkeypatch):
@@ -66,6 +72,18 @@ def _tanpa_jaringan(monkeypatch):
             monkeypatch.setattr(requests, nama, tolak)
     except ImportError:
         pass
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _whisper_lokal_tidak_boleh_jalan(monkeypatch):
+    """Jaring pengaman kedua: worker Whisper asli tidak boleh bisa dijalankan dari
+    test. Test yang menguji jalur lokal harus menunjuk worker PALSU secara eksplisit
+    (transcribe.LOCAL_PYTHON / LOCAL_WORKER), tidak pernah yang asli."""
+    import transcribe
+
+    monkeypatch.setattr(transcribe, "TRANSCRIBE_PROVIDER", "api", raising=False)
+    monkeypatch.setattr(transcribe, "LOCAL_PYTHON", "/tidak/ada/python-whisper", raising=False)
     yield
 
 

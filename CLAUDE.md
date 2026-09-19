@@ -95,7 +95,27 @@ Contoh nyata: satu test memanggil `agent5.run()` tanpa mengalihkan
 `TREND_POOL_PATH`, sehingga tiap kali suite dijalankan ia menimpa
 `workspace/state/` asli **dan** benar-benar meminta data ke Google Trends.
 
-## 7. Verifikasi dengan menjalankan, bukan dengan membaca kode.
+## 7. Kegagalan BUKAN ketiadaan.
+
+"Gagal mengambil data" dan "datanya memang kosong" harus dibedakan secara eksplisit,
+dan hanya yang kedua yang boleh memicu jalur "tidak ada apa-apa".
+
+Contoh nyata: saldo Whisper habis (`403 insufficient_quota`) -> 0 transkrip ->
+`resolve_audio_mode` menyimpulkan "tidak ada ucapan di bahan" -> naskah dikarang dari
+gambar saja ("Halo semuanya! Aku di sini dengan energi positif...") -> suara AI
+ditempel di atas video user yang sebenarnya berbicara. Docstring kodenya sendiri
+menulis "video bisu, musik saja, atau transkripsi gagal" sebagai satu kelompok.
+
+Aturannya:
+- Pemeriksaan yang bisa gagal mengembalikan alasan gagalnya (`transcribe_assets_report`
+  -> `{nama: kode_alasan}`), bukan cuma hasil kosong.
+- Hanya alasan yang PASTI berarti "kosong" (`tanpa_ucapan`, `tanpa_audio`) yang boleh
+  memicu jalur kosong. Selain itu **berhenti dengan pesan yang bisa dibaca user**,
+  sebelum ada panggilan LLM berbayar dan sebelum ada yang diganti.
+- Pola yang sama berlaku di `edit_plan.transkrip_lengkap()`: memotong konten dari
+  transkrip separuh berarti membuang ucapan yang tidak pernah dilihat LLM.
+
+## 8. Verifikasi dengan menjalankan, bukan dengan membaca kode.
 
 Laporkan hasil apa adanya: kalau test gagal, tunjukkan outputnya; kalau langkah
 dilewati, katakan. Klaim "sudah diperbaiki" tanpa eksekusi tidak berlaku di sini —

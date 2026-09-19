@@ -305,7 +305,7 @@ def run():
     # Mode audio diputuskan DI SINI karena di sinilah kita tahu apakah bahan
     # benar-benar berisi ucapan: transkrip yang tidak kosong adalah buktinya.
     mode_audio, alasan_audio = resolve_audio_mode(
-        requested_mode(), transkrip, eksplisit=mode_eksplisit())
+        requested_mode(), transkrip, eksplisit=mode_eksplisit(), gagal=gagal_transkrip)
     print(f"[info] mode audio: {mode_audio} — {alasan_audio}")
 
     pool = read_json(TREND_POOL_PATH, {}) or {}

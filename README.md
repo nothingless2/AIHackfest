@@ -50,6 +50,9 @@ jatuh ke default):
 | `THUMBNAIL_ENABLED` | `1` | ambil cover JPG dari tengah scene pertama & lampirkan ke video Telegram |
 | `DURATION_MIN` / `DURATION_MAX` | `10` / `60` | rentang durasi yang boleh diminta user; di luar itu dijepit dan user diberi tahu |
 | `DURATION_TOLERANCE` | `0.20` | meleset lebih dari ini memicu SATU kali penulisan ulang naskah |
+| `TRANSCRIBE_PROVIDER` | `auto` | `local` = Whisper di mesin ini (faster-whisper, venv `.venv-whisper`, pasang dengan `scripts/setup_local_whisper.sh`); `api` = penyedia OpenAI-kompatibel; `auto` = local kalau terpasang, selain itu api. **Tanpa transkrip agent tidak bisa mendengar video** |
+| `TRANSCRIBE_LOCAL_MODEL` | `small` | model Whisper lokal. `small` diukur: kecocokan 0,92 dengan whisper-1, ~0,76x waktu nyata pada 4 core. `medium` ~3x lebih lambat |
+| `TRANSCRIBE_LANGUAGE` | (otomatis) | kunci bahasa Whisper lokal (mis. `id`); kosong = deteksi otomatis |
 | `EDIT_SELECTION` | `1` | editor AI memilih & mengurutkan potongan ucapan terbaik (mode audio asli). LLM hanya mengembalikan NOMOR kandidat; kode yang membangun kandidat, memverifikasi, dan menegakkan batas durasi. Gagal/transkrip tidak lengkap -> pakai semua klip |
 | `EDIT_DEFAULT_MAX_SECONDS` | `60` | batas atas durasi hasil seleksi kalau user tidak meminta durasi tertentu; kelebihannya dipangkas dari skor terendah |
 | `LLM_MODEL` | `gpt-4o` | satu nama model untuk semua panggilan chat (brief, seleksi, koreksi durasi) |

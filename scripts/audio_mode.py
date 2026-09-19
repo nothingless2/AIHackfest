@@ -7,9 +7,16 @@ Aturan yang diminta user:
 
 Bagian "ada ucapan" TIDAK ditebak: pendeteksinya adalah hasil transkripsi yang
 sudah kita jalankan. Kalau Whisper menghasilkan teks, berarti memang ada yang
-bicara. Kalau tidak ada teks sama sekali (video bisu, musik saja, atau
-transkripsi gagal), memakai "suara asli" akan menghasilkan video tanpa narasi —
-jadi jatuh ke voice-over AI adalah perilaku yang benar, bukan kompromi.
+bicara. Kalau Whisper BERHASIL berjalan dan tidak menemukan ucapan (video bisu,
+musik saja, hanya foto), jatuh ke voice-over AI adalah perilaku yang benar.
+
+TAPI "transkripsi GAGAL" bukan "tidak ada ucapan", dan versi awal file ini
+menyamakannya. Akibat nyata (19 Sep): saldo Whisper habis -> 0 transkrip ->
+disimpulkan "tidak ada ucapan" -> naskah dikarang dari gambar saja ("Halo
+semuanya! Aku di sini dengan energi positif...") lalu suara AI ditempel di atas
+video user yang sebenarnya berbicara. Sekarang kegagalan menghentikan run
+dengan pesan yang jelas (TranscriptionUnavailable), sebelum ada panggilan LLM
+berbiaya dan sebelum suara user diganti.
 
 Mode:
   ai       : voice-over AI, audio asli dibuang. Perilaku lama, tetap default.
@@ -18,6 +25,17 @@ Mode:
 """
 
 import os
+
+# Alasan kegagalan yang PASTI berarti "memang tidak ada ucapan". Selain ini
+# (kuota habis, timeout, layanan mati, akses ditolak, audio gagal diekstrak)
+# transkrip TIDAK lengkap, dan tidak ada yang tahu apakah ada yang bicara.
+ALASAN_PASTI_TANPA_UCAPAN = {"tanpa_audio", "tanpa_ucapan"}
+
+
+class TranscriptionUnavailable(RuntimeError):
+    """Suara asli diminta, tapi transkripsi gagal sehingga tidak diketahui apakah
+    ada ucapan. Pesannya ditulis untuk DIBACA USER (ikut tampil di chat)."""
+
 
 MODE_AI = "ai"
 MODE_ORIGINAL = "original"
@@ -51,15 +69,31 @@ def requested_mode():
     return diminta
 
 
-def resolve_audio_mode(diminta, transkrip, *, eksplisit=False):
+def resolve_audio_mode(diminta, transkrip, *, eksplisit=False, gagal=None):
     """Putuskan mode final. Return (mode, alasan).
 
     `transkrip` kosong berarti tidak ada ucapan yang terdeteksi di bahan.
     `eksplisit` menandai apakah mode datang dari permintaan user atau dari
     default — supaya alasannya jujur dan tidak mengaku "user minta" padahal tidak.
+    `gagal`: {nama: kode_alasan} dari transcribe_assets_report. Kalau ada bahan
+    yang gagal karena SEBAB SELAIN "memang tanpa ucapan" dan tidak satu pun bahan
+    berhasil ditranskrip, melempar TranscriptionUnavailable -- bukan diam-diam
+    memakai voice-over AI. (Kalau sebagian berhasil, ucapan sudah terbukti ada
+    dan run lanjut dengan suara asli; bahan yang gagal dilaporkan di caption.)
     """
     ada_ucapan = bool(transkrip)
     asal = "diminta user" if eksplisit else "default"
+
+    if diminta == MODE_ORIGINAL and not ada_ucapan and gagal:
+        tak_pasti = {n: k for n, k in gagal.items() if k not in ALASAN_PASTI_TANPA_UCAPAN}
+        if tak_pasti:
+            from transcribe import ALASAN_TEKS
+            sebab = ", ".join(sorted({ALASAN_TEKS.get(k, k) for k in tak_pasti.values()}))
+            raise TranscriptionUnavailable(
+                f"Transkripsi gagal ({sebab}), jadi saya tidak bisa mendengar isi videomu. "
+                "Video TIDAK dibuat: tanpa transkrip, naskah hanya bisa dikarang dari gambar "
+                "dan suaramu akan diganti suara AI. Perbaiki layanan transkripsi lalu kirim ulang."
+            )
 
     if diminta == MODE_ORIGINAL:
         if ada_ucapan:

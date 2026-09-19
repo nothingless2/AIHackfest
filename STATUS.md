@@ -203,7 +203,14 @@ dari staging -> restart gateway, dengan verifikasi manifest & build di tiap lang
   dipercaya. Sebuah penyaring titik-tengah sempat membuang kata pertama hampir tiap klip
   karena ini — sekarang berbasis tumpang-tindih.
 
+- **Agent "tidak bisa mendengar" (19 Sep, ~20:00 WIB).** Video draf "Halo, Aku di Sini!":
+  saldo Whisper habis -> 0 transkrip -> sistem menyimpulkan "tidak ada ucapan" -> memakai
+  voice-over AI dan mengarang naskah dari gambar. Bug logika di `audio_mode.py`
+  (kegagalan disamakan dengan ketiadaan) -- diperbaiki: sekarang berhenti dengan pesan jelas.
+  Whisper lokal (`scripts/local_whisper.py`, venv `.venv-whisper`) menggantikan API sebagai
+  default (`TRANSCRIBE_PROVIDER=auto`). Terukur pada 6 klip nyata: kecocokan 0,92 dengan
+  whisper-1, RTF 0,76 pada 4 core. Timestamp kata pertama lebih jujur (0,18-0,72 dtk, bukan
+  0,00 seperti API). Satu klip nyata: "calon pembeli" terbaca "cara pembeli".
+
 ### Backlog
-- Whisper lokal (faster-whisper) sebagai pengganti penyedia berbayar: menghapus ketergantungan
-  saldo dan latensi relay.
 - Seleksi visual (klip buram/gelap) — sekarang seleksi hanya dari transkrip.

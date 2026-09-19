@@ -23,7 +23,12 @@ import subprocess
 import tempfile
 import time
 
-from common import OPENAI_API_KEY
+import json
+import signal
+import sys
+import threading
+
+from common import OPENAI_API_KEY, PROJECT_ROOT
 
 TRANSCRIBE_MODEL = os.getenv("TRANSCRIBE_MODEL", "whisper-1")
 TRANSCRIBE_ENABLED = os.getenv("TRANSCRIBE_ENABLED", "1") not in ("0", "false", "False")
@@ -53,6 +58,30 @@ TRANSCRIBE_BUDGET = int(os.getenv("TRANSCRIBE_BUDGET_SECONDS", "180"))
 # Permintaan dikirim bersamaan; relay mengantrekannya, tapi terukur tetap ~1,8x
 # lebih cepat daripada berurutan (5 klip: 188 dtk paralel vs ~335 dtk serial).
 TRANSCRIBE_CONCURRENCY = int(os.getenv("TRANSCRIBE_CONCURRENCY", "5"))
+
+# --- Penyedia transkripsi ---------------------------------------------------
+# "local" = faster-whisper di mesin ini (scripts/local_whisper.py, venv sendiri).
+# "api"   = Whisper lewat penyedia OpenAI-kompatibel (perilaku lama).
+# "auto"  = local kalau terpasang, selain itu api (DEFAULT). Kalau local gagal
+#           TOTAL (paket rusak / model tak termuat) auto jatuh ke api.
+#
+# Kenapa local jadi pilihan utama: tanpa transkrip agent TIDAK BISA MENDENGAR
+# video -- model chat hanya melihat frame. Jalur API mati total saat saldo habis
+# (403 insufficient_quota) dan, lewat relay, satu klip 5,6 dtk pernah butuh 66,9
+# dtk. Lokal: 51 dtk audio diproses 39 dtk pada 4 core, tanpa saldo.
+TRANSCRIBE_PROVIDER = (os.getenv("TRANSCRIBE_PROVIDER") or "auto").strip().lower()
+# "small" DIUKUR, bukan ditebak: kecocokan 0,92 dengan whisper-1 pada 6 klip
+# nyata, RTF 0,76. "medium" ~3x lebih lambat -- terlalu berat untuk 4 core dengan
+# anggaran 180 dtk.
+LOCAL_MODEL = os.getenv("TRANSCRIBE_LOCAL_MODEL") or "small"
+# Kosong = bahasa dideteksi otomatis (permintaan user: auto-detect bahasa).
+LOCAL_LANGUAGE = (os.getenv("TRANSCRIBE_LANGUAGE") or "").strip() or None
+# 180 = sama dengan anggaran jalur API, supaya rincian timeout tahap brief (450 dtk,
+# lihat orchestrator.py) tetap berlaku. 10 klip ~10 dtk diproses ~85 dtk (diukur).
+LOCAL_BUDGET = int(os.getenv("TRANSCRIBE_LOCAL_BUDGET_SECONDS", "180"))
+LOCAL_PYTHON = os.getenv("WHISPER_PYTHON") or os.path.join(
+    PROJECT_ROOT, ".venv-whisper", "bin", "python")
+LOCAL_WORKER = os.path.join(PROJECT_ROOT, "scripts", "local_whisper.py")
 # 10, naik dari 6. Dulu 6 masuk akal karena transkripsi berjalan BERURUTAN dan
 # tiap bahan menambah waktu tahap secara linier. Sekarang permintaan dikirim
 # bersamaan dengan anggaran waktu, jadi batas yang terlalu ketat hanya membuat
@@ -249,23 +278,103 @@ ALASAN_TEKS = {
     "error_api": "error dari layanan transkripsi",
     "tidak_selesai": "tidak selesai dalam anggaran waktu",
     "tidak_diproses": "melebihi batas jumlah bahan yang ditranskrip",
+    "whisper_lokal_gagal": "Whisper lokal gagal berjalan",
 }
 
 
-def _catat_biaya(durasi_detik, teks):
-    """Biaya transkripsi dihitung per MENIT audio, bukan per token."""
+def local_available():
+    """Worker dan python venv-nya ada? (Belum membuktikan paketnya bisa diimpor --
+    itu ketahuan saat worker dijalankan, dan auto akan jatuh ke API.)"""
+    return os.path.exists(LOCAL_PYTHON) and os.path.exists(LOCAL_WORKER)
+
+
+def pilih_penyedia():
+    """'local' atau 'api' untuk run ini, sesuai TRANSCRIBE_PROVIDER."""
+    if TRANSCRIBE_PROVIDER == "api":
+        return "api"
+    if TRANSCRIBE_PROVIDER == "local":
+        return "local"
+    return "local" if local_available() else "api"
+
+
+def transcribe_local(audio_paths, vocab, *, budget=None):
+    """Transkripsi lokal untuk daftar berkas audio. Return (hasil, fatal).
+
+    `hasil`: {path: data | {"error": ...}} untuk berkas yang SEMPAT selesai.
+    `fatal`: teks kalau worker tidak bisa jalan sama sekali, selain itu None.
+
+    Keluaran worker dibaca baris demi baris, jadi kalau anggaran waktu habis
+    klip yang sudah selesai tetap dipakai dan hanya sisanya yang dilepas.
+    Worker dijalankan di process group sendiri dan dibunuh utuh saat timeout --
+    sama seperti tahap pipeline lain, supaya tidak ada proses yatim.
+    """
+    budget = LOCAL_BUDGET if budget is None else budget
+    if not local_available():
+        return {}, f"Whisper lokal belum terpasang ({LOCAL_PYTHON} tidak ada)"
+
+    cmd = [LOCAL_PYTHON, LOCAL_WORKER, "--model", LOCAL_MODEL]
+    if LOCAL_LANGUAGE:
+        cmd += ["--language", LOCAL_LANGUAGE]
+    if vocab:
+        cmd += ["--prompt", vocab]
+    cmd += list(audio_paths)
+
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                text=True, start_new_session=True)
+    except OSError as e:
+        return {}, f"worker Whisper lokal gagal dijalankan: {e}"
+
+    hasil, fatal = {}, [None]
+
+    def baca():
+        for baris in proc.stdout:
+            try:
+                o = json.loads(baris)
+            except ValueError:
+                continue
+            if o.get("tipe") == "berkas":
+                hasil[o["path"]] = o.get("data") or {}
+            elif o.get("tipe") == "fatal":
+                fatal[0] = o.get("pesan") or "worker melaporkan kegagalan"
+
+    pembaca = threading.Thread(target=baca, daemon=True)
+    pembaca.start()
+    try:
+        proc.wait(timeout=budget)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        proc.wait()
+    pembaca.join(timeout=5)
+
+    if not hasil and fatal[0] is None and proc.returncode not in (0, None):
+        fatal[0] = f"worker keluar dengan kode {proc.returncode} tanpa hasil"
+    return hasil, fatal[0]
+
+
+def _catat_biaya(durasi_detik, teks, *, lokal=False):
+    """Biaya transkripsi dihitung per MENIT audio, bukan per token.
+
+    `lokal=True`: biayanya 0,0 dan itu NOL YANG SEBENARNYA (tidak ada tagihan),
+    bukan "tidak diketahui" -- beda dengan model API yang tidak ada di tabel harga
+    (None). Dicatat tetap supaya jumlah menit audio yang diproses terlihat.
+    """
     try:
         from cost_estimate import estimate_transcribe_cost
         from run_log import log_event
 
+        model = f"local/{LOCAL_MODEL}" if lokal else TRANSCRIBE_MODEL
         log_event(
             "transcribe_call",
             (os.getenv("CONTENT_FACTORY_RUN_ID") or "").strip() or None,
             chat_id=(os.getenv("CONTENT_FACTORY_CHAT_ID") or "").strip() or None,
-            model=TRANSCRIBE_MODEL,
+            model=model,
             audio_seconds=round(durasi_detik, 1),
             chars=len(teks),
-            cost_usd=estimate_transcribe_cost(TRANSCRIBE_MODEL, durasi_detik),
+            cost_usd=0.0 if lokal else estimate_transcribe_cost(TRANSCRIBE_MODEL, durasi_detik),
         )
     except Exception as e:
         print(f"[warn] cost: gagal mencatat transkripsi: {type(e).__name__}: {e}")
@@ -349,56 +458,96 @@ def transcribe_assets_report(paths, *, max_assets=None, konteks=""):
     if not siap:
         return hasil, gagal
 
-    # --- Tahap 2 (jaringan, lambat): semua dikirim bersamaan, dengan anggaran
-    # waktu KERAS. Yang belum selesai saat anggaran habis dilepas begitu saja.
-    import concurrent.futures as cf
-
-    t0 = time.time()
-    print(f"[info] transcribe: {len(siap)} bahan, anggaran {TRANSCRIBE_BUDGET} detik "
-          f"({TRANSCRIBE_CONCURRENCY} permintaan bersamaan).")
-
     durasi_per_path = {p: d for p, _, d in siap}
-    with cf.ThreadPoolExecutor(max_workers=TRANSCRIBE_CONCURRENCY) as pool:
-        futures = {
-            pool.submit(transcribe_file_detailed, audio, durasi=durasi, vocab_prompt=vocab): (path, audio)
-            for path, audio, durasi in siap
+    t0 = time.time()
+    penyedia = pilih_penyedia()
+
+    def terima(path, data, *, lokal):
+        """Catat satu hasil. Return True kalau ada ucapan."""
+        nama = os.path.basename(path)
+        teks = (data.get("text") or "").strip()
+        if not teks:
+            gagal[nama] = "tanpa_ucapan"
+            return False
+        hasil[nama] = {
+            "text": teks,
+            "segments": data.get("segments") or [],
+            "words": data.get("words") or [],
+            "language": data.get("language"),
+            "duration": durasi_per_path.get(path, 0.0),
         }
-        selesai, tertunda = cf.wait(futures, timeout=TRANSCRIBE_BUDGET)
+        if lokal:
+            _catat_biaya(durasi_per_path.get(path, 0.0), teks, lokal=True)
+        print(f"[info] transcribe: {nama} -> {len(teks)} karakter, "
+              f"{len(data.get('segments') or [])} potongan bertimestamp"
+              + (f" ({data.get('detik_proses')} dtk, lokal)" if lokal else ""))
+        return True
 
-        for fut in selesai:
-            path, audio = futures[fut]
-            nama = os.path.basename(path)
-            try:
-                data = fut.result() or {}
-            except Exception as e:
-                kode = alasan_gagal(e)
-                gagal[nama] = kode
-                print(f"[warn] transcribe: {nama} gagal ({ALASAN_TEKS[kode]}): "
-                      f"{type(e).__name__}: {str(e)[:200]}")
-                continue
-            teks = (data.get("text") or "").strip()
-            if not teks:
-                gagal[nama] = "tanpa_ucapan"
-                continue
-            hasil[nama] = {
-                "text": teks,
-                "segments": data.get("segments") or [],
-                "words": data.get("words") or [],
-                "language": data.get("language"),
-                "duration": durasi_per_path.get(path, 0.0),
+    # --- Jalur LOKAL: satu proses worker, model dimuat sekali, klip berurutan.
+    if penyedia == "local":
+        print(f"[info] transcribe: {len(siap)} bahan, Whisper LOKAL ({LOCAL_MODEL}), "
+              f"anggaran {LOCAL_BUDGET} detik.")
+        peta_audio = {audio: path for path, audio, _ in siap}
+        lokal, fatal = transcribe_local(list(peta_audio), build_vocab_prompt(konteks))
+        if fatal and not lokal and TRANSCRIBE_PROVIDER == "auto":
+            print(f"[warn] transcribe: Whisper lokal gagal ({fatal}) — mencoba API.")
+            penyedia = "api"
+        elif fatal and not lokal:
+            print(f"[warn] transcribe: Whisper lokal gagal: {fatal}")
+            for path, _, _ in siap:
+                gagal[os.path.basename(path)] = "whisper_lokal_gagal"
+        else:
+            for audio, path in peta_audio.items():
+                data = lokal.get(audio)
+                nama = os.path.basename(path)
+                if data is None:
+                    gagal[nama] = "tidak_selesai"
+                elif data.get("error"):
+                    gagal[nama] = "whisper_lokal_gagal"
+                    print(f"[warn] transcribe: {nama} gagal: {data['error'][:160]}")
+                else:
+                    terima(path, data, lokal=True)
+            if any(k == "tidak_selesai" for k in gagal.values()):
+                print(f"[warn] transcribe: sebagian bahan TIDAK selesai dalam "
+                      f"{LOCAL_BUDGET} detik dan dilepas.")
+
+    # --- Jalur API: semua dikirim bersamaan, dengan anggaran waktu KERAS.
+    # Yang belum selesai saat anggaran habis dilepas begitu saja.
+    if penyedia == "api":
+        import concurrent.futures as cf
+
+        print(f"[info] transcribe: {len(siap)} bahan, anggaran {TRANSCRIBE_BUDGET} detik "
+              f"({TRANSCRIBE_CONCURRENCY} permintaan bersamaan).")
+
+        with cf.ThreadPoolExecutor(max_workers=TRANSCRIBE_CONCURRENCY) as pool:
+            futures = {
+                pool.submit(transcribe_file_detailed, audio, durasi=durasi, vocab_prompt=vocab): (path, audio)
+                for path, audio, durasi in siap
             }
-            print(f"[info] transcribe: {nama} -> {len(teks)} karakter, "
-                  f"{len(data.get('segments') or [])} potongan bertimestamp")
+            selesai, tertunda = cf.wait(futures, timeout=TRANSCRIBE_BUDGET)
 
-        if tertunda:
-            # Dilaporkan terang-terangan: user berhak tahu sebagian videonya
-            # tidak bersubtitle, alih-alih mengira transkripsinya memang kosong.
-            print(f"[warn] transcribe: {len(tertunda)} bahan TIDAK selesai dalam "
-                  f"{TRANSCRIBE_BUDGET} detik dan dilepas — video tetap dibuat, "
-                  f"tapi bagian itu tanpa subtitle.")
-            for fut in tertunda:
-                gagal[os.path.basename(futures[fut][0])] = "tidak_selesai"
-                fut.cancel()
+            for fut in selesai:
+                path, audio = futures[fut]
+                nama = os.path.basename(path)
+                try:
+                    data = fut.result() or {}
+                except Exception as e:
+                    kode = alasan_gagal(e)
+                    gagal[nama] = kode
+                    print(f"[warn] transcribe: {nama} gagal ({ALASAN_TEKS[kode]}): "
+                          f"{type(e).__name__}: {str(e)[:200]}")
+                    continue
+                terima(path, data, lokal=False)
+
+            if tertunda:
+                # Dilaporkan terang-terangan: user berhak tahu sebagian videonya
+                # tidak bersubtitle, alih-alih mengira transkripsinya memang kosong.
+                print(f"[warn] transcribe: {len(tertunda)} bahan TIDAK selesai dalam "
+                      f"{TRANSCRIBE_BUDGET} detik dan dilepas — video tetap dibuat, "
+                      f"tapi bagian itu tanpa subtitle.")
+                for fut in tertunda:
+                    gagal[os.path.basename(futures[fut][0])] = "tidak_selesai"
+                    fut.cancel()
 
     for _, audio, _ in siap:
         _buang(audio)
