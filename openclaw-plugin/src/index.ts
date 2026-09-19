@@ -166,6 +166,29 @@ const runParams = Type.Object({
         "ke voice-over AI supaya videonya tidak sunyi.",
     }),
   ),
+  aspectRatio: Type.Optional(
+    Type.Union(
+      [Type.Literal("9:16"), Type.Literal("1:1"), Type.Literal("16:9")],
+      {
+        description:
+          "Rasio video. '9:16' vertikal untuk Reels/TikTok/Shorts (default), " +
+          "'1:1' persegi untuk feed Instagram, '16:9' lebar untuk YouTube. " +
+          "Isi HANYA kalau user menyebut rasio atau platform tujuannya.",
+      },
+    ),
+  ),
+  fitMode: Type.Optional(
+    Type.Union(
+      [Type.Literal("crop"), Type.Literal("blur"), Type.Literal("letterbox")],
+      {
+        description:
+          "Cara memuat bahan yang rasionya berbeda dari target. 'crop' isi penuh " +
+          "tapi tepi terpotong (default), 'blur' seluruh frame dipertahankan " +
+          "dengan latar blur, 'letterbox' dengan latar hitam. Isi hanya kalau " +
+          "user memintanya, mis. 'jangan dipotong'.",
+      },
+    ),
+  ),
   voicePersona: Type.Optional(
     Type.Union(
       [Type.Literal("ramah"), Type.Literal("profesional"), Type.Literal("energik"),
@@ -354,6 +377,8 @@ export default defineToolPlugin({
               userContext?: string;
               audioMode?: "ai" | "original";
               voicePersona?: string;
+              aspectRatio?: string;
+              fitMode?: string;
             },
           ) {
             const fail = (text: string, details: Record<string, unknown>) => ({
@@ -372,7 +397,8 @@ export default defineToolPlugin({
               });
             }
 
-            const { mediaPaths, userContext, audioMode, voicePersona } = params;
+            const { mediaPaths, userContext, audioMode, voicePersona, aspectRatio, fitMode } =
+              params;
 
             // Dicatat SEBELUM validasi apa pun, supaya tetap ada bukti walau
             // permintaan nanti ditolak (file hilang / format tidak didukung).
@@ -391,6 +417,8 @@ export default defineToolPlugin({
               hasUserContext: Boolean((userContext ?? "").trim()),
               audioMode: audioMode ?? null,
               voicePersona: voicePersona ?? null,
+              aspectRatio: aspectRatio ?? null,
+              fitMode: fitMode ?? null,
               // Path yang BENAR-BENAR dikirim model, plus hasil validasinya.
               // Tanpa ini, penolakan "file tidak ditemukan" tidak bisa didiagnosis
               // dari log sama sekali -- yang tercatat cuma jumlahnya.
@@ -480,6 +508,12 @@ export default defineToolPlugin({
             }
             if (voicePersona) {
               pipelineEnv.TTS_PERSONA = voicePersona;
+            }
+            if (aspectRatio) {
+              pipelineEnv.VIDEO_ASPECT = aspectRatio;
+            }
+            if (fitMode) {
+              pipelineEnv.FIT_MODE = fitMode;
             }
 
             const konteks = (userContext ?? "").trim();

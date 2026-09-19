@@ -22,6 +22,7 @@ APPROVE untuk jalur plugin ini dibangun -- dibersihkan lewat sweep retensi
 import os
 import sys
 
+from canvas import CanvasError, resolve_canvas
 from common import (
     brief_path_for_run,
     chat_allowed,
@@ -109,6 +110,18 @@ def main():
         # aksesnya tidak diizinkan, tanpa membocorkan detail sistem/daftar chat.
         notify("pipeline", "akses tidak diizinkan untuk chat ini.", chat_id=chat_id)
         return os.EX_NOPERM
+
+    # Rasio & fit mode divalidasi DI SINI: sebelum lock render dan sebelum satu
+    # pun panggilan GPT-4o. Nilai salah ketik tidak boleh membakar kredit lalu
+    # baru ditolak di tahap render, dan TIDAK boleh diam-diam jatuh ke default.
+    try:
+        lebar, tinggi, fit = resolve_canvas()
+        print(f"[info] kanvas: {lebar}x{tinggi} ({fit})")
+    except CanvasError as e:
+        print(f"[error] {e}")
+        log_event("run_rejected", run_id, chat_id=chat_id, reason="canvas_invalid")
+        notify("pipeline", f"konfigurasi video tidak valid: {e}", chat_id=chat_id)
+        return os.EX_CONFIG
 
     try:
         status, detail = run_core_stages_locked(

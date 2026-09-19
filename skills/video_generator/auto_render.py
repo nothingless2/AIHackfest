@@ -26,13 +26,16 @@ sys.path.insert(
     0,
     os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "scripts"),
 )
+from canvas import (  # noqa: E402
+    ASPECT_PRESETS, FIT_MODES, CanvasError, resolve_canvas,
+)
 from retry import with_retry_async  # noqa: E402
 from trim_silence import (  # noqa: E402
     TRIM_SILENCE, detect_silence, keep_ranges, map_time, total_kept,
 )
 from moviepy import AudioFileClip
 
-TARGET_W, TARGET_H = 1080, 1920
+TARGET_W, TARGET_H, TARGET_FIT = resolve_canvas()
 # Font dipilih lewat NAMA keluarga (mis. "Inter", "Roboto"), bukan path file --
 # path berbeda-beda antar distribusi dan antar versi paket. fc-match yang
 # menerjemahkannya, dan selalu mengembalikan sesuatu (font terdekat) sehingga
@@ -293,12 +296,45 @@ def _catat_pemakaian_tts(text, mesin="edge-tts"):
         print(f"[warn] cost: gagal mencatat pemakaian TTS: {type(e).__name__}: {e}")
 
 
-def scale_crop_filter():
-    """Filter ffmpeg: isi kanvas 1080x1920 tanpa distorsi, lalu crop tengah."""
-    return (
-        f"scale=-2:{TARGET_H}:force_original_aspect_ratio=increase,"
-        f"crop={TARGET_W}:{TARGET_H},fps={FPS}"
-    )
+# Ukuran versi kecil yang di-blur sebelum diperbesar jadi latar. gblur berbiaya
+# kuadratik terhadap luas, jadi memblur 1080x1920 langsung jauh lebih mahal
+# daripada memblur versi kecil lalu meregangkannya -- dan hasilnya tidak berbeda
+# karena memang sengaja dibuat kabur.
+BLUR_SMALL_W = int(os.getenv("BLUR_SMALL_WIDTH", "160"))
+BLUR_SIGMA = float(os.getenv("BLUR_SIGMA", "18"))
+
+
+def scale_crop_filter(w=None, h=None, fit=None):
+    """Filter ffmpeg untuk memuat bahan ke kanvas w x h.
+
+    CATATAN BUG LAMA: versi sebelumnya memakai
+        scale=-2:{H}:force_original_aspect_ratio=increase
+    yang hanya menyebut SATU dimensi. `increase` tidak punya pembanding lebar,
+    jadi untuk sumber yang lebih sempit dari kanvas hasilnya lebih kecil dari
+    lebar target dan crop gagal. Tidak pernah terlihat selama kanvas selalu 9:16;
+    langsung meledak begitu rasio jadi parameter. Kedua dimensi kini disebut.
+    """
+    w = w or TARGET_W
+    h = h or TARGET_H
+    fit = (fit or TARGET_FIT).lower()
+
+    if fit == "letterbox":
+        return (f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
+                f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,fps={FPS}")
+
+    if fit == "blur":
+        kecil_h = max(2, int(BLUR_SMALL_W * h / w) // 2 * 2)
+        return (
+            f"split[bg][fg];"
+            f"[bg]scale={BLUR_SMALL_W}:{kecil_h}:force_original_aspect_ratio=increase,"
+            f"crop={BLUR_SMALL_W}:{kecil_h},gblur=sigma={BLUR_SIGMA},"
+            f"scale={w}:{h}[bgx];"
+            f"[fg]scale={w}:{h}:force_original_aspect_ratio=decrease[fgx];"
+            f"[bgx][fgx]overlay=(W-w)/2:(H-h)/2,fps={FPS}"
+        )
+
+    return (f"scale={w}:{h}:force_original_aspect_ratio=increase,"
+            f"crop={w}:{h},fps={FPS}")
 
 
 def fade_filters(durasi, *, keep_audio):

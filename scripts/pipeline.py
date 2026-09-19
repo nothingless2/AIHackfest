@@ -12,6 +12,7 @@ approval CLI berjalan bersamaan (risiko itu yang ditutup 1b).
 import os
 import sys
 
+from canvas import CanvasError, resolve_canvas
 from common import CLI_CHAT_ID, chat_allowed, ensure_dirs, log_error, notify
 from gateway_check import warn_if_gateway_polling
 from orchestrator import install_signal_handlers, run_core_stages_locked, run_stage
@@ -69,6 +70,17 @@ def main():
             "Tambahkan ke ALLOWED_CHAT_IDS, atau kosongkan TELEGRAM_CHAT_ID untuk run lokal tanpa kirim."
         )
         return os.EX_NOPERM
+
+    # Rasio & fit mode divalidasi DI SINI: sebelum lock render dan sebelum satu
+    # pun panggilan GPT-4o. Nilai salah ketik tidak boleh membakar kredit lalu
+    # baru ditolak di tahap render, dan TIDAK boleh diam-diam jatuh ke default.
+    try:
+        lebar, tinggi, fit = resolve_canvas()
+        print(f"[info] kanvas: {lebar}x{tinggi} ({fit})")
+    except CanvasError as e:
+        print(f"[error] {e}")
+        log_event("run_rejected", run_id, chat_id=chat_id, reason="canvas_invalid")
+        return os.EX_CONFIG
 
     try:
         status, detail = run_core_stages_locked(
