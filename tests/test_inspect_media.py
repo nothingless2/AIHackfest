@@ -521,3 +521,70 @@ def test_jalur_darurat_tetap_berpilihan_dan_menghasilkan_pesan(tmp_path, monkeyp
         assert len(p["opsi"]) >= 2 and sum(o["rekomendasi"] for o in p["opsi"]) == 1
     assert "A. " in r["pesan"] and "★" in r["pesan"]
     assert "JANGAN memakai ask_user" in r["teks"] and r["inspect_id"] in r["teks"]
+
+
+# ---------- jawaban user harus SAMPAI ke pipeline (celah 19 Sep 23:36) ----------
+
+def _inspeksi_topik(tmp_path, konteks="edit ya"):
+    paths = [_video(tmp_path / f"v{i}.mp4", w=640, h=360) for i in range(2)]
+    r = im.inspeksi(paths, konteks, "111")
+    assert "topik" in [p["kode"] for p in r["pertanyaan"]], "prasyarat: skenario menanyakan topik"
+    return paths, r
+
+
+def test_konteks_tanpa_jawaban_ditolak_meski_userAnswered_true(tmp_path):
+    """Persis celah nyata: agent menandai sudah ditanyakan, tapi jawabannya tidak dimasukkan."""
+    paths, r = _inspeksi_topik(tmp_path)
+    g = im.cek_izin(r["inspect_id"], "111", paths, user_answered=True, konteks="edit ya")
+    assert g["ok"] is False and g["kode"] == "jawaban_tidak_di_konteks"
+    assert "userContext" in g["teks"]
+
+
+def test_konteks_dengan_jawaban_lolos(tmp_path):
+    paths, r = _inspeksi_topik(tmp_path)
+    g = im.cek_izin(r["inspect_id"], "111", paths, True,
+                    konteks="edit ya. Ini acara Aksi Merah Laksamana Muda, donor darah")
+    assert g["ok"] is True
+
+
+@pytest.mark.parametrize("pasrah", ["edit ya. terserah", "edit ya, langsung saja", "edit ya tanpa konteks"])
+def test_pasrah_eksplisit_dianggap_jawaban(tmp_path, pasrah):
+    paths, r = _inspeksi_topik(tmp_path)
+    assert im.cek_izin(r["inspect_id"], "111", paths, True, konteks=pasrah)["ok"] is True
+
+
+def test_konteks_lebih_pendek_dari_awal_ditolak(tmp_path):
+    paths, r = _inspeksi_topik(tmp_path, konteks="edit video ini sebagus mungkin untuk tiktok")
+    g = im.cek_izin(r["inspect_id"], "111", paths, True, konteks="edit")
+    assert g["kode"] == "jawaban_tidak_di_konteks"
+
+
+def test_pemanggil_lama_tanpa_konteks_tidak_diperiksa(tmp_path):
+    """konteks=None = pemanggil yang tidak mengirimnya; perilaku lama utuh."""
+    paths, r = _inspeksi_topik(tmp_path)
+    assert im.cek_izin(r["inspect_id"], "111", paths, True)["ok"] is True
+
+
+def test_tanpa_pertanyaan_topik_konteks_tidak_dipersoalkan(tmp_path, monkeypatch):
+    """Cek ini hanya berlaku bila pertanyaan topik/tujuan memang diajukan."""
+    monkeypatch.setattr(im, "susun_pertanyaan",
+                        lambda ringk, tahu: [p for p in _SEMUA_ASLI(ringk, tahu) if p["kode"] == "fit"])
+    paths = [_video(tmp_path / "v.mp4", w=640, h=360)]
+    r = im.inspeksi(paths, "edit", "111")
+    assert "topik" not in [p["kode"] for p in r["pertanyaan"]]
+    assert im.cek_izin(r["inspect_id"], "111", paths, True, konteks="edit")["ok"] is True
+
+
+_SEMUA_ASLI = im.susun_pertanyaan
+
+
+def test_konteks_user_masuk_cli_check(tmp_path):
+    v = _video(tmp_path / "v.mp4", w=640, h=360)
+    env = {"INSPECT_DIR": str(tmp_path / "st"), "WHISPER_PYTHON": "/tidak/ada"}
+    _, r = _cli("inspect", {"paths": [v], "konteks": "edit ya", "chat_id": "555"}, env)
+    _, g = _cli("check", {"inspect_id": r["inspect_id"], "chat_id": "555", "paths": [v],
+                          "user_answered": True, "konteks": "edit ya"}, env)
+    assert g["kode"] == "jawaban_tidak_di_konteks"
+    _, g2 = _cli("check", {"inspect_id": r["inspect_id"], "chat_id": "555", "paths": [v],
+                           "user_answered": True, "konteks": "edit ya. Ini acara donor darah Aksi Merah"}, env)
+    assert g2["ok"] is True

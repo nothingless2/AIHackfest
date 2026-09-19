@@ -580,7 +580,25 @@ def _teks_degraded(pertanyaan, inspect_id, paths):
     return "\n".join(baris)
 
 
-def cek_izin(inspect_id, chat_id, paths, user_answered=False):
+_PASRAH = re.compile(r"\b(terserah|langsung saja|tanpa konteks|serahkan|default)\b", re.I)
+
+
+def konteks_memuat_jawaban(konteks, konteks_awal):
+    """Apakah `konteks` memuat sesuatu DI LUAR permintaan awal (atau user pasrah)?
+
+    Celah nyata (19 Sep 23:36): user menjawab "acara donor darah Aksi Merah Laksamana
+    Muda", agent memanggil run dengan userAnswered=true, tapi jawabannya tidak masuk
+    userContext -- judul hasilnya "Acara Sukses: Presentasi & Komunitas Solid" dan user
+    harus mengulang. Ukuran deterministik: tiga kata baru atau lebih dibanding permintaan
+    awal, atau ungkapan pasrah eksplisit ("terserah", "langsung saja").
+    """
+    k = (konteks or "").strip()
+    if _PASRAH.search(k):
+        return True
+    return len(k.split()) - len((konteks_awal or "").split()) >= 3
+
+
+def cek_izin(inspect_id, chat_id, paths, user_answered=False, konteks=None):
     """Gerbang di jalur `run`. Return {"ok": bool, "kode": str, "teks": str}.
 
     Gagal-tertutup: apa pun yang tidak bisa dibuktikan menghasilkan penolakan
@@ -626,6 +644,16 @@ def cek_izin(inspect_id, chat_id, paths, user_answered=False):
                      "Pemeriksaan menemukan hal yang perlu ditanyakan ke user "
                      f"({', '.join(st['pertanyaan'])}). Tanyakan dulu dan tunggu jawabannya, lalu "
                      "panggil lagi dengan userAnswered = true dan userContext berisi jawaban user.")
+    # Pertanyaan topik/tujuan hanya berguna kalau jawabannya SAMPAI ke pipeline. `konteks`
+    # None = pemanggil lama yang tidak mengirimnya (tidak diperiksa); plugin selalu mengirim.
+    if (konteks is not None and st.get("pertanyaan")
+            and {"topik", "tujuan"} & set(st["pertanyaan"])
+            and not konteks_memuat_jawaban(konteks, st.get("konteks_awal", ""))):
+        return tolak("jawaban_tidak_di_konteks",
+                     "userContext belum memuat jawaban user. Pemeriksaan menanyakan topik/tujuan, "
+                     "jadi isi userContext dengan permintaan awal DITAMBAH jawaban user apa adanya "
+                     "(nama tempat, acara, brand dengan ejaan persis). Kalau user menjawab "
+                     "'terserah', tulis itu di userContext. Lalu panggil lagi.")
     return {"ok": True, "kode": "ok", "teks": ""}
 
 
@@ -647,7 +675,8 @@ def main(argv=None):
                          str(masuk.get("chat_id") or ""))
     else:
         hasil = cek_izin(masuk.get("inspect_id") or "", str(masuk.get("chat_id") or ""),
-                         masuk.get("paths") or [], bool(masuk.get("user_answered")))
+                         masuk.get("paths") or [], bool(masuk.get("user_answered")),
+                         masuk.get("konteks"))
     print(json.dumps(hasil, ensure_ascii=False))
     return 0
 

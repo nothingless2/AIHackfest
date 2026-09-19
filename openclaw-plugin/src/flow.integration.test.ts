@@ -95,6 +95,7 @@ beforeAll(async () => {
 
 afterAll(() => rmSync(base, { recursive: true, force: true }));
 
+const KONTEKS = "edit ya. Ini dokumentasi acara Aksi Merah Laksamana Muda, donor darah";
 const berkas = (dir: string, n: number) => Array.from({ length: n }, (_, i) => join(dir, `input-${i + 1}.mp4`));
 const logPlugin = () => {
   const p = join(root, "workspace", "state", "plugin_calls.jsonl");
@@ -172,14 +173,14 @@ describe("gerbang di content_factory_run", () => {
 
   it("menolak inspectId milik chat lain", async () => {
     const r = await toolsLain.content_factory_run.execute(
-      "call_run_3", { mediaPaths: berkas(segar, 3), inspectId, userAnswered: true });
+      "call_run_3", { mediaPaths: berkas(segar, 3), inspectId, userAnswered: true, userContext: KONTEKS });
     expect(r.details.kode).toBe("milik_chat_lain");
     expect(tidakAdaRender() && rawKosong()).toBe(true);
   }, 30_000);
 
   it("menolak bahan yang berbeda dari yang diperiksa", async () => {
     const r = await tools.content_factory_run.execute(
-      "call_run_4", { mediaPaths: berkas(segar, 2), inspectId, userAnswered: true });
+      "call_run_4", { mediaPaths: berkas(segar, 2), inspectId, userAnswered: true, userContext: KONTEKS });
     expect(r.details.kode).toBe("bahan_berbeda");
     expect(tidakAdaRender() && rawKosong()).toBe(true);
   }, 30_000);
@@ -225,6 +226,7 @@ describe("gerbang di content_factory_run", () => {
     rmSync(join(root, "workspace", "state", "stub_run.json"), { force: true });
     const r = await tools.content_factory_run.execute("call_run_menua", {
       mediaPaths: [join(seg2, "input-1.mp4")], inspectId: ins.details.inspectId, userAnswered: true,
+      userContext: KONTEKS,
     });
     expect(r.details.status, teks(r)).toBe("started");
   }, 60_000);
@@ -234,9 +236,20 @@ describe("gerbang di content_factory_run", () => {
     expect(r.details.error).toBe("inspect_required");
   }, 30_000);
 
+  it("menolak kalau jawaban user TIDAK masuk userContext (celah nyata 19 Sep 23:36)", async () => {
+    // bersihkan jejak tes sebelumnya yang sah, supaya "tidak ada render" bisa diperiksa
+    rmSync(join(root, "workspace", "state", "stub_run.json"), { force: true });
+    rmSync(join(root, "workspace", "raw"), { recursive: true, force: true });
+    const r = await tools.content_factory_run.execute(
+      "call_run_tanpa_jawaban", { mediaPaths: berkas(segar, 3), inspectId, userAnswered: true, userContext: "edit ya" });
+    expect(r.details.kode).toBe("jawaban_tidak_di_konteks");
+    expect(teks(r)).toContain("userContext");
+    expect(tidakAdaRender() && rawKosong()).toBe(true);
+  }, 30_000);
+
   it("gagal-tertutup tanpa chat pemicu", async () => {
     const r = await toolsTanpaChat.content_factory_run.execute(
-      "call_run_nochat", { mediaPaths: berkas(segar, 3), inspectId, userAnswered: true });
+      "call_run_nochat", { mediaPaths: berkas(segar, 3), inspectId, userAnswered: true, userContext: KONTEKS });
     expect(r.details.error).toBe("origin_chat_unknown");
   }, 30_000);
 });

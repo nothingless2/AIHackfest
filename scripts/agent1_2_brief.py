@@ -431,6 +431,9 @@ def run():
     brief["target_duration"] = target_durasi
     # User meminta satu teks statis sepanjang video: renderer menyeragamkan scene-nya.
     brief["static_text"] = teks_statis
+    # Disimpan untuk diagnostik: tanpa ini tidak ada cara memeriksa apakah jawaban user
+    # benar-benar sampai ke pipeline (brief 19 Sep 23:36 tidak memuatnya).
+    brief["konteks_user"] = konteks[:800]
     brief["generated_at"] = now_iso()
 
     # --- Seleksi konten: pilih & urutkan potongan ucapan terbaik. Hanya untuk mode

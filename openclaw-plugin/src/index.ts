@@ -657,6 +657,7 @@ export default defineToolPlugin({
                 chat_id: String(originChatId),
                 paths: mediaPaths,
                 user_answered: userAnswered === true,
+                konteks: (userContext ?? "").trim(),
               },
               timeoutMs: 15_000,
               signal,
