@@ -59,7 +59,8 @@ def clear_render_workspace():
     sekaligus di tempat yang lebih tepat karena kini dilindungi lock.
     """
     jumlah = 0
-    pola = ["_segment_*.mp4", "_combined_*.mp4", "_concat_list.txt", "temp_vo.mp3"]
+    pola = ["_segment_*.mp4", "_combined_*.mp4", "_concat_list.txt", "_filter_teks.txt",
+            "_with_music.mp4", "temp_vo.mp3"]
     for p in pola:
         for path in glob.glob(os.path.join(DRAFTS_DIR, p)):
             jumlah += _hapus(path, "file kerja")

@@ -72,9 +72,18 @@ def test_gaya_tanpa_kotak_memakai_garis_tepi(monkeypatch):
     assert "bordercolor=black" in f
 
 
-# ---------- animasi ----------
+# ---------- animasi (gaya KUMULATIF lama) ----------
+#
+# Tiga tes di bawah memeriksa perilaku kumulatif -- kata muncul satu per satu dan
+# menumpuk. Itu perilaku gaya lama ("putih-kotak" dst.), bukan gaya bawaan karaoke,
+# jadi gayanya disebut eksplisit. Perilaku lamanya tetap tersedia dan tetap dijaga.
 
-def test_satu_filter_per_kata():
+@pytest.fixture
+def gaya_lama(monkeypatch):
+    monkeypatch.setattr(ar, "SUBTITLE_STYLE", "putih-kotak")
+
+
+def test_satu_filter_per_kata(gaya_lama):
     """Tiap keadaan adalah drawtext berisi kata yang sudah terucap."""
     sc = [{"start": 0, "end": 3, "text": "a b c", "words": [
         {"word": "a", "start": 0.0, "end": 0.5},
@@ -84,7 +93,7 @@ def test_satu_filter_per_kata():
     assert len(ar.build_drawtext_chain(sc, 1920, 1080)) == 3
 
 
-def test_kata_menumpuk_bukan_berganti():
+def test_kata_menumpuk_bukan_berganti(gaya_lama):
     sc = [{"start": 0, "end": 3, "text": "satu dua", "words": [
         {"word": "satu", "start": 0.0, "end": 0.5},
         {"word": "dua", "start": 0.6, "end": 1.0},
@@ -94,7 +103,7 @@ def test_kata_menumpuk_bukan_berganti():
     assert "text='satu dua'" in f[1], "kata kedua harus menambah, bukan mengganti"
 
 
-def test_kata_aktif_sampai_kata_berikutnya_muncul():
+def test_kata_aktif_sampai_kata_berikutnya_muncul(gaya_lama):
     sc = [{"start": 0, "end": 5, "text": "a b", "words": [
         {"word": "a", "start": 1.0, "end": 1.4},
         {"word": "b", "start": 2.0, "end": 2.5},

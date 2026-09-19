@@ -166,6 +166,24 @@ const runParams = Type.Object({
         "ke voice-over AI supaya videonya tidak sunyi.",
     }),
   ),
+  subtitleStyle: Type.Optional(
+    Type.Union(
+      [
+        Type.Literal("karaoke"), Type.Literal("karaoke-tebal"), Type.Literal("karaoke-kapital"),
+        Type.Literal("putih-kotak"), Type.Literal("kuning-kotak"),
+        Type.Literal("putih-tebal"), Type.Literal("kuning"),
+      ],
+      {
+        description:
+          "Gaya subtitle. 'karaoke' (default): seluruh frasa diam di tempat dan kata " +
+          "yang sedang diucapkan menyala kuning, dengan kotak gelap. 'karaoke-tebal': " +
+          "sama tapi tanpa kotak (outline). 'karaoke-kapital': huruf besar semua. " +
+          "Gaya lama tanpa sorotan kata: 'putih-kotak', 'kuning-kotak', 'putih-tebal', " +
+          "'kuning' (teks menumpuk kata demi kata). Isi HANYA kalau user meminta " +
+          "gaya subtitle tertentu.",
+      },
+    ),
+  ),
   editMode: Type.Optional(
     Type.Union(
       [Type.Literal("auto"), Type.Literal("full")],
@@ -428,6 +446,7 @@ export default defineToolPlugin({
               durationSeconds?: number;
               music?: string;
               editMode?: string;
+              subtitleStyle?: string;
               musicMood?: string;
             },
           ) {
@@ -449,7 +468,7 @@ export default defineToolPlugin({
 
             const {
               mediaPaths, userContext, audioMode, voicePersona, aspectRatio, fitMode,
-              durationSeconds, music, musicMood, editMode,
+              durationSeconds, music, musicMood, editMode, subtitleStyle,
             } =
               params;
 
@@ -475,6 +494,7 @@ export default defineToolPlugin({
               durationSeconds: durationSeconds ?? null,
               music: music ?? null,
               editMode: editMode ?? null,
+              subtitleStyle: subtitleStyle ?? null,
               musicMood: musicMood ?? null,
               // Path yang BENAR-BENAR dikirim model, plus hasil validasinya.
               // Tanpa ini, penolakan "file tidak ditemukan" tidak bisa didiagnosis
@@ -571,6 +591,9 @@ export default defineToolPlugin({
             }
             if (editMode) {
               pipelineEnv.CONTENT_FACTORY_EDIT = editMode;
+            }
+            if (subtitleStyle) {
+              pipelineEnv.SUBTITLE_STYLE = subtitleStyle;
             }
             if (music) {
               pipelineEnv.CONTENT_FACTORY_MUSIC = music;

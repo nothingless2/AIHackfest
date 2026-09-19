@@ -39,6 +39,7 @@ from music import (  # noqa: E402
     music_wanted, pick_track, requested_mood,
 )
 from spoken import prompt_rule, spoken_text  # noqa: E402
+from subtitle_layout import layout_group  # noqa: E402
 from thumbnail import (  # noqa: E402
     THUMBNAIL_ENABLED, extract_thumbnail, thumbnail_time,
 )
@@ -669,12 +670,22 @@ SUBTITLE_MAX_LINES = int(os.getenv("SUBTITLE_MAX_LINES", "2"))
 SAFE_BOTTOM_RATIO = float(os.getenv("SAFE_BOTTOM_RATIO", "0.156"))
 
 SUBTITLE_STYLES = {
+    # --- Karaoke: SELURUH frasa tampil diam di tempat, hanya kata yang sedang
+    # diucapkan yang berganti warna (kunci "highlight"). Ini gaya bawaan.
+    "karaoke":         {"color": "white", "highlight": "0xFFD400",
+                        "box": "black@0.55", "pad": 24},
+    "karaoke-tebal":   {"color": "white", "highlight": "0xFFD400", "border": 6},
+    "karaoke-kapital": {"color": "white", "highlight": "0xFFD400",
+                        "box": "black@0.55", "pad": 24, "upper": True},
+    # --- Gaya lama: teks KUMULATIF (kata muncul satu per satu, seluruh teks
+    # di-center ulang tiap kata baru sehingga kata sebelumnya bergeser ke kiri).
     "putih-kotak":  {"color": "white",  "box": "black@0.55", "pad": 24},
     "kuning-kotak": {"color": "yellow", "box": "black@0.55", "pad": 24},
     "putih-tebal":  {"color": "white",  "border": 5},
     "kuning":       {"color": "yellow", "border": 4},  # gaya lama
 }
-SUBTITLE_STYLE = os.getenv("SUBTITLE_STYLE", "putih-kotak")
+SUBTITLE_STYLE = os.getenv("SUBTITLE_STYLE", "karaoke")
+DEFAULT_SUBTITLE_STYLE = "karaoke"
 
 
 def subtitle_style():
@@ -682,8 +693,8 @@ def subtitle_style():
     gaya = SUBTITLE_STYLES.get(SUBTITLE_STYLE)
     if gaya is None:
         print(f"[warn] SUBTITLE_STYLE tidak dikenal ({SUBTITLE_STYLE!r}), memakai "
-              f"'putih-kotak'. Pilihan: {', '.join(sorted(SUBTITLE_STYLES))}.")
-        return SUBTITLE_STYLES["putih-kotak"]
+              f"'{DEFAULT_SUBTITLE_STYLE}'. Pilihan: {', '.join(sorted(SUBTITLE_STYLES))}.")
+        return SUBTITLE_STYLES[DEFAULT_SUBTITLE_STYLE]
     return gaya
 
 
@@ -748,6 +759,84 @@ def _drawtext(teks, fs, y, gaya, enable, alpha=None):
     return "".join(bagian)
 
 
+_WARNA_NAMA = {"white": 0xFFFFFF, "yellow": 0xFFFF00, "black": 0x000000}
+
+
+def warna_int(nilai):
+    """'white' / '0xRRGGBB' / '#RRGGBB' / int -> int 0xRRGGBB."""
+    if isinstance(nilai, int):
+        return nilai
+    s = str(nilai).strip().lower()
+    if s in _WARNA_NAMA:
+        return _WARNA_NAMA[s]
+    return int(s.lstrip("#").replace("0x", ""), 16)
+
+
+def _filter_kata(kata, x, dasar, fs, gaya, aktif, grup):
+    """Satu drawtext untuk SATU kata, dengan warna yang berganti menurut waktu.
+
+    `y=<garis_dasar>-ascent`: y pada drawtext adalah puncak tinta string itu, jadi
+    tanpa ini kata tanpa huruf tinggi berdiri lebih rendah daripada tetangganya.
+
+    Warna lewat fontcolor_expr + eif (heksadesimal 6 digit): satu filter per kata
+    cukup, tanpa menggambar kata yang sama dua kali. Pembanding gte*lt (bukan
+    between) supaya di batas antar-kata hanya satu kata yang menyala.
+    """
+    a, b = aktif
+    g0, g1 = grup
+    nyala, biasa = warna_int(gaya["highlight"]), warna_int(gaya["color"])
+    warna = ("0x%{eif\\:if(gte(t\\," + f"{a:.3f}" + ")*lt(t\\," + f"{b:.3f}" + ")\\,"
+             + f"{nyala}\\,{biasa})" + "\\:x\\:6}")
+    bagian = [
+        f"drawtext=fontfile={FONT_PATH}:text='{escape_drawtext(kata)}':fontsize={fs}",
+        f":x={x}:y={dasar}-ascent:fontcolor_expr='{warna}'",
+    ]
+    if not gaya.get("box"):
+        bagian.append(f":bordercolor=black:borderw={gaya.get('border', 5)}"
+                      ":shadowcolor=black@0.55:shadowx=3:shadowy=3")
+    bagian.append(f":enable='between(t,{g0:.3f},{g1:.3f})'")
+    return "".join(bagian)
+
+
+def filter_karaoke(kata, jendela, W, fs, y_top, gaya):
+    """Filter untuk satu tampilan subtitle bergaya karaoke.
+
+    `kata`: [{"word","start","end"}] dengan waktu ABSOLUT di video hasil.
+    `jendela`: (mulai, selesai) tampilan. Kalau kata-katanya tidak muat di
+    SUBTITLE_MAX_LINES baris, tampilan dipecah dua di tengah dan tiap separuh
+    mendapat jendelanya sendiri -- ucapan tidak pernah dipangkas.
+    """
+    g0, g1 = jendela
+    if gaya.get("upper"):
+        kata = [{**w, "word": w["word"].upper()} for w in kata]
+    tata = layout_group(
+        kata, font_path=FONT_PATH, fs=fs, canvas_w=W, max_lines=SUBTITLE_MAX_LINES,
+        y_top=y_top, pad_x=gaya.get("pad", 24), pad_y=round(gaya.get("pad", 24) * 0.75))
+    if tata is None:
+        if len(kata) < 2:      # satu kata tak bisa dipecah lagi; layout_group
+            return []          # sendiri tidak menolaknya, jadi ini hanya pengaman
+        t = len(kata) // 2
+        batas = float(kata[t].get("start") or g0)
+        return (filter_karaoke(kata[:t], (g0, batas), W, fs, y_top, gaya)
+                + filter_karaoke(kata[t:], (batas, g1), W, fs, y_top, gaya))
+
+    filters = []
+    if gaya.get("box"):
+        x, yb, w, h = tata["box"]
+        filters.append(f"drawbox=x={x}:y={yb}:w={w}:h={h}:color={gaya['box']}:t=fill"
+                       f":enable='between(t,{g0:.3f},{g1:.3f})'")
+    urut = [(ln["baseline"], w) for ln in tata["lines"] for w in ln["words"]]
+    for i, (dasar, w) in enumerate(urut):
+        mulai = float(w["start"] if w["start"] is not None else g0)
+        nxt = urut[i + 1][1]["start"] if i + 1 < len(urut) else None
+        selesai = float(nxt) if nxt is not None else float(g1)
+        if selesai <= mulai:
+            selesai = mulai + 0.05
+        filters.append(_filter_kata(w["word"], w["x"], dasar, fs, gaya,
+                                    (mulai, selesai), (g0, g1)))
+    return filters
+
+
 def build_drawtext_chain(scenes, video_height, video_width=None):
     """Filter drawtext per scene, dengan animasi.
 
@@ -770,6 +859,9 @@ def build_drawtext_chain(scenes, video_height, video_width=None):
             continue
 
         kata = sc.get("words") or []
+        if kata and gaya.get("highlight"):
+            filters.extend(filter_karaoke(kata, (float(start), float(end)), W, fs, y, gaya))
+            continue
         if kata:
             for i, w in enumerate(kata):
                 terucap = " ".join(k["word"] for k in kata[: i + 1])
@@ -796,11 +888,21 @@ def apply_text_overlay(input_path, scenes, output_path):
     if not filters:
         os.replace(input_path, output_path)
         return
-    run_ffmpeg(
-        ["-i", input_path, "-vf", ",".join(filters), "-c:v", "libx264",
-         "-pix_fmt", "yuv420p", "-preset", "fast", output_path],
-        "overlay teks",
-    )
+    # Rantai filter lewat BERKAS, bukan argumen -vf: satu argumen di Linux dibatasi
+    # 128 KB (MAX_ARG_STRLEN). Video 68 detik dengan ~200 kata memakai puluhan
+    # KB pada gaya lama, dan gaya karaoke menambah filter per kata + kotak.
+    skrip = os.path.join(os.path.dirname(os.path.abspath(output_path)), "_filter_teks.txt")
+    with open(skrip, "w", encoding="utf-8") as f:
+        f.write(",".join(filters))
+    try:
+        run_ffmpeg(
+            ["-i", input_path, "-filter_script:v", skrip, "-c:v", "libx264",
+             "-pix_fmt", "yuv420p", "-preset", "fast", output_path],
+            "overlay teks",
+        )
+    finally:
+        if os.path.exists(skrip):
+            os.remove(skrip)
 
 
 def mux_audio(video_path, audio_path, output_path):
