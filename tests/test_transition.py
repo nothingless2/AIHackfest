@@ -151,3 +151,80 @@ def test_kontrol_positif_fade_masuk_memang_menggelapkan(sumber_terang, tmp_path)
     seg = str(tmp_path / "seg_fade.mp4")
     ar.build_segment(sumber_terang, 2.0, seg, keep_audio=False, fade_in=True)
     assert _yavg_frame_pertama(seg) < 30, "kontrol positif gagal: alat ukur tidak mendeteksi fade"
+
+
+# ---------- aturan: hard cut di dalam klip, fade hanya di sambungan yang pantas ----------
+
+def test_potongan_di_dalam_klip_selalu_hard_cut():
+    """Keluhan nyata user: 17 kedipan hitam dalam 68,9 detik. Sebabnya fade
+    dipasang per segmen, sedangkan pemotongan jeda memecah SATU klip jadi
+    beberapa segmen — jadi tiap jeda yang dibuang berkedip hitam di tengah
+    kalimat."""
+    rencana = [{"path": "a", "ranges": [(0, 3), (4, 6), (7, 9)], "asli": 9.0}]
+    assert ar.sambungan_audio_asli(rencana) == [False, False]
+
+
+def test_pergantian_klip_dengan_jeda_panjang_dapat_fade():
+    rencana = [{"path": "a", "ranges": [(0, 5)], "asli": 8.0},   # 3 dtk dibuang di ekor
+               {"path": "b", "ranges": [(0, 4)], "asli": 4.0}]
+    assert ar.sambungan_audio_asli(rencana) == [True]
+
+
+def test_pergantian_klip_tanpa_jeda_tetap_hard_cut():
+    """Ucapan mengalir terus melewati sambungan — fade di situ terbaca sebagai
+    kerusakan, bukan transisi."""
+    rencana = [{"path": "a", "ranges": [(0, 5)], "asli": 5.0},
+               {"path": "b", "ranges": [(0, 4)], "asli": 4.0}]
+    assert ar.sambungan_audio_asli(rencana) == [False]
+
+
+def test_satu_sambungan_mematikan_dua_ujung():
+    """Kalau cuma salah satu ujung dimatikan, layar tetap berkedip di situ."""
+    bendera = ar.fade_flags([False, True], 3)
+    assert bendera[0] == (False, False), "segmen pertama: tanpa fade masuk"
+    assert bendera[1] == (False, True), "hard cut di kiri, fade di kanan"
+    assert bendera[2] == (True, True), "fade masuk, lalu penutup video"
+
+
+def test_segmen_terakhir_selalu_menutup_dengan_fade():
+    assert ar.fade_flags([], 1) == [(False, True)]
+
+
+def test_mode_ai_hard_cut_di_tengah_kalimat():
+    """Tanpa jeda bicara yang bisa diukur, yang dipakai teksnya: sambungan di
+    tengah satu scene berarti kalimatnya masih berjalan."""
+    scenes = [{"start": 0, "end": 6, "text": "satu kalimat panjang"}]
+    assert ar.sambungan_scene([3.0, 3.0], scenes) == [False]
+
+
+def test_mode_ai_fade_di_pergantian_scene():
+    scenes = [{"start": 0, "end": 3, "text": "gagasan satu"},
+              {"start": 3, "end": 6, "text": "gagasan dua"}]
+    assert ar.sambungan_scene([3.0, 3.0], scenes) == [True]
+
+
+def test_tanpa_data_scene_perilaku_lama_dipertahankan():
+    assert ar.sambungan_scene([2.0, 2.0, 2.0], []) == [True, True]
+
+
+def test_sambungan_hard_cut_TIDAK_menghasilkan_frame_hitam(sumber_terang, tmp_path):
+    """Diukur, bukan dipercaya dari daftar argumen: rakit dua segmen dengan
+    sambungan hard cut, lalu pastikan tidak ada frame gelap di sambungannya."""
+    segmen = []
+    for i, (f_in, f_out) in enumerate(ar.fade_flags([False], 2)):
+        p = str(tmp_path / f"seg{i}.mp4")
+        ar.build_segment(sumber_terang, 2.0, p, keep_audio=False,
+                         fade_in=f_in, fade_out=f_out)
+        segmen.append(p)
+    gabung = str(tmp_path / "gabung.mp4")
+    ar.concat_segments(segmen, gabung, str(tmp_path))
+
+    hasil = subprocess.run(
+        ["ffprobe", "-v", "error", "-f", "lavfi", "-i", f"movie={gabung},signalstats",
+         "-show_entries", "frame_tags=lavfi.signalstats.YAVG", "-of", "csv=p=0"],
+        check=True, capture_output=True, text=True)
+    nilai = [float(x) for x in hasil.stdout.split() if x.strip()]
+    # 0,5 detik di sekitar sambungan (detik ke-2 dari total 4 detik)
+    sekitar = nilai[int(1.75 * ar.FPS):int(2.25 * ar.FPS)]
+    assert sekitar, "tidak ada frame di sekitar sambungan"
+    assert min(sekitar) > 60, f"masih ada frame gelap di sambungan: {min(sekitar)}"

@@ -113,6 +113,10 @@ TRANSITION_DURATION = float(os.getenv("TRANSITION_DURATION", "0.2"))
 # Fade audio dibuat jauh lebih pendek: 0,2 dtk cukup untuk memotong suku kata,
 # sedangkan tujuannya hanya mencegah bunyi "klik" di sambungan.
 AUDIO_FADE_DURATION = float(os.getenv("AUDIO_FADE_DURATION", "0.06"))
+# Jeda ASLI (sebelum dipotong) yang membuat sebuah sambungan pantas diberi fade.
+# Di bawah ini artinya ucapan mengalir terus melewati sambungan, dan fade di situ
+# terbaca sebagai kerusakan, bukan transisi.
+TRANSITION_MIN_GAP = float(os.getenv("TRANSITION_MIN_GAP", "0.6"))
 
 AUDIO_RATE = "44100"
 AUDIO_CHANNELS = "2"
@@ -348,27 +352,42 @@ def scale_crop_filter(w=None, h=None, fit=None):
             f"crop={w}:{h},fps={FPS}")
 
 
-def fade_filters(durasi, *, keep_audio, fade_in=True):
+def fade_filters(durasi, *, keep_audio, fade_in=True, fade_out=True):
     """(filter video, filter audio) untuk transisi redup di ujung segmen.
 
     Segmen yang terlalu pendek untuk menampung dua fade dilewati — memaksakannya
     membuat klip nyaris tidak pernah terlihat terang.
 
-    `fade_in=False` dipakai untuk segmen PERTAMA video. Sebabnya bukan selera:
-    fade dari hitam membuat frame 0 benar-benar hitam (terukur: YAVG 16), dan
-    Telegram MENGABAIKAN thumbnail yang kita kirim lalu membuat sendiri dari
-    frame pertama -- hasilnya preview hitam polos untuk setiap video. Diverifikasi
-    langsung: mengirim cover lewat field `thumbnail` MAUPUN bentuk `attach://`
-    yang didokumentasikan sama-sama menghasilkan thumbnail server 644 byte yang
-    hitam. Fade antar klip berikutnya tetap ada.
+    Fade masuk dan keluar dikendalikan TERPISAH, dan itu yang membuat aturan
+    "hard cut di dalam klip, fade hanya di pergantian klip" bisa diwujudkan:
+    satu sambungan mematikan fade keluar segmen sebelumnya SEKALIGUS fade masuk
+    segmen sesudahnya. Kalau hanya salah satu yang dimatikan, layar tetap
+    berkedip hitam di sambungan itu.
+
+    Dua sebab konkret di balik ini:
+    - Frame 0 hitam membuat Telegram (yang mengabaikan thumbnail kita dan memakai
+      frame pertama video) menampilkan preview hitam polos.
+    - Pemotongan jeda memecah satu klip jadi beberapa segmen. Dengan fade di tiap
+      segmen, setiap jeda yang dibuang meninggalkan kedipan hitam DI TENGAH
+      KALIMAT: terukur 17 kedipan dalam 68,9 detik pada video nyata milik user.
+
+    Fade AUDIO tetap dipasang di kedua ujung apa pun keputusan fade video: ia
+    hanya 0,06 detik dan tugasnya mencegah bunyi "klik" di sambungan, bukan
+    menjadi transisi.
     """
     if TRANSITION != "fade" or TRANSITION_DURATION <= 0:
         return "", ""
     d = min(TRANSITION_DURATION, durasi / 3)
     if d < 0.05:
         return "", ""
-    masuk = f"fade=t=in:st=0:d={d:.3f}," if fade_in else ""
-    vf = f"{masuk}fade=t=out:st={max(0, durasi - d):.3f}:d={d:.3f}"
+
+    bagian = []
+    if fade_in:
+        bagian.append(f"fade=t=in:st=0:d={d:.3f}")
+    if fade_out:
+        bagian.append(f"fade=t=out:st={max(0, durasi - d):.3f}:d={d:.3f}")
+    vf = ",".join(bagian)
+
     if not keep_audio:
         return vf, ""
     a = min(AUDIO_FADE_DURATION, durasi / 6)
@@ -376,8 +395,78 @@ def fade_filters(durasi, *, keep_audio, fade_in=True):
     return vf, af
 
 
+
+def fade_flags(batas, jumlah):
+    """[(fade_in, fade_out)] per segmen dari keputusan per SAMBUNGAN.
+
+    `batas[k]` = ada fade di sambungan antara segmen k dan k+1. Satu sambungan
+    mengendalikan dua ujung sekaligus (keluar dari k, masuk ke k+1) -- kalau
+    hanya salah satunya dimatikan, layar tetap berkedip hitam di situ.
+
+    Segmen pertama tidak pernah fade masuk (frame 0 hitam merusak preview), dan
+    segmen terakhir selalu fade keluar (penutup video).
+    """
+    hasil = []
+    for k in range(jumlah):
+        masuk = batas[k - 1] if k > 0 else False
+        keluar = batas[k] if k < jumlah - 1 else True
+        hasil.append((masuk, keluar))
+    return hasil
+
+
+def sambungan_audio_asli(rencana):
+    """Fade di sambungan mana saja, untuk mode audio asli.
+
+    Aturannya, sesuai keputusan user: potongan DI DALAM satu klip (akibat jeda
+    atau bagian yang dibuang) selalu hard cut; pergantian klip diberi fade HANYA
+    kalau di sambungan itu memang ada jeda bicara -- yaitu jeda yang kita buang
+    di ekor klip sebelumnya ditambah jeda di awal klip berikutnya.
+
+    Tanpa aturan ini tiap jeda yang dibuang meninggalkan kedipan hitam di tengah
+    kalimat: terukur 17 kedipan dalam 68,9 detik pada video nyata.
+    """
+    batas = []
+    for i, item in enumerate(rencana):
+        ranges = item["ranges"]
+        for j in range(len(ranges)):
+            terakhir_di_klip = j == len(ranges) - 1
+            if not terakhir_di_klip:
+                batas.append(False)          # potongan internal -> hard cut
+                continue
+            if i == len(rencana) - 1:
+                continue                      # tidak ada sambungan sesudahnya
+            asli = item.get("asli") or ranges[-1][1]
+            ekor = max(0.0, asli - ranges[-1][1])
+            kepala = max(0.0, rencana[i + 1]["ranges"][0][0])
+            batas.append(ekor + kepala >= TRANSITION_MIN_GAP)
+    return batas
+
+
+def sambungan_scene(durasi_klip, scenes):
+    """Fade di sambungan mana saja, untuk mode voice-over AI.
+
+    Di sini tidak ada jeda bicara yang bisa diukur (naskahnya dibacakan tanpa
+    putus), jadi yang dipakai adalah TEKS: sambungan yang jatuh di tengah satu
+    scene berarti kalimatnya masih berjalan -> hard cut. Sambungan yang jatuh
+    di pergantian scene adalah pergantian gagasan -> fade.
+
+    Tanpa data scene sama sekali, semua sambungan diberi fade (perilaku lama).
+    """
+    if not scenes:
+        return [True] * max(0, len(durasi_klip) - 1)
+    batas, waktu = [], 0.0
+    for d in durasi_klip[:-1]:
+        waktu += d
+        di_tengah_scene = any(
+            float(sc.get("start", 0)) + 0.15 < waktu < float(sc.get("end", 0)) - 0.15
+            for sc in scenes if sc.get("end") is not None
+        )
+        batas.append(not di_tengah_scene)
+    return batas
+
+
 def build_segment(asset_path, duration, segment_path, *, keep_audio=False,
-                  potong=None, fade_in=True):
+                  potong=None, fade_in=True, fade_out=True):
     """Satu bahan mentah (gambar atau video) -> satu segmen 9:16 sepanjang `duration`.
 
     `keep_audio=True` (mode audio asli) mempertahankan suara asli video, dan
@@ -387,7 +476,8 @@ def build_segment(asset_path, duration, segment_path, *, keep_audio=False,
     """
     ext = os.path.splitext(asset_path)[1].lower()
     vf = scale_crop_filter()
-    fade_v, fade_a = fade_filters(duration, keep_audio=keep_audio, fade_in=fade_in)
+    fade_v, fade_a = fade_filters(duration, keep_audio=keep_audio,
+                                  fade_in=fade_in, fade_out=fade_out)
     if fade_v:
         vf = f"{vf},{fade_v}"
     audio_enc = ["-c:a", "aac", "-ar", AUDIO_RATE, "-ac", AUDIO_CHANNELS]
@@ -932,7 +1022,10 @@ def render_from_agent_script(
                 ranges = [(0.0, asli)]
             baru = total_kept(ranges)
             dibuang += asli - baru
-            rencana.append({"path": path, "ranges": ranges, "durasi": baru})
+            # `asli` disimpan karena rencana transisi butuh tahu berapa jeda
+            # yang DIBUANG di ekor klip, bukan cuma berapa yang dipertahankan.
+            rencana.append({"path": path, "ranges": ranges, "durasi": baru,
+                            "asli": asli})
 
         durasi_klip = [r["durasi"] for r in rencana]
         total_duration = sum(durasi_klip)
@@ -977,19 +1070,26 @@ def render_from_agent_script(
     if pakai_audio_asli:
         # Satu segmen per rentang yang dipertahankan: klip dengan jeda di tengah
         # jadi beberapa potong, dan concat menyambungnya kembali tanpa jeda itu.
-        for i, item in enumerate(rencana):
-            for j, (a, b) in enumerate(item["ranges"]):
-                seg_path = os.path.join(output_dir, f"_segment_{i}_{j}.mp4")
-                build_segment(item["path"], b - a, seg_path,
-                              keep_audio=True, potong=(a, b),
-                              fade_in=bool(segment_paths))
-                segment_paths.append(seg_path)
+        potongan = [(i, j, a, b) for i, item in enumerate(rencana)
+                    for j, (a, b) in enumerate(item["ranges"])]
+        bendera = fade_flags(sambungan_audio_asli(rencana), len(potongan))
+        for (i, j, a, b), (f_in, f_out) in zip(potongan, bendera):
+            seg_path = os.path.join(output_dir, f"_segment_{i}_{j}.mp4")
+            build_segment(rencana[i]["path"], b - a, seg_path,
+                          keep_audio=True, potong=(a, b),
+                          fade_in=f_in, fade_out=f_out)
+            segment_paths.append(seg_path)
     else:
+        bendera = fade_flags(sambungan_scene(durasi_klip, scenes), len(existing_assets))
         for i, asset_path in enumerate(existing_assets):
             seg_path = os.path.join(output_dir, f"_segment_{i}.mp4")
             build_segment(asset_path, durasi_klip[i], seg_path, keep_audio=False,
-                          fade_in=i > 0)
+                          fade_in=bendera[i][0], fade_out=bendera[i][1])
             segment_paths.append(seg_path)
+
+    fade_dipakai = sum(1 for f_in, _ in bendera if f_in)
+    print(f"✂️ {len(segment_paths)} potongan, {fade_dipakai} sambungan pakai fade, "
+          f"sisanya hard cut.")
 
     silent_combined = os.path.join(output_dir, "_combined_silent.mp4")
     if len(segment_paths) > 1:
