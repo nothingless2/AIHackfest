@@ -343,3 +343,48 @@ def test_timeout_melebihi_latensi_terukur():
     paralel pernah 188 dtk. Timeout yang lebih pendek membunuh panggilan yang
     sebenarnya akan berhasil -- itulah kegagalan 19 Sep."""
     assert t.TRANSCRIBE_TIMEOUT >= 120
+
+
+def test_caption_memberi_tahu_bahan_tanpa_subtitle(monkeypatch, tmp_path):
+    """Video dengan subtitle sebagian jauh lebih baik daripada gagal — tapi user
+    harus DIBERI TAHU, bukan dibiarkan mengira subtitle-nya rusak."""
+    import run_and_deliver as rd
+
+    brief = {"judul": "Uji", "hashtags": [],
+             "transcript_coverage": {"ditranskrip": 6, "total_bahan": 10,
+                                     "tanpa_subtitle": ["a.mp4", "b.mp4", "c.mp4", "d.mp4"]}}
+    terkirim = {}
+
+    monkeypatch.setattr(rd, "read_json", lambda *a, **k: brief)
+    monkeypatch.setattr(rd, "ringkasan_biaya", lambda run_id: "")
+    monkeypatch.setattr(rd, "log_event", lambda *a, **k: None)
+    monkeypatch.setattr(rd, "draft_video_path_for_run", lambda r: str(tmp_path / "v.mp4"))
+    monkeypatch.setattr(rd, "draft_thumb_path_for_run", lambda r: str(tmp_path / "v.jpg"))
+
+    def fake_send(caption, path, *, chat_id, thumb_path=None):
+        terkirim["caption"] = caption
+        return True
+
+    monkeypatch.setattr(rd, "send_video", fake_send)
+    rd.deliver_plugin("run1", "123")
+
+    assert "4 dari 10" in terkirim["caption"]
+    assert "tanpa subtitle" in terkirim["caption"]
+
+
+def test_caption_tidak_berisik_kalau_semua_bersubtitle(monkeypatch, tmp_path):
+    import run_and_deliver as rd
+
+    brief = {"judul": "Uji", "hashtags": [],
+             "transcript_coverage": {"ditranskrip": 3, "total_bahan": 3, "tanpa_subtitle": []}}
+    terkirim = {}
+    monkeypatch.setattr(rd, "read_json", lambda *a, **k: brief)
+    monkeypatch.setattr(rd, "ringkasan_biaya", lambda run_id: "")
+    monkeypatch.setattr(rd, "log_event", lambda *a, **k: None)
+    monkeypatch.setattr(rd, "draft_video_path_for_run", lambda r: str(tmp_path / "v.mp4"))
+    monkeypatch.setattr(rd, "draft_thumb_path_for_run", lambda r: str(tmp_path / "v.jpg"))
+    monkeypatch.setattr(rd, "send_video",
+                        lambda c, p, *, chat_id, thumb_path=None: terkirim.setdefault("caption", c) or True)
+    rd.deliver_plugin("run1", "123")
+
+    assert "tanpa subtitle" not in terkirim["caption"]

@@ -361,6 +361,14 @@ def run():
     brief["transcript_words"] = {nama: d.get("words") or [] for nama, d in rinci.items()}
     bahasa = {d.get("language") for d in rinci.values() if d.get("language")}
     brief["detected_language"] = sorted(bahasa)[0] if len(bahasa) == 1 else (sorted(bahasa) or None)
+    # Berapa bahan yang benar-benar punya subtitle. Tanpa angka ini, bahan yang
+    # gagal/terlewat ditranskrip tampil tanpa teks dan user tidak pernah tahu
+    # bedanya dengan "bahan itu memang tidak ada ucapannya".
+    brief["transcript_coverage"] = {
+        "ditranskrip": len(rinci),
+        "total_bahan": len(asset_names),
+        "tanpa_subtitle": [n for n in asset_names if n not in rinci],
+    }
     brief["media_assets"] = resolve_assets(asset_names)
     brief["asset_names"] = asset_names
     brief["brief_id"] = f"brief_{now_iso()}"

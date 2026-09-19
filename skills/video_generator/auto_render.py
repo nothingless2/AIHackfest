@@ -496,7 +496,12 @@ def subtitle_geometry(video_width, video_height):
     tinggi_blok = SUBTITLE_MAX_LINES * fs * 1.25
     y = round(video_height - video_height * SAFE_BOTTOM_RATIO - tinggi_blok)
     return fs, max(0, y)
-MAX_SUBTITLE_LINES = 3
+# SATU sumber kebenaran untuk batas baris. Dulu ada dua: MAX_SUBTITLE_LINES=3
+# (dipakai split_for_subtitle saat mengemas teks) dan SUBTITLE_MAX_LINES=2
+# (dipakai saat menggambar). Akibatnya potongan dikemas untuk 3 baris lalu
+# dipotong jadi 2 saat digambar -- terukur 4 kata ucapan user hilang diam-diam,
+# diganti "...", pada satu kalimat transkrip biasa.
+MAX_SUBTITLE_LINES = SUBTITLE_MAX_LINES
 
 
 def wrap_text(teks, fontsize, video_width, *, max_lines=MAX_SUBTITLE_LINES):

@@ -53,7 +53,11 @@ TRANSCRIBE_BUDGET = int(os.getenv("TRANSCRIBE_BUDGET_SECONDS", "180"))
 # Permintaan dikirim bersamaan; relay mengantrekannya, tapi terukur tetap ~1,8x
 # lebih cepat daripada berurutan (5 klip: 188 dtk paralel vs ~335 dtk serial).
 TRANSCRIBE_CONCURRENCY = int(os.getenv("TRANSCRIBE_CONCURRENCY", "5"))
-TRANSCRIBE_MAX_ASSETS = int(os.getenv("TRANSCRIBE_MAX_ASSETS", "6"))
+# 10, naik dari 6. Dulu 6 masuk akal karena transkripsi berjalan BERURUTAN dan
+# tiap bahan menambah waktu tahap secara linier. Sekarang permintaan dikirim
+# bersamaan dengan anggaran waktu, jadi batas yang terlalu ketat hanya membuat
+# bahan ke-7 dan seterusnya tampil TANPA subtitle padahal sempat diproses.
+TRANSCRIBE_MAX_ASSETS = int(os.getenv("TRANSCRIBE_MAX_ASSETS", "10"))
 TRANSCRIBE_MAX_SECONDS = int(os.getenv("TRANSCRIBE_MAX_SECONDS", "600"))
 
 # Kosakata yang dibiaskan ke Whisper. Bahasa Indonesia lisan penuh serapan

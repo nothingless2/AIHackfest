@@ -131,3 +131,41 @@ def test_kata_dikelompokkan_agar_muat():
 def test_kelompok_pendek_tetap_satu():
     kata = [{"word": "halo", "start": 0, "end": 1}]
     assert len(ar.chunk_words(kata, 86, 1080)) == 1
+
+
+# ---------- ucapan user tidak boleh hilang diam-diam ----------
+
+def test_tidak_ada_kata_yang_hilang_dari_pemecahan_ke_penggambaran():
+    """Bug nyata: ada DUA batas baris berbeda di file yang sama.
+
+    split_for_subtitle mengemas teks untuk MAX_SUBTITLE_LINES=3, lalu
+    build_drawtext_chain menggambarnya dengan SUBTITLE_MAX_LINES=2 — selisih
+    satu baris itu membuat 4 kata ucapan user hilang diam-diam, diganti "...",
+    pada satu kalimat transkrip biasa.
+
+    Yang dijaga di sini bukan angkanya, tapi akibatnya: apa pun batas barisnya,
+    rantai pemecahan -> penggambaran tidak boleh membuang kata.
+    """
+    kalimat = ("Berapa banyak calon pembeli yang hilang dikarenakan informasi unit "
+               "yang tidak update dan tidak pernah diperbarui oleh tim penjualan")
+    fs, lebar = 48, 1080
+
+    terbaca = []
+    for bagian in ar.split_for_subtitle(kalimat, fs, lebar):
+        digambar = ar.wrap_text(bagian, fs, lebar, max_lines=ar.SUBTITLE_MAX_LINES)
+        assert "..." not in digambar, f"potongan dipangkas: {digambar!r}"
+        terbaca += digambar.split()
+
+    assert terbaca == kalimat.split(), "ada kata ucapan user yang hilang"
+
+
+def test_batas_baris_hanya_satu_sumber():
+    """Dua konstanta untuk hal yang sama adalah cara bug di atas kembali."""
+    assert ar.MAX_SUBTITLE_LINES == ar.SUBTITLE_MAX_LINES
+
+
+def test_teks_sangat_panjang_tetap_dipecah_bukan_dipangkas():
+    panjang = " ".join(f"kata{i}" for i in range(60))
+    bagian = ar.split_for_subtitle(panjang, 48, 1080)
+    assert len(bagian) > 3
+    assert " ".join(bagian).split() == panjang.split()

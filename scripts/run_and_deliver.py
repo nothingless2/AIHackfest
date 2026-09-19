@@ -59,6 +59,14 @@ def deliver_plugin(run_id, chat_id):
         bagian += ["", f"Deskripsi: {deskripsi}"]
     if hashtags:
         bagian += ["", hashtags]
+    cakupan = brief.get("transcript_coverage") or {}
+    kurang = len(cakupan.get("tanpa_subtitle") or [])
+    if kurang:
+        # Dilaporkan, bukan didiamkan: user berhak tahu bagian mana yang tanpa
+        # teks, alih-alih mengira subtitle-nya rusak.
+        bagian += ["", f"ℹ️ {kurang} dari {cakupan.get('total_bahan')} bahan tampil "
+                       "tanpa subtitle (ucapannya tidak terdeteksi atau tidak sempat "
+                       "ditranskrip)."]
     if biaya:
         bagian += ["", biaya]
     bagian += ["", "Balas APPROVE untuk menyetujui atau REVISI untuk perbaikan."]
