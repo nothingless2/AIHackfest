@@ -226,3 +226,23 @@ dari staging -> restart gateway, dengan verifikasi manifest & build di tiap lang
   dipangkas "..."; prompt diberi durasi nyata tiap klip supaya scene menempel di klipnya; caption memberi
   tahu bahwa teks dibuat dari tampilan saja. Deskripsi tool plugin ditulis ulang (dulu menyebut
   "voice-over AI" dan tidak menyebut apa yang tidak ada, sehingga bot menjanjikan koreksi warna dsb).
+
+## 19 Sept (malam) — agent bertanya dulu (inspect -> ask_user -> run)
+
+- Rancangan: `content_factory_inspect` (fakta terukur + pertanyaan yang kurang) lalu
+  `content_factory_run` yang WAJIB membawa `inspectId` sah. Aturan gerbang hanya ada di Python
+  (`scripts/inspect_media.py cek_izin`), diuji di pytest, dipanggil plugin lewat `runPythonJson`
+  (process group dibunuh saat timeout/abort; ada tes vitest + kontrol positif).
+- **OpenClaw sudah punya tool `ask_user`** (jawaban kembali di giliran yang sama). Model
+  memakainya langsung, SEBELUM `inspect`, dengan pertanyaan generik "Ya, langsung saja". Deskripsi
+  tool tidak cukup; arahan tetap di `USER.md` workspace yang berhasil (toolSummary: inspect
+  dipanggil pertama).
+- **Cacat yang nyaris lolos:** penjaga lampiran menolak folder > 30 menit. Jawaban user yang datang
+  lebih lambat akan ditolak "bukan dari pesan ini". Sekarang kesegaran dinilai saat `inspect`,
+  dan `run` hanya mensyaratkan struktur bila ada pemeriksaan sah (`verifyForRun`). Dijaga tes
+  integrasi `flow.integration.test.ts` (folder 3 jam lalu tetap diterima) dengan kontrol positif.
+- E2E lewat CLI OpenClaw TIDAK mungkin: giliran CLI tidak punya `nativeChannelId`, kedua tool
+  menolak (gagal-tertutup, benar). Alur utuh hanya teruji lewat pesan Telegram sungguhan.
+- Penolakan `inspect` kini dicatat di `plugin_calls.jsonl` (dulu hanya yang sukses, sehingga empat
+  panggilan gagal tidak meninggalkan jejak apa pun).
+- `common.write_json` sekarang atomik (butir #8 rencana Fase 2).

@@ -150,9 +150,23 @@ def read_json(path, default=None):
 
 
 def write_json(path, payload):
+    """Tulis JSON secara ATOMIK: ke berkas sementara lalu os.replace.
+
+    Versi lama membuka `path` langsung dengan mode "w" -- yang memotong berkas jadi
+    kosong SEBELUM isinya ditulis. Pembaca (atau penulis kedua) yang datang di
+    antara keduanya melihat berkas kosong/setengah jadi. os.replace atomik di
+    filesystem yang sama, jadi pembaca selalu melihat versi lama utuh atau baru utuh.
+    """
     ensure_dirs()
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=4, ensure_ascii=False)
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    sementara = f"{path}.{os.getpid()}.tmp"
+    try:
+        with open(sementara, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=4, ensure_ascii=False)
+        os.replace(sementara, path)
+    finally:
+        if os.path.exists(sementara):
+            os.remove(sementara)
 
 
 def telegram_configured(chat_id=None):

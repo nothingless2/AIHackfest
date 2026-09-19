@@ -34,6 +34,8 @@ def main():
     ap.add_argument("--language", default=None)
     ap.add_argument("--prompt", default=None)
     ap.add_argument("--threads", type=int, default=0, help="0 = semua core")
+    ap.add_argument("--vad-only", action="store_true",
+                    help="hanya ukur detik ucapan (VAD), tanpa memuat model Whisper")
     ap.add_argument("berkas", nargs="+")
     a = ap.parse_args()
 
@@ -42,6 +44,25 @@ def main():
     def kirim(obj):
         sys.stdout.write(json.dumps(obj, ensure_ascii=False) + "\n")
         sys.stdout.flush()
+
+    if a.vad_only:
+        # Pemeriksaan bahan SEBELUM diproses: berapa detik yang berisi ucapan.
+        # Terukur 0,05-0,2 dtk per klip; talking-head 93-97%, B-roll suasana 0-35%.
+        try:
+            from faster_whisper.audio import decode_audio
+            from faster_whisper.vad import VadOptions, get_speech_timestamps
+        except Exception as e:  # noqa: BLE001
+            kirim({"tipe": "fatal", "pesan": f"VAD tidak bisa diimpor: {e}"})
+            return 2
+        for path in a.berkas:
+            try:
+                audio = decode_audio(path, sampling_rate=16000)
+                ts = get_speech_timestamps(audio, VadOptions())
+                kirim({"tipe": "vad", "path": path, "total": round(len(audio) / 16000, 2),
+                       "ucapan": round(sum(s["end"] - s["start"] for s in ts) / 16000, 2)})
+            except Exception as e:  # noqa: BLE001
+                kirim({"tipe": "vad", "path": path, "error": f"{type(e).__name__}: {e}"})
+        return 0
 
     try:
         from faster_whisper import WhisperModel

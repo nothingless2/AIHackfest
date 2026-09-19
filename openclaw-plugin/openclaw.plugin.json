@@ -17,11 +17,15 @@
   },
   "contracts": {
     "tools": [
-      "content_factory_run"
+      "content_factory_run",
+      "content_factory_inspect"
     ]
   },
   "toolMetadata": {
     "content_factory_run": {
+      "optional": true
+    },
+    "content_factory_inspect": {
       "optional": true
     }
   }

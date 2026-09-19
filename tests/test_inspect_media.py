@@ -1,0 +1,419 @@
+"""Pemeriksaan bahan sebelum diproses + gerbang di jalur `run`.
+
+Ada dua hal yang harus terbukti:
+1. PERTANYAAN ditentukan kode dari fakta terukur (bukan dari selera LLM): permintaan
+   yang lengkap tidak ditanyai apa-apa, permintaan singkat atas bahan tanpa ucapan
+   ditanyai konteksnya.
+2. GERBANG di `run` gagal-tertutup: tanpa pemeriksaan, milik chat lain, bahan
+   berbeda, kedaluwarsa, atau belum ditanyakan -> ditolak dengan langkah berikutnya.
+"""
+
+import json
+import os
+import subprocess
+import sys
+import textwrap
+import time
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+import inspect_media as im
+
+
+@pytest.fixture(autouse=True)
+def _isolasi(tmp_path, monkeypatch):
+    """Status pemeriksaan tidak boleh menyentuh workspace/state asli (aturan #6)."""
+    monkeypatch.setattr(im, "INSPECT_DIR", str(tmp_path / "inspect"))
+    monkeypatch.setattr(im, "REQUIRE_INSPECT", True)
+    monkeypatch.setattr(im, "LOCAL_PYTHON", "/tidak/ada/python")   # VAD tak terukur kecuali diatur
+
+
+def _video(path, detik=3.0, w=320, h=568, audio=True, volume=0.3):
+    args = ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i",
+            f"color=c=gray:size={w}x{h}:rate=10:duration={detik}"]
+    if audio:
+        args += ["-f", "lavfi", "-i", f"anoisesrc=d={detik}:c=pink:a={volume}", "-c:a", "aac", "-shortest"]
+    subprocess.run(args + ["-c:v", "libx264", "-pix_fmt", "yuv420p", str(path)],
+                   check=True, capture_output=True)
+    return str(path)
+
+
+def _ringk(**kw):
+    dasar = {"n": 3, "n_video": 3, "n_gambar": 0, "n_berucap": 0, "n_tanpa_ucapan": 3, "n_ragu": 0,
+             "n_tanpa_suara": 0, "n_tidak_terukur": 0, "n_suasana": 3, "n_horizontal": 0,
+             "total_detik": 15.5}
+    dasar.update(kw)
+    return dasar
+
+
+def _tahu(konteks=""):
+    return im.dari_konteks(konteks)
+
+
+def _kode(q):
+    return [p["kode"] for p in q]
+
+
+# ---------- pertanyaan ditentukan fakta ----------
+
+def test_bahan_tanpa_ucapan_ditanyai_konteksnya():
+    """Insiden 19 Sep: B-roll tanpa ucapan diedit 'sebagus mungkin' -> judul hanya tebakan."""
+    q = im.susun_pertanyaan(_ringk(), _tahu("Coba edit video ini sebagus mungkin untuk tiktok"))
+    assert "topik" in _kode(q)
+    assert "tidak tahu ceritanya" in q[0]["tanya"]
+
+
+def test_permintaan_lengkap_atas_talking_head_tidak_ditanyai_apa_apa():
+    ringk = _ringk(n_berucap=3, n_tanpa_ucapan=0, n_suasana=0)
+    konteks = ("Edit jadi konten TikTok 30 detik tentang sistem listing properti untuk developer, "
+               "tanpa suara AI, tambahkan musik lo-fi, ajakan di akhir: hubungi Steven")
+    assert im.susun_pertanyaan(ringk, _tahu(konteks)) == []
+
+
+def test_talking_head_dengan_permintaan_singkat_ditanya_tujuan_dan_platform():
+    q = im.susun_pertanyaan(_ringk(n_berucap=3, n_tanpa_ucapan=0, n_suasana=0), _tahu("edit ya"))
+    assert _kode(q) == ["tujuan", "platform_durasi"]
+
+
+def test_platform_yang_sudah_disebut_tidak_ditanyakan_lagi():
+    q = im.susun_pertanyaan(_ringk(n_berucap=3, n_tanpa_ucapan=0, n_suasana=0),
+                            _tahu("edit untuk reels ya"))
+    assert "platform_durasi" not in _kode(q)
+
+
+def test_durasi_yang_sudah_disebut_tidak_ditanyakan_lagi():
+    q = im.susun_pertanyaan(_ringk(n_berucap=3, n_tanpa_ucapan=0, n_suasana=0), _tahu("edit 20 detik"))
+    assert "platform_durasi" not in _kode(q)
+
+
+def test_maksimal_empat_pertanyaan():
+    ringk = _ringk(n_video=5, n_berucap=5, n_tanpa_ucapan=0, n_suasana=0, n_horizontal=5)
+    q = im.susun_pertanyaan(ringk, _tahu("edit"))
+    assert 1 <= len(q) <= im.MAKS_PERTANYAAN
+
+
+def test_setiap_pertanyaan_punya_default_dan_alasan():
+    for p in im.susun_pertanyaan(_ringk(n_horizontal=3), _tahu("edit")):
+        assert p["default"] and p["alasan"] and p["tanya"]
+
+
+def test_suasana_tanpa_ucapan_ditanya_audio():
+    q = im.susun_pertanyaan(_ringk(), _tahu("edit untuk tiktok"))
+    assert "audio" in _kode(q)
+
+
+def test_audio_yang_sudah_disebut_tidak_ditanyakan():
+    q = im.susun_pertanyaan(_ringk(), _tahu("edit untuk tiktok, tanpa suara ai"))
+    assert "audio" not in _kode(q)
+
+
+def test_bahan_tanpa_suara_ditanya_musik_atau_voiceover():
+    q = im.susun_pertanyaan(_ringk(n_tanpa_ucapan=0, n_tanpa_suara=3, n_suasana=0),
+                            _tahu("edit untuk reels"))
+    assert "audio" in _kode(q)
+
+
+def test_hanya_foto_ditanya_konteks_dan_audio():
+    ringk = _ringk(n_video=0, n_gambar=4, n_tanpa_ucapan=0, n_suasana=0)
+    assert {"topik", "audio"} <= set(_kode(im.susun_pertanyaan(ringk, _tahu("edit"))))
+
+
+def test_banyak_video_berucap_ditanya_boleh_dibuang_atau_utuh():
+    ringk = _ringk(n_video=5, n_berucap=5, n_tanpa_ucapan=0, n_suasana=0)
+    q = im.susun_pertanyaan(ringk, _tahu("edit untuk tiktok 30 detik tentang properti untuk developer"))
+    assert "potong" in _kode(q)
+
+
+def test_sudah_menyebut_buang_atau_utuh_tidak_ditanyakan():
+    ringk = _ringk(n_video=5, n_berucap=5, n_tanpa_ucapan=0, n_suasana=0)
+    q = im.susun_pertanyaan(ringk, _tahu("edit untuk tiktok 30 detik tentang properti, buang take ulang"))
+    assert "potong" not in _kode(q)
+
+
+def test_sumber_horizontal_ke_vertikal_ditanya_cara_memuat():
+    q = im.susun_pertanyaan(_ringk(n_horizontal=3), _tahu("edit untuk tiktok"))
+    fit = [p for p in q if p["kode"] == "fit"]
+    assert fit and "3 dari 3" in fit[0]["tanya"]
+
+
+def test_target_landscape_tidak_ditanya_cara_memuat():
+    q = im.susun_pertanyaan(_ringk(n_horizontal=3), _tahu("edit untuk youtube 16:9"))
+    assert "fit" not in _kode(q)
+
+
+def test_fit_yang_sudah_disebut_tidak_ditanyakan():
+    q = im.susun_pertanyaan(_ringk(n_horizontal=3), _tahu("edit untuk tiktok, pakai latar blur"))
+    assert "fit" not in _kode(q)
+
+
+# ---------- deteksi apa yang sudah disebut ----------
+
+@pytest.mark.parametrize("konteks,kunci,nilai", [
+    ("untuk TikTok", "platform", True), ("buat reels", "platform", True),
+    ("rasio 1:1", "rasio", True), ("9 : 16", "rasio", True),
+    ("bikin 15 detik", "durasi", 15),
+    ("tanpa suara ai", "audio", True), ("pakai voice over", "audio", True),
+    ("tambahkan musik", "musik", True), ("kasih backsound lofi", "musik", True),
+    ("edit saja", "platform", False), ("edit saja", "durasi", None),
+])
+def test_deteksi_yang_sudah_disebut(konteks, kunci, nilai):
+    assert im.dari_konteks(konteks)[kunci] == nilai
+
+
+# ---------- klasifikasi ucapan (ambang dari klip nyata) ----------
+
+@pytest.mark.parametrize("ucapan,harap", [(8.5, "berucap"), (5.2, "berucap"),   # talking-head 93-95%
+                                          (0.0, "tanpa_ucapan"),                # B-roll 0%
+                                          (1.2, "ragu")])                       # klip 35% yg dihalusinasi
+def test_klasifikasi_memakai_angka_terukur(ucapan, harap):
+    f = {"jenis": "video", "punya_audio": True, "ucapan_detik": ucapan, "durasi": 3.6 if ucapan == 1.2 else 8.9}
+    assert im.klasifikasi(f) == harap
+
+
+def test_gambar_dan_tanpa_suara_dan_tak_terukur():
+    assert im.klasifikasi({"jenis": "gambar", "punya_audio": False, "ucapan_detik": None, "durasi": None}) == "gambar"
+    assert im.klasifikasi({"jenis": "video", "punya_audio": False, "ucapan_detik": None, "durasi": 3}) == "tanpa_suara"
+    assert im.klasifikasi({"jenis": "video", "punya_audio": True, "ucapan_detik": None, "durasi": 3}) == "tidak_terukur"
+
+
+# ---------- fakta dari berkas nyata ----------
+
+def test_probe_membaca_durasi_orientasi_dan_audio(tmp_path):
+    v = _video(tmp_path / "a.mp4", detik=2.0, w=640, h=360)
+    f = im.probe_clip(v)
+    assert f["jenis"] == "video" and f["orientasi"] == "horizontal"
+    assert f["durasi"] == pytest.approx(2.0, abs=0.2) and f["punya_audio"] is True
+    assert f["volume_db"] is not None and f["volume_db"] > -45
+
+
+def test_probe_video_tanpa_audio(tmp_path):
+    f = im.probe_clip(_video(tmp_path / "b.mp4", audio=False))
+    assert f["punya_audio"] is False and f["volume_db"] is None
+
+
+def test_probe_berkas_rusak_dilaporkan_bukan_meledak(tmp_path):
+    rusak = tmp_path / "x.mp4"
+    rusak.write_bytes(b"bukan video")
+    assert im.probe_clip(str(rusak))["error"]
+
+
+def test_vad_tidak_tersedia_berarti_tidak_terukur_bukan_nol(tmp_path):
+    """Tidak terukur BUKAN 'tanpa ucapan': menyamakannya akan menuduh video
+    berucap sebagai B-roll (aturan #7 CLAUDE.md)."""
+    v = _video(tmp_path / "a.mp4")
+    fakta = im.kumpulkan_fakta([v])
+    assert fakta[0]["ucapan_detik"] is None and fakta[0]["kelas"] == "tidak_terukur"
+
+
+def test_vad_lewat_worker_palsu_terbaca(tmp_path, monkeypatch):
+    v = _video(tmp_path / "a.mp4", detik=4.0)
+    worker = tmp_path / "vad_palsu.py"
+    worker.write_text(textwrap.dedent('''
+        import json, os, sys
+        for p in [a for a in sys.argv[1:] if os.path.isfile(a)]:
+            print(json.dumps({"tipe": "vad", "path": p, "total": 4.0, "ucapan": 3.8}))
+    '''))
+    monkeypatch.setattr(im, "LOCAL_PYTHON", sys.executable)
+    monkeypatch.setattr(im, "LOCAL_WORKER", str(worker))
+    fakta = im.kumpulkan_fakta([v])
+    assert fakta[0]["ucapan_detik"] == 3.8 and fakta[0]["kelas"] == "berucap"
+
+
+# ---------- inspeksi + gerbang ----------
+
+def _inspeksi(tmp_path, konteks="edit", chat="111", n=2):
+    paths = [_video(tmp_path / f"v{i}.mp4", w=640, h=360) for i in range(n)]
+    return paths, im.inspeksi(paths, konteks, chat)
+
+
+def test_inspeksi_menyimpan_status_dan_mengembalikan_id(tmp_path):
+    paths, r = _inspeksi(tmp_path)
+    assert r["ok"] and len(r["inspect_id"]) == 12
+    st = json.load(open(os.path.join(im.INSPECT_DIR, f"{r['inspect_id']}.json")))
+    assert st["chat_id"] == "111" and st["pertanyaan"] == [p["kode"] for p in r["pertanyaan"]]
+
+
+def test_teks_memuat_id_path_persis_dan_perintah_berhenti(tmp_path):
+    paths, r = _inspeksi(tmp_path)
+    assert r["inspect_id"] in r["teks"]
+    assert json.dumps(paths, ensure_ascii=False) in r["teks"]
+    assert "BERHENTI" in r["teks"] and "JANGAN memanggil" in r["teks"]
+
+
+def _vad_berucap(tmp_path, monkeypatch, detik=3.0):
+    """VAD palsu yang melaporkan hampir seluruh klip berisi ucapan (talking-head)."""
+    worker = tmp_path / "vad_berucap.py"
+    worker.write_text(textwrap.dedent(f'''
+        import json, os, sys
+        for p in [a for a in sys.argv[1:] if os.path.isfile(a)]:
+            print(json.dumps({{"tipe": "vad", "path": p, "total": {detik}, "ucapan": {detik * 0.95}}}))
+    '''))
+    monkeypatch.setattr(im, "LOCAL_PYTHON", sys.executable)
+    monkeypatch.setattr(im, "LOCAL_WORKER", str(worker))
+
+
+def test_tanpa_pertanyaan_teks_menyuruh_langsung_lanjut(tmp_path, monkeypatch):
+    _vad_berucap(tmp_path, monkeypatch)
+    paths = [_video(tmp_path / "v.mp4")]
+    r = im.inspeksi(paths, "edit untuk tiktok 20 detik tentang sistem listing properti developer, "
+                           "tanpa suara ai, pakai musik", "111")
+    assert r["pertanyaan"] == []
+    assert "Tidak ada yang perlu ditanyakan" in r["teks"]
+    assert r["inspect_id"] in r["teks"]
+
+
+def test_tanpa_pertanyaan_gerbang_lolos_tanpa_user_answered(tmp_path, monkeypatch):
+    """Tidak ada yang ditanyakan -> tidak ada yang perlu dijawab."""
+    _vad_berucap(tmp_path, monkeypatch)
+    paths = [_video(tmp_path / "v.mp4")]
+    r = im.inspeksi(paths, "edit untuk tiktok 20 detik tentang sistem listing properti developer, "
+                           "tanpa suara ai, pakai musik", "111")
+    assert im.cek_izin(r["inspect_id"], "111", paths, user_answered=False)["ok"] is True
+
+
+def test_inspeksi_tanpa_chat_ditolak(tmp_path):
+    paths = [_video(tmp_path / "v.mp4")]
+    r = im.inspeksi(paths, "edit", "")
+    assert r["ok"] is False and r["kode"] == "chat_tidak_diketahui"
+    assert not os.path.exists(im.INSPECT_DIR) or not os.listdir(im.INSPECT_DIR)
+
+
+def test_gerbang_lolos_setelah_ditanyakan(tmp_path):
+    paths, r = _inspeksi(tmp_path)
+    assert im.cek_izin(r["inspect_id"], "111", paths, user_answered=True)["ok"] is True
+
+
+def test_gerbang_menolak_tanpa_inspect():
+    r = im.cek_izin("", "111", ["/x/a.mp4"])
+    assert r["ok"] is False and r["kode"] == "wajib_inspect"
+    assert "content_factory_inspect" in r["teks"], "penolakan harus menyebut langkah berikutnya"
+
+
+def test_gerbang_menolak_kalau_belum_ditanyakan(tmp_path):
+    paths, r = _inspeksi(tmp_path)
+    assert r["pertanyaan"], "prasyarat: skenario ini punya pertanyaan"
+    g = im.cek_izin(r["inspect_id"], "111", paths, user_answered=False)
+    assert g["ok"] is False and g["kode"] == "belum_ditanyakan"
+
+
+def test_gerbang_menolak_milik_chat_lain(tmp_path):
+    """Dua user memakai sistem yang sama: pemeriksaan A tidak boleh dipakai B."""
+    paths, r = _inspeksi(tmp_path, chat="111")
+    g = im.cek_izin(r["inspect_id"], "222", paths, user_answered=True)
+    assert g["ok"] is False and g["kode"] == "milik_chat_lain"
+
+
+def test_gerbang_menolak_bahan_berbeda(tmp_path):
+    paths, r = _inspeksi(tmp_path)
+    lain = _video(tmp_path / "lain.mp4", detik=5.0)
+    g = im.cek_izin(r["inspect_id"], "111", [lain], user_answered=True)
+    assert g["ok"] is False and g["kode"] == "bahan_berbeda"
+
+
+def test_gerbang_menolak_kalau_ada_bahan_ditambah(tmp_path):
+    paths, r = _inspeksi(tmp_path)
+    tambahan = _video(tmp_path / "tambah.mp4")
+    g = im.cek_izin(r["inspect_id"], "111", paths + [tambahan], user_answered=True)
+    assert g["kode"] == "bahan_berbeda"
+
+
+def test_urutan_path_tidak_mempengaruhi_kecocokan(tmp_path):
+    paths, r = _inspeksi(tmp_path, n=3)
+    assert im.cek_izin(r["inspect_id"], "111", list(reversed(paths)), True)["ok"] is True
+
+
+def test_gerbang_menolak_kedaluwarsa(tmp_path):
+    paths, r = _inspeksi(tmp_path)
+    p = os.path.join(im.INSPECT_DIR, f"{r['inspect_id']}.json")
+    st = json.load(open(p))
+    st["dibuat"] = (datetime.now(timezone.utc) - timedelta(hours=im.INSPECT_TTL_HOURS + 1)).isoformat()
+    json.dump(st, open(p, "w"))
+    g = im.cek_izin(r["inspect_id"], "111", paths, user_answered=True)
+    assert g["ok"] is False and g["kode"] == "kedaluwarsa"
+
+
+@pytest.mark.parametrize("id_jahat", ["../../etc/passwd", "abc", "A" * 12, "zzzzzzzzzzzz",
+                                      "0123456789ab/../x", "0123456789abcdef"])
+def test_inspect_id_tidak_boleh_menyusun_path_sembarangan(id_jahat):
+    """Divalidasi regex ketat SEBELUM dipakai menyusun path."""
+    g = im.cek_izin(id_jahat, "111", ["/x/a.mp4"], True)
+    assert g["ok"] is False and g["kode"] == "tidak_ditemukan"
+    assert im._path_state(id_jahat) is None
+
+
+def test_id_yang_tidak_pernah_dibuat_ditolak():
+    assert im.cek_izin("0123456789ab", "111", ["/x/a.mp4"], True)["kode"] == "tidak_ditemukan"
+
+
+def test_gerbang_bisa_dimatikan(monkeypatch):
+    monkeypatch.setattr(im, "REQUIRE_INSPECT", False)
+    assert im.cek_izin("", "111", ["/x/a.mp4"])["ok"] is True
+
+
+def test_status_rusak_ditolak_bukan_meledak(tmp_path):
+    paths, r = _inspeksi(tmp_path)
+    open(os.path.join(im.INSPECT_DIR, f"{r['inspect_id']}.json"), "w").write("{rusak")
+    assert im.cek_izin(r["inspect_id"], "111", paths, True)["kode"] == "tidak_ditemukan"
+
+
+def test_kegagalan_pemeriksaan_tidak_menahan_user(tmp_path, monkeypatch):
+    """Pemeriksaan boleh gagal; user tetap dapat dua pertanyaan generik dan bisa lanjut."""
+    monkeypatch.setattr(im, "kumpulkan_fakta", lambda p: (_ for _ in ()).throw(RuntimeError("ffprobe mati")))
+    paths = [_video(tmp_path / "v.mp4")]
+    r = im.inspeksi(paths, "edit", "111")
+    assert r["ok"] and r["degraded"] and len(r["pertanyaan"]) == 2
+    assert im.cek_izin(r["inspect_id"], "111", paths, True)["ok"] is True
+
+
+# ---------- CLI (jalur yang dipakai plugin) ----------
+
+def _cli(perintah, payload, env_tambahan):
+    env = {**os.environ, **env_tambahan}
+    o = subprocess.run([sys.executable, os.path.join(os.path.dirname(im.__file__), "inspect_media.py"), perintah],
+                       input=json.dumps(payload), capture_output=True, text=True, env=env, timeout=60)
+    return o.returncode, json.loads(o.stdout)
+
+
+def test_cli_inspect_lalu_check_satu_objek_json(tmp_path):
+    v = _video(tmp_path / "v.mp4", w=640, h=360)
+    env = {"INSPECT_DIR": str(tmp_path / "st"), "WHISPER_PYTHON": "/tidak/ada"}
+    kode, r = _cli("inspect", {"paths": [v], "konteks": "edit", "chat_id": "555"}, env)
+    assert kode == 0 and r["ok"] and r["inspect_id"]
+    kode, g = _cli("check", {"inspect_id": r["inspect_id"], "chat_id": "555", "paths": [v],
+                             "user_answered": True}, env)
+    assert kode == 0 and g["ok"] is True
+    kode, g2 = _cli("check", {"inspect_id": r["inspect_id"], "chat_id": "999", "paths": [v],
+                              "user_answered": True}, env)
+    assert g2["kode"] == "milik_chat_lain"
+
+
+def test_cli_masukan_rusak_dan_perintah_salah():
+    o = subprocess.run([sys.executable, os.path.join(os.path.dirname(im.__file__), "inspect_media.py"), "inspect"],
+                       input="bukan json", capture_output=True, text=True, timeout=30)
+    assert o.returncode == 2 and json.loads(o.stdout)["kode"] == "masukan_rusak"
+    o = subprocess.run([sys.executable, os.path.join(os.path.dirname(im.__file__), "inspect_media.py"), "apa"],
+                       input="{}", capture_output=True, text=True, timeout=30)
+    assert o.returncode == 2 and json.loads(o.stdout)["kode"] == "penggunaan"
+
+
+# ---------- write_json atomik (butir #8 rencana Fase 2) ----------
+
+def test_write_json_tidak_meninggalkan_berkas_sementara(tmp_path):
+    import common
+    p = str(tmp_path / "x" / "data.json")
+    common.write_json(p, {"a": 1})
+    assert json.load(open(p)) == {"a": 1}
+    assert os.listdir(tmp_path / "x") == ["data.json"]
+
+
+def test_write_json_gagal_tidak_merusak_isi_lama(tmp_path):
+    """Versi lama memotong berkas jadi kosong SEBELUM menulis; kalau serialisasi
+    gagal di tengah, isi lama hilang."""
+    import common
+    p = str(tmp_path / "data.json")
+    common.write_json(p, {"lama": True})
+    with pytest.raises(TypeError):
+        common.write_json(p, {"tidak_bisa": object()})
+    assert json.load(open(p)) == {"lama": True}, "isi lama harus utuh"
+    assert [n for n in os.listdir(tmp_path) if n.endswith(".tmp")] == []

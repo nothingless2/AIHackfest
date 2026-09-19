@@ -5,6 +5,7 @@ import { existsSync, copyFileSync, mkdirSync, appendFileSync, realpathSync, stat
 import { randomUUID } from "node:crypto";
 import { basename, extname, resolve, relative, isAbsolute, dirname } from "node:path";
 import { homedir } from "node:os";
+import { runPythonJson } from "./pythonCall.js";
 
 const SUPPORTED_EXTENSIONS = new Set([
   ".jpg",
@@ -61,6 +62,29 @@ function isInsideRoots(real: string, roots: string[]): boolean {
     const rel = relative(root, real);
     return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
   });
+}
+
+/**
+ * Lampiran untuk `content_factory_run`, dengan kesegaran yang BERSYARAT.
+ *
+ * Struktur (di dalam folder lampiran resmi, satu folder saja, folder terbaca) SELALU
+ * diperiksa. Batas umur 30 menit hanya berlaku kalau tidak ada pemeriksaan bahan yang
+ * sah: `content_factory_inspect` sudah menilai kesegaran SAAT DIPERIKSA, dan gerbangnya
+ * (scripts/inspect_media.py) mengikat hasilnya ke chat dan himpunan berkas yang sama
+ * selama 24 jam. Tanpa pengecualian ini, user yang menjawab pertanyaan agent 40 menit
+ * kemudian akan ditolak dengan "bukan dari pesan ini" padahal bahannya sama persis.
+ *
+ * `izinKode`: "ok" = pemeriksaan sah; selain itu (mis. "dinonaktifkan") = tanpa bukti.
+ */
+export function verifyForRun(
+  paths: string[],
+  izinKode: string | undefined,
+  opts: { roots?: string[]; maxAgeMs?: number } = {},
+): InboundVerdict {
+  const struktur = verifyInbound(paths, { ...opts, maxAgeMs: Number.POSITIVE_INFINITY });
+  if (!struktur.ok) return struktur;
+  if (izinKode === "ok") return struktur;
+  return verifyInbound(paths, opts);
 }
 
 export type InboundVerdict =
@@ -143,17 +167,46 @@ const configSchema = Type.Object({
   ),
 });
 
-const runParams = Type.Object({
-  mediaPaths: Type.Array(
+const mediaPathsSchema = Type.Array(
+  Type.String({
+    description: "Path lokal satu file gambar atau video yang diupload user di chat ini.",
+  }),
+  {
+    minItems: 1,
+    description:
+      "Daftar path lokal semua gambar/video mentah yang diupload user pada pesan ini, " +
+      "yang harus disusun jadi satu konten.",
+  },
+);
+
+const inspectParams = Type.Object({
+  mediaPaths: mediaPathsSchema,
+  userContext: Type.Optional(
     Type.String({
-      description: "Path lokal satu file gambar atau video yang diupload user di chat ini.",
-    }),
-    {
-      minItems: 1,
       description:
-        "Daftar path lokal semua gambar/video mentah yang diupload user pada pesan ini, " +
-        "yang harus disusun jadi satu konten.",
-    },
+        "Kalimat permintaan user APA ADANYA (topik, platform, durasi, gaya yang sudah ia " +
+        "sebut). Dipakai untuk menentukan pertanyaan mana yang MASIH kurang.",
+    }),
+  ),
+});
+
+const runParams = Type.Object({
+  mediaPaths: mediaPathsSchema,
+  inspectId: Type.Optional(
+    Type.String({
+      pattern: "^[a-f0-9]{12}$",
+      description:
+        "ID dari hasil content_factory_inspect untuk bahan yang SAMA. WAJIB: tanpa ini " +
+        "pemanggilan ditolak.",
+    }),
+  ),
+  userAnswered: Type.Optional(
+    Type.Boolean({
+      description:
+        "true HANYA kalau kamu sudah menanyakan pertanyaan dari hasil inspect ke user dan user " +
+        "sudah menjawab (atau menjawab 'terserah'/'langsung saja'). Jangan mengisi true untuk " +
+        "melewati pertanyaan.",
+    }),
   ),
   audioMode: Type.Optional(
     Type.Union([Type.Literal("ai"), Type.Literal("original")], {
@@ -437,7 +490,11 @@ export default defineToolPlugin({
         "Pipeline sendiri mengirim laporan hasilnya (video, cover, dan catatan) ke chat. Cukup " +
         "konfirmasi singkat apa yang diminta user dan bahwa hasil dikirim otomatis; jangan " +
         "merinci pengaturan yang tidak ada di daftar di atas dan jangan menebak hasilnya " +
-        "sebelum terkirim.",
+        "sebelum terkirim.\n\n" +
+        "ALUR WAJIB: (1) panggil content_factory_inspect PALING PERTAMA dengan bahan yang sama " +
+        "(sebelum bertanya apa pun ke user); (2) tanyakan pertanyaan yang diminta hasilnya " +
+        "(lewat ask_user bila tersedia) dan TUNGGU jawaban; (3) baru panggil tool ini dengan " +
+        "inspectId dan userAnswered=true. Pemanggilan tanpa inspectId yang sah akan ditolak.",
       parameters: runParams,
       optional: true,
       factory({ api, toolContext }) {
@@ -456,6 +513,8 @@ export default defineToolPlugin({
             toolCallId: string,
             params: {
               mediaPaths: string[];
+              inspectId?: string;
+              userAnswered?: boolean;
               userContext?: string;
               audioMode?: "ai" | "original";
               voicePersona?: string;
@@ -467,6 +526,7 @@ export default defineToolPlugin({
               subtitleStyle?: string;
               musicMood?: string;
             },
+            signal?: AbortSignal,
           ) {
             const fail = (text: string, details: Record<string, unknown>) => ({
               content: [{ type: "text" as const, text }],
@@ -487,6 +547,7 @@ export default defineToolPlugin({
             const {
               mediaPaths, userContext, audioMode, voicePersona, aspectRatio, fitMode,
               durationSeconds, music, musicMood, editMode, subtitleStyle,
+              inspectId, userAnswered,
             } =
               params;
 
@@ -547,7 +608,66 @@ export default defineToolPlugin({
             // Path dari model wajib berada di dalam folder lampiran OpenClaw.
             // Tanpa ini, satu string dari LLM bisa menyuruh plugin menyalin file
             // mana pun yang terbaca proses gateway ke workspace user.
-            const verdict = verifyInbound(mediaPaths);
+            // Struktur diperiksa SEKARANG (tanpa batas umur); kesegaran dinilai setelah
+            // gerbang, karena pemeriksaan bahan yang sah sudah membuktikannya (lihat
+            // verifyForRun). Urutan ini juga menjaga gerbang tidak pernah menyentuh path
+            // yang jelas bukan lampiran.
+            const struktur = verifyInbound(mediaPaths, { maxAgeMs: Number.POSITIVE_INFINITY });
+            if (!struktur.ok) {
+              return fail(
+                `Lampiran ditolak: ${struktur.reason}. Hanya file yang diupload pada ` +
+                  `pesan ini yang boleh dipakai. Detail: ${struktur.offending.join(", ")}`,
+                { error: "media_not_from_this_message", reason: struktur.reason,
+                  offending: struktur.offending },
+              );
+            }
+
+            // Tujuan pengiriman HARUS chat pemicu (lihat catatan panjang di bawah). Dicek
+            // SEBELUM menyalin file, supaya penolakan tidak meninggalkan salinan.
+            const originChatId = toolContext.nativeChannelId;
+            if (!originChatId) {
+              return fail(
+                "Chat pemicu tidak dapat ditentukan, jadi pipeline tidak dijalankan — " +
+                  "hasilnya tidak punya tujuan yang aman. Lihat workspace/state/plugin_calls.jsonl " +
+                  "untuk konteks yang diterima plugin.",
+                { error: "origin_chat_unknown" },
+              );
+            }
+
+            // GERBANG pemeriksaan bahan: pipeline hanya jalan setelah bahan diperiksa dan --
+            // kalau ada yang perlu ditanyakan -- user sudah ditanya. Ditegakkan di Python
+            // (scripts/inspect_media.py cek_izin) supaya aturannya satu dan diuji satu kali.
+            // GAGAL-TERTUTUP: kalau pemeriksaannya sendiri tidak bisa dijalankan, ditolak.
+            const gate = await runPythonJson({
+              cwd: projectRoot,
+              script: "scripts/inspect_media.py",
+              args: ["check"],
+              stdin: {
+                inspect_id: inspectId ?? "",
+                chat_id: String(originChatId),
+                paths: mediaPaths,
+                user_answered: userAnswered === true,
+              },
+              timeoutMs: 15_000,
+              signal,
+            });
+            if (!gate.ok) {
+              return fail(
+                `Pemeriksaan bahan tidak bisa diverifikasi (${gate.error}), jadi pipeline tidak ` +
+                  "dijalankan. Coba panggil content_factory_inspect lagi.",
+                { error: "inspect_check_failed", detail: gate.error },
+              );
+            }
+            const izin = gate.json as { ok?: boolean; kode?: string; teks?: string };
+            if (!izin.ok) {
+              logInvocation(projectRoot, { tool: "run", toolCallId, ditolak: izin.kode ?? "?" });
+              return fail(izin.teks || "Pemeriksaan bahan diperlukan sebelum memproses.", {
+                error: "inspect_required",
+                kode: izin.kode ?? "unknown",
+              });
+            }
+
+            const verdict = verifyForRun(mediaPaths, izin.kode);
             if (!verdict.ok) {
               return fail(
                 `Lampiran ditolak: ${verdict.reason}. Hanya file yang diupload pada ` +
@@ -567,20 +687,10 @@ export default defineToolPlugin({
               return destName;
             });
 
-            // Tujuan pengiriman HARUS chat pemicu. Kalau tidak diketahui, pipeline
-            // ditolak di sini -- BUKAN dilanjutkan dengan chat cadangan dari .env.
-            // Fallback itulah yang dulu membuat hasil run siapa pun terkirim ke satu
-            // chat tetap, sehingga materi milik user A bisa sampai ke user B.
-            const originChatId = toolContext.nativeChannelId;
-            if (!originChatId) {
-              return fail(
-                "Chat pemicu tidak dapat ditentukan, jadi pipeline tidak dijalankan — " +
-                  "hasilnya tidak punya tujuan yang aman. Lihat workspace/state/plugin_calls.jsonl " +
-                  "untuk konteks yang diterima plugin.",
-                { error: "origin_chat_unknown" },
-              );
-            }
-
+            // Catatan: kalau chat pemicu tidak diketahui, pipeline ditolak (dicek di atas)
+            // -- BUKAN dilanjutkan dengan chat cadangan dari .env. Fallback itulah yang
+            // dulu membuat hasil run siapa pun terkirim ke satu chat tetap, sehingga
+            // materi milik user A bisa sampai ke user B.
             const pipelineEnv: Record<string, string> = {
               CONTENT_FACTORY_ASSETS: copiedNames.join(","),
               // Diteruskan apa adanya (BUKAN runPrefix yang sudah dipotong 8 char) --
@@ -662,6 +772,134 @@ export default defineToolPlugin({
                 draftPath,
                 assets: copiedNames,
                 async: true,
+              },
+            };
+          },
+        };
+      },
+    }),
+    tool({
+      name: "content_factory_inspect",
+      label: "Content Factory Inspect",
+      description:
+        "LANGKAH PERTAMA sebelum content_factory_run. Memeriksa gambar/video yang diupload user " +
+        "(durasi, orientasi, ada tidaknya suara dan ucapan) dan mengembalikan (a) fakta terukur, " +
+        "(b) DAFTAR PERTANYAAN yang benar-benar masih kurang untuk hasil terbaik, dan (c) inspectId.\n\n" +
+        "Cepat (beberapa detik), tidak memakai LLM, tidak merender apa pun, tidak mengubah apa pun.\n\n" +
+        "CARA MEMAKAINYA: panggil tool ini PALING PERTAMA begitu user mengirim bahan dan meminta " +
+        "diedit — SEBELUM menanyakan apa pun ke user dan SEBELUM memakai ask_user. Pertanyaan " +
+        "harus berasal dari hasil tool ini (berdasarkan fakta terukur), bukan dari tebakanmu; " +
+        "kalau kamu sudah bertanya lebih dulu, user akan ditanyai dua kali. Lalu IKUTI instruksi " +
+        "di hasilnya: tanyakan pertanyaan yang diminta (lewat ask_user bila tersedia), tunggu " +
+        "jawabannya, dan hanya kemudian panggil content_factory_run. Kalau tidak ada pertanyaan, " +
+        "langsung lanjut ke content_factory_run. Jangan menambah pertanyaan sendiri di luar " +
+        "daftar itu.",
+      parameters: inspectParams,
+      optional: true,
+      factory({ api, toolContext }) {
+        return {
+          name: "content_factory_inspect",
+          label: "Content Factory Inspect",
+          description: "Periksa bahan user dan tentukan pertanyaan yang masih kurang.",
+          parameters: inspectParams,
+          async execute(
+            toolCallId: string,
+            params: { mediaPaths: string[]; userContext?: string },
+            signal?: AbortSignal,
+          ) {
+            let projectRootDiketahui: string | undefined;
+            // Setiap penolakan DICATAT. Versi pertama hanya mencatat yang sukses, sehingga
+            // empat panggilan yang semuanya gagal tidak meninggalkan jejak apa pun dan
+            // penyebabnya harus ditebak dari ringkasan tool di keluaran agent.
+            const fail = (text: string, details: Record<string, unknown>) => {
+              if (projectRootDiketahui) {
+                logInvocation(projectRootDiketahui, {
+                  tool: "inspect", toolCallId, ditolak: details.error ?? "unknown",
+                  alasan: details.reason ?? details.detail ?? null,
+                });
+              }
+              return {
+                content: [{ type: "text" as const, text }],
+                details: { status: "error", ...details },
+              };
+            };
+
+            let projectRoot: string;
+            try {
+              projectRoot = resolveProjectRoot(
+                (api.pluginConfig as { projectRoot?: string } | undefined)?.projectRoot,
+              );
+              projectRootDiketahui = projectRoot;
+            } catch (e) {
+              return fail(String(e instanceof Error ? e.message : e), {
+                error: "project_root_invalid",
+              });
+            }
+
+            // Sama seperti run: tanpa chat pemicu yang jelas, pemeriksaan tidak punya
+            // pemilik, dan inspectId-nya tidak bisa dicocokkan nanti.
+            const originChatId = toolContext.nativeChannelId;
+            if (!originChatId) {
+              return fail("Chat pemicu tidak dapat ditentukan, pemeriksaan dibatalkan.", {
+                error: "origin_chat_unknown",
+              });
+            }
+
+            // Path dari model tetap TIDAK TEPERCAYA: hanya file lampiran pesan ini.
+            const verdict = verifyInbound(params.mediaPaths);
+            if (!verdict.ok) {
+              return fail(
+                `Lampiran ditolak: ${verdict.reason}. Hanya file yang diupload pada pesan ini ` +
+                  `yang boleh diperiksa. Detail: ${verdict.offending.join(", ")}`,
+                { error: "media_not_from_this_message", reason: verdict.reason },
+              );
+            }
+
+            const hasil = await runPythonJson({
+              cwd: projectRoot,
+              script: "scripts/inspect_media.py",
+              args: ["inspect"],
+              stdin: {
+                paths: params.mediaPaths,
+                konteks: (params.userContext ?? "").trim(),
+                chat_id: String(originChatId),
+              },
+              timeoutMs: 60_000,
+              signal,
+            });
+            if (!hasil.ok) {
+              return fail(
+                `Pemeriksaan bahan gagal (${hasil.error}). Tanyakan ke user secara singkat: ` +
+                  "topiknya apa, untuk platform mana, dan berapa lama — lalu beri tahu bahwa " +
+                  "pemeriksaan otomatis sedang bermasalah.",
+                { error: "inspect_failed", detail: hasil.error },
+              );
+            }
+            const r = hasil.json as {
+              ok?: boolean; teks?: string; inspect_id?: string;
+              pertanyaan?: Array<{ kode: string }>; degraded?: string | null;
+            };
+            if (!r.ok) {
+              return fail(r.teks || "Pemeriksaan bahan gagal.", { error: "inspect_rejected" });
+            }
+
+            logInvocation(projectRoot, {
+              tool: "inspect",
+              toolCallId,
+              chatId: String(originChatId),
+              mediaCount: params.mediaPaths.length,
+              inspectId: r.inspect_id,
+              pertanyaan: (r.pertanyaan ?? []).map((p) => p.kode),
+              degraded: r.degraded ?? null,
+            });
+
+            return {
+              content: [{ type: "text" as const, text: r.teks ?? "" }],
+              details: {
+                status: "inspected",
+                inspectId: r.inspect_id,
+                questions: (r.pertanyaan ?? []).map((p) => p.kode),
+                degraded: r.degraded ?? null,
               },
             };
           },

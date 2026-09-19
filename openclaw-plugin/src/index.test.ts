@@ -4,6 +4,9 @@ import { getToolPluginMetadata } from "openclaw/plugin-sdk/tool-plugin";
 
 describe("content-factory", () => {
   it("declares tool metadata", () => {
-    expect(getToolPluginMetadata(entry)?.tools.map((tool) => tool.name)).toEqual(["content_factory_run"]);
+    expect(getToolPluginMetadata(entry)?.tools.map((tool) => tool.name)).toEqual([
+      "content_factory_run",
+      "content_factory_inspect",
+    ]);
   });
 });

@@ -117,6 +117,9 @@ def sweep_old_run_files(max_age_days=None):
         glob.glob(os.path.join(DRAFTS_DIR, "video_*.mp4"))
         + glob.glob(os.path.join(DRAFTS_DIR, "video_*.jpg"))
         + glob.glob(os.path.join(STATE_DIR, "creative_brief_*.json"))
+        # Status pemeriksaan bahan (scripts/inspect_media.py). Valid hanya 24 jam
+        # (INSPECT_TTL_HOURS); sisanya sampah -- dan memuat cuplikan permintaan user.
+        + glob.glob(os.path.join(STATE_DIR, "inspect", "*.json"))
     )
     for path in kandidat:
         if os.path.basename(path) in _LINDUNGI:

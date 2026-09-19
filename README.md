@@ -54,6 +54,8 @@ jatuh ke default):
 | `TRANSCRIBE_PROVIDER` | `auto` | `local` = Whisper di mesin ini (faster-whisper, venv `.venv-whisper`, pasang dengan `scripts/setup_local_whisper.sh`); `api` = penyedia OpenAI-kompatibel; `auto` = local kalau terpasang, selain itu api. **Tanpa transkrip agent tidak bisa mendengar video** |
 | `TRANSCRIBE_LOCAL_MODEL` | `small` | model Whisper lokal. `small` diukur: kecocokan 0,92 dengan whisper-1, ~0,76x waktu nyata pada 4 core. `medium` ~3x lebih lambat |
 | `TRANSCRIBE_LANGUAGE` | (otomatis) | kunci bahasa Whisper lokal (mis. `id`); kosong = deteksi otomatis |
+| `INSPECT_TTL_HOURS` | `24` | umur pemeriksaan bahan (`inspectId`); lewat itu agent harus memeriksa ulang |
+| `CONTENT_FACTORY_REQUIRE_INSPECT` | `1` | gerbang di `content_factory_run`: wajib ada pemeriksaan bahan yang sah. `0` mematikannya (mis. skrip) |
 | `EDIT_SELECTION` | `1` | editor AI memilih & mengurutkan potongan ucapan terbaik (mode audio asli). LLM hanya mengembalikan NOMOR kandidat; kode yang membangun kandidat, memverifikasi, dan menegakkan batas durasi. Gagal/transkrip tidak lengkap -> pakai semua klip |
 | `EDIT_DEFAULT_MAX_SECONDS` | `60` | batas atas durasi hasil seleksi kalau user tidak meminta durasi tertentu; kelebihannya dipangkas dari skor terendah |
 | `LLM_MODEL` | `gpt-4o` | satu nama model untuk semua panggilan chat (brief, seleksi, koreksi durasi) |
@@ -82,6 +84,23 @@ Pipeline **berhenti** kalau tahap kritis gagal (exit code diperiksa), jadi tidak
 lanjut memproses data basi.
 
 ### B. Lewat chat Telegram (plugin OpenClaw)
+
+**Agent bertanya dulu, lalu memproses** (dua tool, tanpa timer atau proses latar belakang):
+
+1. `content_factory_inspect` — sinkron, ~1-2 detik, tanpa LLM. Mengukur fakta bahan (durasi,
+   orientasi, ada tidaknya suara, persentase ucapan lewat VAD) dan menentukan pertanyaan yang
+   **benar-benar kurang** (maksimal 4) dengan membandingkannya dengan apa yang sudah kamu
+   sebut. Permintaan lengkap atas video berucapan = nol pertanyaan.
+2. Agent menanyakannya lewat `ask_user` (pilihan bernomor dengan default), jawabannya kembali
+   di giliran yang sama.
+3. `content_factory_run` — **ditolak** tanpa `inspectId` yang sah (milik chat yang sama, bahan
+   yang sama, < 24 jam, dan pertanyaannya sudah ditanyakan). Kesegaran lampiran (30 menit)
+   dinilai saat diperiksa, jadi jawaban yang datang belakangan tetap diterima.
+
+Urutan "inspect dulu, baru bertanya" tidak bisa dipaksakan lewat deskripsi tool saja: model
+sempat memanggil `ask_user` lebih dulu dengan pertanyaan generik. Yang efektif adalah arahan
+tetap di `~/.openclaw/workspace/USER.md` (dimuat setiap sesi). Cadangan versi lama:
+`USER.md.sebelum-inspect`.
 
 ```bash
 cd openclaw-plugin && npm install && npm run plugin:build

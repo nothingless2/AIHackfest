@@ -199,3 +199,13 @@ def test_sweep_TIDAK_menyentuh_cover_run_berjalan(dirs):
     tetap = tulis(dirs["drafts"] / "video_output.jpg", umur_hari=90)
     retention.sweep_old_run_files(max_age_days=7)
     assert tetap.exists()
+
+
+# ---------- status pemeriksaan bahan ----------
+
+def test_sweep_membuang_status_pemeriksaan_yang_tua(dirs):
+    (dirs["state"] / "inspect").mkdir()
+    tua = tulis(dirs["state"] / "inspect" / "aaaaaaaaaaaa.json", umur_hari=30)
+    baru = tulis(dirs["state"] / "inspect" / "bbbbbbbbbbbb.json", umur_hari=1)
+    retention.sweep_old_run_files(max_age_days=7)
+    assert not tua.exists() and baru.exists()
