@@ -50,6 +50,11 @@ jatuh ke default):
 | `THUMBNAIL_ENABLED` | `1` | ambil cover JPG dari tengah scene pertama & lampirkan ke video Telegram |
 | `DURATION_MIN` / `DURATION_MAX` | `10` / `60` | rentang durasi yang boleh diminta user; di luar itu dijepit dan user diberi tahu |
 | `DURATION_TOLERANCE` | `0.20` | meleset lebih dari ini memicu SATU kali penulisan ulang naskah |
+| `EDIT_SELECTION` | `1` | editor AI memilih & mengurutkan potongan ucapan terbaik (mode audio asli). LLM hanya mengembalikan NOMOR kandidat; kode yang membangun kandidat, memverifikasi, dan menegakkan batas durasi. Gagal/transkrip tidak lengkap -> pakai semua klip |
+| `EDIT_DEFAULT_MAX_SECONDS` | `60` | batas atas durasi hasil seleksi kalau user tidak meminta durasi tertentu; kelebihannya dipangkas dari skor terendah |
+| `LLM_MODEL` | `gpt-4o` | satu nama model untuk semua panggilan chat (brief, seleksi, koreksi durasi) |
+| `TRANSCRIBE_BASE_URL` / `TRANSCRIBE_API_KEY` | (penyedia utama) | penyedia SENDIRI untuk Whisper; perlu kalau penyedia chat tidak punya Whisper |
+| `TTS_BASE_URL` / `TTS_API_KEY` | (penyedia utama) | penyedia SENDIRI untuk TTS |
 | `MUSIC_ENABLED` | `1` | musik latar, kalau ada berkas di `assets/music/` (lihat README di folder itu) |
 | `MUSIC_BELOW_SPEECH_DB` | `10` | seberapa jauh musik di bawah ucapan; level dihitung dari loudness video, bukan gain tetap |
 | `MUSIC_DUCK_RATIO` / `MUSIC_DUCK_SIDECHAIN_GAIN` | `12` / `8` | kekuatan auto-ducking saat ada yang bicara |

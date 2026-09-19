@@ -184,3 +184,26 @@ dari staging -> restart gateway, dengan verifikasi manifest & build di tiap lang
   (cover diabaikan), jadi manfaat langsungnya ada di `published/` dan publikasi ke
   platform lain — bukan di chat.
 - Cover via model gambar: tidak diaktifkan, tetap di backlog.
+
+## 19 Sept — penyebab "subtitle hilang-hilang" dan pindah penyedia chat
+
+- **Akar masalah subtitle bukan hanya timeout.** Whisper lewat RelayRouter ditolak
+  `403 local:insufficient_quota` (saldo $0,0004, butuh $0,0066/permintaan). Kegagalan itu
+  sebelumnya hanya jadi baris `[warn]` di keluaran yang tertangkap; sekarang tiap bahan
+  yang gagal punya kode alasan dan caption menyebutnya.
+- **Snifox hanya menyediakan model chat** (tanpa Whisper/TTS; 15 model, cek 19 Sep). Chat
+  dipindah ke `core.snifoxai.com/v1`, Whisper/TTS tetap ke RelayRouter lewat `TRANSCRIBE_*`
+  / `TTS_*`. Paket langganan Snifox (Quantum) berbatas **30 RPM per kunci** dan tidak mencakup
+  Claude Haiku (PAYG saja) — kalau memakai paket itu, `LLM_MODEL=anthropic/claude-sonnet-5`.
+- **Seleksi konten** (`scripts/edit_plan.py`): LLM memilih nomor kandidat; kode memverifikasi.
+  Sengaja DIBATALKAN kalau ada bahan yang transkripnya gagal (bukan sekadar tanpa ucapan):
+  memotong dari data separuh berarti membuang ucapan yang tidak pernah dilihat LLM.
+- **Temuan timestamp Whisper:** kata pertama tiap klip dilaporkan mulai di 0,00 padahal suara
+  baru mulai ~0,66. Jangan pernah mengandalkan `start` kata pertama; ujung kata lebih bisa
+  dipercaya. Sebuah penyaring titik-tengah sempat membuang kata pertama hampir tiap klip
+  karena ini — sekarang berbasis tumpang-tindih.
+
+### Backlog
+- Whisper lokal (faster-whisper) sebagai pengganti penyedia berbayar: menghapus ketergantungan
+  saldo dan latensi relay.
+- Seleksi visual (klip buram/gelap) — sekarang seleksi hanya dari transkrip.

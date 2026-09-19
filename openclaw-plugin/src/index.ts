@@ -166,6 +166,19 @@ const runParams = Type.Object({
         "ke voice-over AI supaya videonya tidak sunyi.",
     }),
   ),
+  editMode: Type.Optional(
+    Type.Union(
+      [Type.Literal("auto"), Type.Literal("full")],
+      {
+        description:
+          "Seleksi konten. 'auto' (default): editor AI memilih dan mengurutkan " +
+          "potongan ucapan terbaik, membuang take ulang dan bagian tidak jelas. " +
+          "'full': pakai SEMUA bahan apa adanya, hanya jeda diam yang dipotong. " +
+          "Isi 'full' hanya kalau user minta jangan ada yang dibuang atau bilang " +
+          "semua videonya harus masuk.",
+      },
+    ),
+  ),
   music: Type.Optional(
     Type.Union(
       [Type.Literal("on"), Type.Literal("off")],
@@ -414,6 +427,7 @@ export default defineToolPlugin({
               fitMode?: string;
               durationSeconds?: number;
               music?: string;
+              editMode?: string;
               musicMood?: string;
             },
           ) {
@@ -435,7 +449,7 @@ export default defineToolPlugin({
 
             const {
               mediaPaths, userContext, audioMode, voicePersona, aspectRatio, fitMode,
-              durationSeconds, music, musicMood,
+              durationSeconds, music, musicMood, editMode,
             } =
               params;
 
@@ -460,6 +474,7 @@ export default defineToolPlugin({
               fitMode: fitMode ?? null,
               durationSeconds: durationSeconds ?? null,
               music: music ?? null,
+              editMode: editMode ?? null,
               musicMood: musicMood ?? null,
               // Path yang BENAR-BENAR dikirim model, plus hasil validasinya.
               // Tanpa ini, penolakan "file tidak ditemukan" tidak bisa didiagnosis
@@ -553,6 +568,9 @@ export default defineToolPlugin({
             }
             if (aspectRatio) {
               pipelineEnv.VIDEO_ASPECT = aspectRatio;
+            }
+            if (editMode) {
+              pipelineEnv.CONTENT_FACTORY_EDIT = editMode;
             }
             if (music) {
               pipelineEnv.CONTENT_FACTORY_MUSIC = music;

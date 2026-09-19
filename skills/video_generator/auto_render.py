@@ -32,6 +32,7 @@ from canvas import (  # noqa: E402
 from duration import (  # noqa: E402
     DURATION_TOLERANCE, off_target, word_target,
 )
+from edit_plan import MERGE_GAP  # noqa: E402
 from retry import with_retry_async  # noqa: E402
 from music import (  # noqa: E402
     MusicError, auto_volume, build_filter as music_filter, has_audio_stream,
@@ -42,7 +43,7 @@ from thumbnail import (  # noqa: E402
     THUMBNAIL_ENABLED, extract_thumbnail, thumbnail_time,
 )
 from trim_silence import (  # noqa: E402
-    TRIM_SILENCE, detect_silence, keep_ranges, map_time, total_kept,
+    MIN_KEEP_DURATION, TRIM_SILENCE, detect_silence, keep_ranges, map_time, total_kept,
 )
 from moviepy import AudioFileClip
 
@@ -396,6 +397,90 @@ def fade_filters(durasi, *, keep_audio, fade_in=True, fade_out=True):
 
 
 
+
+def rencana_semua_klip(existing_assets):
+    """Perilaku lama: setiap bahan dipakai utuh, hanya jeda diam yang dibuang.
+
+    Return (rencana, detik_dibuang).
+    """
+    rencana, dibuang = [], 0.0
+    for path in existing_assets:
+        adalah_video = os.path.splitext(path)[1].lower() in VIDEO_EXTENSIONS
+        asli = media_duration(path) if adalah_video else IMAGE_CLIP_SECONDS
+        asli = asli if asli > 0 else IMAGE_CLIP_SECONDS
+        if TRIM_SILENCE and adalah_video:
+            ranges = keep_ranges(asli, detect_silence(path))
+        else:
+            ranges = [(0.0, asli)]
+        baru = total_kept(ranges)
+        dibuang += asli - baru
+        # `asli` disimpan karena rencana transisi butuh tahu berapa jeda
+        # yang DIBUANG di ekor klip, bukan cuma berapa yang dipertahankan.
+        rencana.append({"path": path, "ranges": ranges, "durasi": baru, "asli": asli})
+    return rencana, dibuang
+
+
+def _potong_jeda_dalam(path, ranges, asli, cache):
+    """Buang jeda diam DI DALAM rentang terpilih (perilaku 'potong jeda' yang sama
+    dengan mode biasa). Rentang yang habis terpotong dikembalikan utuh."""
+    if not TRIM_SILENCE:
+        return ranges
+    if path not in cache:
+        cache[path] = keep_ranges(asli, detect_silence(path))
+    hasil = []
+    for a, b in ranges:
+        for ka, kb in cache[path]:
+            x, y = max(a, ka), min(b, kb)
+            if y - x >= MIN_KEEP_DURATION:
+                hasil.append((x, y))
+    return hasil or ranges
+
+
+def rencana_dari_plan(plan, existing_assets):
+    """Ubah rencana seleksi (dari tahap brief) menjadi `rencana` renderer.
+
+    Diverifikasi ULANG di sini terhadap berkas yang benar-benar ada, meskipun
+    brief sudah memverifikasinya: nama berkas harus ada di daftar bahan, dan
+    rentang dijepit ke durasi nyata. Pick yang tidak lolos dibuang, bukan
+    dipercaya. Return [] kalau tidak ada yang tersisa (pemanggil kembali ke
+    perilaku lama).
+    """
+    peta = {os.path.basename(p): p for p in existing_assets}
+    durasi_cache, jeda_cache, item_list = {}, {}, []
+
+    for pick in plan.get("picks") or []:
+        path = peta.get(pick.get("file"))
+        if not path:
+            print(f"[warn] seleksi: {pick.get('file')!r} tidak ada di daftar bahan — dilewati.")
+            continue
+        if path not in durasi_cache:
+            durasi_cache[path] = media_duration(path)
+        asli = durasi_cache[path]
+        a, b = pick["range"]
+        a, b = max(0.0, float(a)), min(float(b), asli) if asli > 0 else float(b)
+        if b - a < 0.3:
+            continue
+
+        anak = item_list[-1] if item_list else None
+        if anak and anak["path"] == path:
+            # Klip yang sama berurutan: satu item, beberapa rentang (hard cut di
+            # antaranya). Rentang yang nyaris bersambung digabung supaya tidak
+            # ada loncatan tanpa alasan.
+            terakhir_a, terakhir_b = anak["ranges"][-1]
+            if a - terakhir_b <= MERGE_GAP and a >= terakhir_a:
+                anak["ranges"][-1] = (terakhir_a, max(terakhir_b, b))
+            else:
+                anak["ranges"].append((a, b))
+        else:
+            item_list.append({"path": path, "ranges": [(a, b)], "asli": asli,
+                              "fade_masuk": bool(pick.get("fade_masuk"))})
+
+    for item in item_list:
+        item["ranges"] = _potong_jeda_dalam(item["path"], item["ranges"], item["asli"], jeda_cache)
+        item["durasi"] = total_kept(item["ranges"])
+    return [i for i in item_list if i["durasi"] > 0]
+
+
 def fade_flags(batas, jumlah):
     """[(fade_in, fade_out)] per segmen dari keputusan per SAMBUNGAN.
 
@@ -425,6 +510,9 @@ def sambungan_audio_asli(rencana):
     Tanpa aturan ini tiap jeda yang dibuang meninggalkan kedipan hitam di tengah
     kalimat: terukur 17 kedipan dalam 68,9 detik pada video nyata.
     """
+    if rencana and "fade_masuk" in rencana[0]:
+        return sambungan_plan(rencana)
+
     batas = []
     for i, item in enumerate(rencana):
         ranges = item["ranges"]
@@ -439,6 +527,25 @@ def sambungan_audio_asli(rencana):
             ekor = max(0.0, asli - ranges[-1][1])
             kepala = max(0.0, rencana[i + 1]["ranges"][0][0])
             batas.append(ekor + kepala >= TRANSITION_MIN_GAP)
+    return batas
+
+
+def sambungan_plan(rencana):
+    """Fade di sambungan mana saja, untuk rencana hasil SELEKSI KONTEN.
+
+    Di sini keputusannya semantik, bukan fisik: potongan di dalam satu klip
+    (bagian yang dibuang di antaranya) selalu hard cut, dan pergantian klip
+    hanya diberi fade kalau editor menandainya sebagai pergantian topik --
+    sudah dibatasi sepertiga oleh susun_rencana(). Sesuai keputusan user:
+    "hard cut untuk konten yang tidak sesuai, fade untuk pergantian klip tapi
+    tidak semuanya".
+    """
+    batas = []
+    for i, item in enumerate(rencana):
+        n = len(item["ranges"])
+        batas.extend([False] * (n - 1))
+        if i < len(rencana) - 1:
+            batas.append(bool(rencana[i + 1].get("fade_masuk")))
     return batas
 
 
@@ -773,6 +880,25 @@ def chunk_words(words, fs, video_width, *, max_lines=None):
     return kelompok
 
 
+def _di_dalam(t0, t1, ranges):
+    """Kata [t0, t1] ikut terdengar di salah satu rentang yang dipertahankan?
+
+    Berdasarkan TUMPANG-TINDIH, bukan titik tengah. Alasannya terukur pada klip
+    nyata: Whisper melaporkan kata pertama setiap klip mulai di 0,00 padahal
+    suaranya baru mulai ~0,66 (silencedetect: hening 0,28-0,66), jadi "Berapa"
+    tercatat 0,00-0,96 dengan titik tengah 0,48 -- di LUAR rentang yang dimulai
+    0,54, padahal audionya ada. Penyaring titik-tengah membuang kata pertama
+    hampir setiap klip dari subtitle. Ujung kata (end) jauh lebih bisa dipercaya
+    daripada awalnya, dan tumpang-tindih memanfaatkan itu.
+
+    Ambang: minimal min(0,10 dtk, separuh durasi kata), supaya kata yang sangat
+    pendek pun tidak dibuang hanya karena durasinya kecil.
+    """
+    t0, t1 = float(t0), float(t1)
+    perlu = min(0.10, 0.5 * max(t1 - t0, 0.0))
+    return any(min(b, t1) - max(a, t0) >= perlu for a, b in ranges)
+
+
 def subtitle_scenes(data, rencana, video_width=None, video_height=None):
     """Ubah transkrip jadi scene subtitle dengan waktu ABSOLUT di video hasil.
 
@@ -806,7 +932,12 @@ def subtitle_scenes(data, rencana, video_width=None, video_height=None):
         def geser(t):
             return offset + min(map_time(float(t or 0), ranges), batas)
 
-        kata = per_kata.get(nama) or []
+        # HANYA kata yang jatuh di bagian yang dipertahankan. Tanpa penyaringan ini,
+        # seleksi konten membocorkan teks kalimat yang DIBUANG: kelompok kata
+        # dibentuk dari seluruh ucapan klip, lalu waktunya dipetakan ke potongan
+        # yang dipertahankan, sehingga teks yang tidak diucapkan ikut tampil.
+        kata = [w for w in (per_kata.get(nama) or [])
+                if _di_dalam(w.get("start", 0), w.get("end", 0), ranges)]
         if kata:
             for kelompok in chunk_words(kata, fs, W):
                 mulai_w = geser(kelompok[0].get("start", 0))
@@ -825,6 +956,11 @@ def subtitle_scenes(data, rencana, video_width=None, video_height=None):
                     ],
                 })
         else:
+            # TIDAK disaring per-rentang seperti jalur kata, dan sengaja: segmen di
+            # area yang dibuang sudah runtuh jadi durasi nol lewat map_time() lalu
+            # dilewati di bawah, sedangkan penyaring titik-tengah akan salah
+            # membuang segmen panjang yang hanya SEBAGIAN masuk rentang (segmen
+            # [0, 99] pada klip 3 detik titik tengahnya di luar klip).
             for seg in per_segmen.get(nama, []):
                 teks = (seg.get("text") or "").strip()
                 m, sel = geser(seg.get("start", 0)), geser(seg.get("end", 0))
@@ -984,6 +1120,7 @@ def render_from_agent_script(
 
     audio_mode = (data.get("audio_mode") or "ai").strip().lower()
     pakai_audio_asli = audio_mode == "original"
+    edit_dipakai = False
 
     full_vo = data.get("full_voice_over", "")
     if not full_vo and not pakai_audio_asli:
@@ -1013,21 +1150,19 @@ def render_from_agent_script(
         # Durasi ditentukan bahan, bukan TTS: tiap klip main sepanjang aslinya
         # supaya ucapan user tidak terpotong di tengah kalimat.
         print("🔊 Memakai AUDIO ASLI dari video user (tanpa voice-over AI).")
-        rencana, dibuang = [], 0.0
-        for path in existing_assets:
-            adalah_video = os.path.splitext(path)[1].lower() in VIDEO_EXTENSIONS
-            asli = media_duration(path) if adalah_video else IMAGE_CLIP_SECONDS
-            asli = asli if asli > 0 else IMAGE_CLIP_SECONDS
-            if TRIM_SILENCE and adalah_video:
-                ranges = keep_ranges(asli, detect_silence(path))
+        plan_edit = data.get("edit_plan")
+        rencana, dibuang, edit_dipakai = [], 0.0, False
+        if plan_edit and plan_edit.get("status") == "applied":
+            rencana = rencana_dari_plan(plan_edit, existing_assets)
+            edit_dipakai = bool(rencana)
+            if edit_dipakai:
+                print(f"🎞️ Seleksi konten dipakai: {plan_edit.get('dipilih')} dari "
+                      f"{plan_edit.get('kandidat')} potongan.")
             else:
-                ranges = [(0.0, asli)]
-            baru = total_kept(ranges)
-            dibuang += asli - baru
-            # `asli` disimpan karena rencana transisi butuh tahu berapa jeda
-            # yang DIBUANG di ekor klip, bukan cuma berapa yang dipertahankan.
-            rencana.append({"path": path, "ranges": ranges, "durasi": baru,
-                            "asli": asli})
+                print("[warn] seleksi konten tidak menghasilkan potongan valid — "
+                      "memakai semua bahan.")
+        if not rencana:
+            rencana, dibuang = rencana_semua_klip(existing_assets)
 
         durasi_klip = [r["durasi"] for r in rencana]
         total_duration = sum(durasi_klip)
@@ -1163,6 +1298,7 @@ def render_from_agent_script(
         target_duration=target_duration,
         actual_duration=round(total_duration, 2),
         duration_adjusted=durasi_dikoreksi,
+        edit_plan_applied=edit_dipakai,
         music=musik_dipakai,
         audio_mode=audio_mode,
         judul=data.get("judul"),

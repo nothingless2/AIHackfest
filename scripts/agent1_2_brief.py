@@ -10,6 +10,7 @@ import sys
 
 from audio_mode import mode_eksplisit, requested_mode, resolve_audio_mode
 from duration import duration_text, requested_duration
+from edit_plan import buat_rencana, ringkas as ringkas_edit
 from spoken import SPOKEN_REWRITE, prompt_rule
 from transcribe import transcribe_assets_report
 from vision import build_image_parts
@@ -382,6 +383,31 @@ def run():
     # pengecekan sama sekali (perilaku lama utuh).
     brief["target_duration"] = target_durasi
     brief["generated_at"] = now_iso()
+
+    # --- Seleksi konten: pilih & urutkan potongan ucapan terbaik. Hanya untuk mode
+    # audio asli (di mode voice-over AI tidak ada ucapan user yang bisa dipilih).
+    # Gagal-aman: apa pun yang tidak beres -> rencana None -> render memakai
+    # perilaku lama (semua klip). Alasannya SELALU dicatat di edit_status.
+    rencana_edit, status_edit = None, {"status": "dilewati", "alasan": "mode voice-over AI"}
+    if mode_audio == "original":
+        if (os.getenv("CONTENT_FACTORY_EDIT") or "auto").strip().lower() == "full":
+            status_edit = {"status": "dilewati",
+                           "alasan": "diminta memakai semua bahan apa adanya"}
+        else:
+            rencana_edit, status_edit = buat_rencana(
+                asset_names, rinci, gagal_transkrip,
+                {n: d.get("duration") for n, d in rinci.items()},
+                konteks=konteks, judul=brief.get("judul", ""),
+                sudut=trend_report.get("content_angle", ""),
+                target_durasi=target_durasi,
+            )
+    brief["edit_plan"] = rencana_edit
+    brief["edit_status"] = status_edit
+    brief["edit_summary"] = ringkas_edit(rencana_edit)
+    if rencana_edit:
+        print(f"[info] seleksi konten: {brief['edit_summary']}")
+    else:
+        print(f"[info] seleksi konten dilewati: {status_edit.get('alasan')}")
 
     if not brief.get("full_voice_over"):
         raise ValueError("LLM tidak menghasilkan 'full_voice_over'; brief tidak dapat dipakai.")

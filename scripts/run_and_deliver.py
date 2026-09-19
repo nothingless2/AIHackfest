@@ -76,6 +76,11 @@ def deliver_plugin(run_id, chat_id):
         bagian += ["", f"Deskripsi: {deskripsi}"]
     if hashtags:
         bagian += ["", hashtags]
+    if brief.get("edit_summary"):
+        # Angkanya dihitung KODE dari rencana yang diverifikasi; hanya alasan
+        # per potongan yang berasal dari LLM.
+        bagian += ["", brief["edit_summary"]]
+
     cakupan = brief.get("transcript_coverage") or {}
     kurang = len(cakupan.get("tanpa_subtitle") or [])
     if kurang:
