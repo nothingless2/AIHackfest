@@ -25,7 +25,7 @@ def rekam(monkeypatch, tmp_path):
     """Rekam setiap panggilan send_video/notify beserta chat tujuannya."""
     calls = {"send_video": [], "notify": []}
 
-    def fake_send_video(caption, video_path, *, chat_id):
+    def fake_send_video(caption, video_path, *, chat_id, thumb_path=None):
         calls["send_video"].append(chat_id)
         return True
 

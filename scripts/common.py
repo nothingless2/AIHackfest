@@ -2,11 +2,14 @@
 
 import json
 import os
+import tempfile
 import traceback
 from datetime import datetime, timezone
 
 import requests
 from dotenv import load_dotenv
+
+from thumbnail import telegram_thumb
 
 # --- Root proyek dihitung dari lokasi file ini, bukan dari cwd pemanggil.
 # Ini penting: pipeline bisa dipanggil dari mana saja (plugin OpenClaw, cron, CLI)
@@ -40,6 +43,20 @@ def draft_video_path_for_run(run_id):
     if not run_id:
         return DRAFT_VIDEO_PATH
     return os.path.join(DRAFTS_DIR, f"video_{run_id}.mp4")
+
+
+DRAFT_THUMB_PATH = os.path.splitext(DRAFT_VIDEO_PATH)[0] + ".jpg"
+
+
+def draft_thumb_path_for_run(run_id):
+    """Padanan draft_video_path_for_run() untuk cover JPG.
+
+    Sengaja berbagi awalan nama dengan videonya (`video_{run_id}.*`) supaya satu
+    pola retensi menyapu keduanya dan cover tidak jadi file yatim.
+    """
+    if not run_id:
+        return DRAFT_THUMB_PATH
+    return os.path.join(DRAFTS_DIR, f"video_{run_id}.jpg")
 
 
 def brief_path_for_run(run_id):
@@ -184,11 +201,59 @@ def notify(agent_key, message, *, chat_id, silent_fail=True):
         return False
 
 
-def send_video(caption, video_path, *, chat_id):
+def _hapus_diam(path):
+    """Hapus file sementara tanpa pernah menggagalkan apa pun karenanya."""
+    if not path:
+        return
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _post_video(caption, video_path, chat_id, thumb_path=None):
+    """Satu panggilan sendVideo. Dipisah supaya bisa diulang tanpa cover.
+
+    File dibuka di sini (bukan diterima sebagai handle) karena handle yang sudah
+    terbaca habis tidak bisa dipakai ulang di percobaan kedua.
+    """
+    terbuka = []
+    try:
+        vf = open(video_path, "rb")
+        terbuka.append(vf)
+        files = {"video": vf}
+        if thumb_path:
+            # Dilampirkan sebagai FILE multipart, bukan string: dokumentasi Bot API
+            # menyatakan thumbnail diabaikan kalau tidak diunggah lewat
+            # multipart/form-data, dan tidak bisa dipakai ulang lewat file_id.
+            tf = open(thumb_path, "rb")
+            terbuka.append(tf)
+            files["thumbnail"] = tf
+        return requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendVideo",
+            data={"chat_id": chat_id, "caption": caption},
+            files=files,
+            timeout=120,
+        )
+    finally:
+        for f in terbuka:
+            f.close()
+
+
+def send_video(caption, video_path, *, chat_id, thumb_path=None):
     """Kirim file video ke SATU chat tertentu. Return True kalau benar-benar terkirim.
 
     `chat_id` wajib dan keyword-only: ini jalur yang mengirim materi milik user,
     jadi tujuannya harus disebut eksplisit oleh pemanggil, tidak pernah ditebak.
+
+    `thumb_path` opsional: JPG ukuran kanvas penuh. Yang DIKIRIM bukan file itu
+    melainkan versi kecilnya (<=320 px, <200 kB sesuai batas Bot API); file
+    besarnya tetap tersimpan sebagai artefak. Cover tidak pernah menggagalkan
+    pengiriman -- kalau request dengan cover ditolak, video dikirim ulang polos.
+
+    CATATAN TERVERIFIKASI: untuk video MP4, Telegram mengabaikan cover ini dan
+    memakai frame pertama video (lihat scripts/thumbnail.py). Jadi yang
+    menentukan preview di chat adalah frame pertama, bukan parameter ini.
     """
     if not chat_id:
         print(f"[warn] chat tujuan tidak diketahui, video TIDAK dikirim: {video_path}")
@@ -202,14 +267,21 @@ def send_video(caption, video_path, *, chat_id):
         print(f"[warn] Video tidak ditemukan: {video_path}")
         return False
 
+    kecil = None
     try:
-        with open(video_path, "rb") as vf:
-            resp = requests.post(
-                f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendVideo",
-                data={"chat_id": chat_id, "caption": caption},
-                files={"video": vf},
-                timeout=120,
-            )
+        if thumb_path and os.path.exists(thumb_path):
+            fd, kandidat = tempfile.mkstemp(prefix="tg_thumb_", suffix=".jpg")
+            os.close(fd)
+            kecil = telegram_thumb(thumb_path, kandidat)
+            if kecil is None:
+                _hapus_diam(kandidat)
+
+        resp = _post_video(caption, video_path, chat_id, kecil)
+        if resp.status_code != 200 and kecil:
+            # Cover ditolak (batas ukuran/format) -- videonya jauh lebih berharga
+            # daripada covernya, jadi coba sekali lagi tanpa cover.
+            print(f"[warn] sendVideo dengan cover ditolak, coba ulang tanpa cover: {resp.text[:200]}")
+            resp = _post_video(caption, video_path, chat_id, None)
         if resp.status_code != 200:
             print(f"[warn] Gagal kirim video ke Telegram: {resp.text}")
             return False
@@ -217,6 +289,8 @@ def send_video(caption, video_path, *, chat_id):
     except Exception as e:
         log_error("send_video", e)
         return False
+    finally:
+        _hapus_diam(kecil)
 
 
 def list_raw_assets():

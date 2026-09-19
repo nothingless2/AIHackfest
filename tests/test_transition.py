@@ -80,3 +80,26 @@ def test_filter_fade_masuk_ke_rantai_segmen(monkeypatch):
     gabung = " ".join(terlihat["args"])
     assert "fade=t=in" in gabung, "fade video harus ikut terkirim"
     assert "afade=t=in" in gabung, "fade audio harus ikut terkirim"
+
+
+# ---------- segmen pertama tidak boleh dibuka dari hitam ----------
+
+def test_segmen_pertama_tanpa_fade_masuk():
+    """Frame 0 hitam bukan cuma soal selera: Telegram MENGABAIKAN thumbnail yang
+    kita kirim dan membuat sendiri dari frame pertama, jadi preview tiap video
+    jadi hitam polos. Diverifikasi lewat pengiriman nyata (field `thumbnail`
+    maupun bentuk `attach://` sama-sama diabaikan)."""
+    vf, _ = ar.fade_filters(4.0, keep_audio=True, fade_in=False)
+    assert "fade=t=in" not in vf
+    assert "fade=t=out" in vf, "fade keluar tetap ada, yang dibuang hanya fade masuk"
+
+
+def test_fade_audio_tetap_ada_di_segmen_pertama():
+    """Audio boleh tetap fade masuk — itu mencegah 'klik' dan tidak menyentuh frame."""
+    _, af = ar.fade_filters(4.0, keep_audio=True, fade_in=False)
+    assert "afade=t=in" in af
+
+
+def test_klip_berikutnya_tetap_fade_masuk():
+    vf, _ = ar.fade_filters(4.0, keep_audio=True, fade_in=True)
+    assert "fade=t=in:st=0" in vf

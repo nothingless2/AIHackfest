@@ -13,9 +13,11 @@ import time
 
 from common import (
     BRIEF_PATH,
+    DRAFT_THUMB_PATH,
     DRAFT_VIDEO_PATH,
     PROJECT_ROOT,
     brief_path_for_run,
+    draft_thumb_path_for_run,
     draft_video_path_for_run,
 )
 from run_lock import acquire_render_lock
@@ -158,6 +160,11 @@ def run_core_stages_locked(
             if code == 0:
                 shutil.copy2(DRAFT_VIDEO_PATH, draft_video_path_for_run(run_id))
                 shutil.copy2(BRIEF_PATH, brief_path_for_run(run_id))
+                # Cover bersifat tambahan: ketiadaannya TIDAK menggagalkan run
+                # yang videonya sudah jadi. Disalin di dalam lock, sama seperti
+                # video, supaya tidak pernah tertimpa run berikutnya.
+                if os.path.exists(DRAFT_THUMB_PATH):
+                    shutil.copy2(DRAFT_THUMB_PATH, draft_thumb_path_for_run(run_id))
                 status = "SUCCESS"
                 return status, None
             status = "FAILED"

@@ -16,6 +16,7 @@ from common import (
     DRAFT_VIDEO_PATH,
     PUBLISHED_DIR,
     brief_path_for_run,
+    draft_thumb_path_for_run,
     draft_video_path_for_run,
     PUBLISH_HISTORY_PATH,
     TELEGRAM_BOT_TOKEN,
@@ -135,6 +136,7 @@ def run():
     mentah = (os.getenv("CONTENT_FACTORY_RUN_ID") or "").strip()
     run_id = sanitize_run_id(mentah) if mentah else None
     video_path = draft_video_path_for_run(run_id)
+    thumb_path = draft_thumb_path_for_run(run_id)
     brief_path = brief_path_for_run(run_id)
     riwayat = {"video_path": video_path, "brief_path": brief_path}
 
@@ -181,7 +183,7 @@ def run():
         # polling getUpdates dengan token yang sama akan saling mencuri balasan.
         with acquire_approval_lock(run_id or "cli"):
             after_update_id = get_latest_update_id()
-            terkirim = send_video(caption, video_path, chat_id=chat_id)
+            terkirim = send_video(caption, video_path, chat_id=chat_id, thumb_path=thumb_path)
             log_event("delivered" if terkirim else "delivery_failed", run_id, chat_id=chat_id)
             if not terkirim:
                 record_history("PENDING_SEND_FAILED", **riwayat)
@@ -224,6 +226,14 @@ def run():
         except OSError as e:
             print(f"[warn] gagal memindah video ke published/: {e}")
             published_path = video_path
+
+        # Cover ikut pindah supaya arsip published/ lengkap dan tidak ada JPG
+        # yatim tertinggal di drafts/ setelah cleanup_run_files(video=False).
+        if os.path.exists(thumb_path):
+            try:
+                shutil.move(thumb_path, os.path.splitext(published_path)[0] + ".jpg")
+            except OSError as e:
+                print(f"[warn] gagal memindah cover ke published/: {e}")
 
         live_url = publish_to_platforms(published_path, caption)
 

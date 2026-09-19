@@ -166,3 +166,11 @@ dari staging -> restart gateway, dengan verifikasi manifest & build di tiap lang
   (tidak satu pun pesan masuk). Bot sendiri sehat (`getMe` -> `@processingssabot`) dan polling aktif.
   Sempat ada `UND_ERR_CONNECT_TIMEOUT` ke API Telegram jam 07:14 (sebelum restart). **Belum terjelaskan —
   verifikasi run_id dari toolCallId masih tertunda.**
+- 19 Sept 08:15–08:25 — uji cover (2.4), 4 kiriman ke chat 1583550141. **Temuan: Telegram
+  mengabaikan thumbnail custom untuk video MP4** dan membuat sendiri dari frame pertama.
+  Diuji dua bentuk request (field `thumbnail` multipart dan `attach://`): keduanya
+  menghasilkan thumbnail server 644 byte **hitam**, padahal cover kita 11 kB dan benar
+  (sudah dilihat langsung). Sebab hitamnya: `fade=t=in:st=0` dipasang di segmen pertama
+  sehingga frame 0 punya YAVG 16. Setelah fade masuk dibuang dari segmen pertama,
+  thumbnail server jadi 7.739 byte berisi gambar asli. Cover JPG tetap dibuat sebagai
+  artefak (dipakai di `published/` dan untuk publikasi ke platform lain).

@@ -26,6 +26,7 @@ from canvas import CanvasError, resolve_canvas
 from common import (
     brief_path_for_run,
     chat_allowed,
+    draft_thumb_path_for_run,
     draft_video_path_for_run,
     ensure_dirs,
     log_error,
@@ -43,6 +44,7 @@ from run_log import log_event
 
 def deliver_plugin(run_id, chat_id):
     video_path = draft_video_path_for_run(run_id)
+    thumb_path = draft_thumb_path_for_run(run_id)
     brief = read_json(brief_path_for_run(run_id), {}) or {}
     judul = brief.get("judul", "Untitled")
     hashtags = " ".join(brief.get("hashtags", []))
@@ -65,7 +67,7 @@ def deliver_plugin(run_id, chat_id):
     if len(caption) > 1000:
         caption = caption[:997] + "..."
 
-    ok = send_video(caption, video_path, chat_id=chat_id)
+    ok = send_video(caption, video_path, chat_id=chat_id, thumb_path=thumb_path)
     log_event("delivered" if ok else "delivery_failed", run_id, chat_id=chat_id)
     if not ok:
         notify(

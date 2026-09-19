@@ -30,6 +30,9 @@ from canvas import (  # noqa: E402
     ASPECT_PRESETS, FIT_MODES, CanvasError, resolve_canvas,
 )
 from retry import with_retry_async  # noqa: E402
+from thumbnail import (  # noqa: E402
+    THUMBNAIL_ENABLED, extract_thumbnail, thumbnail_time,
+)
 from trim_silence import (  # noqa: E402
     TRIM_SILENCE, detect_silence, keep_ranges, map_time, total_kept,
 )
@@ -337,18 +340,27 @@ def scale_crop_filter(w=None, h=None, fit=None):
             f"crop={w}:{h},fps={FPS}")
 
 
-def fade_filters(durasi, *, keep_audio):
+def fade_filters(durasi, *, keep_audio, fade_in=True):
     """(filter video, filter audio) untuk transisi redup di ujung segmen.
 
     Segmen yang terlalu pendek untuk menampung dua fade dilewati — memaksakannya
     membuat klip nyaris tidak pernah terlihat terang.
+
+    `fade_in=False` dipakai untuk segmen PERTAMA video. Sebabnya bukan selera:
+    fade dari hitam membuat frame 0 benar-benar hitam (terukur: YAVG 16), dan
+    Telegram MENGABAIKAN thumbnail yang kita kirim lalu membuat sendiri dari
+    frame pertama -- hasilnya preview hitam polos untuk setiap video. Diverifikasi
+    langsung: mengirim cover lewat field `thumbnail` MAUPUN bentuk `attach://`
+    yang didokumentasikan sama-sama menghasilkan thumbnail server 644 byte yang
+    hitam. Fade antar klip berikutnya tetap ada.
     """
     if TRANSITION != "fade" or TRANSITION_DURATION <= 0:
         return "", ""
     d = min(TRANSITION_DURATION, durasi / 3)
     if d < 0.05:
         return "", ""
-    vf = f"fade=t=in:st=0:d={d:.3f},fade=t=out:st={max(0, durasi - d):.3f}:d={d:.3f}"
+    masuk = f"fade=t=in:st=0:d={d:.3f}," if fade_in else ""
+    vf = f"{masuk}fade=t=out:st={max(0, durasi - d):.3f}:d={d:.3f}"
     if not keep_audio:
         return vf, ""
     a = min(AUDIO_FADE_DURATION, durasi / 6)
@@ -357,7 +369,7 @@ def fade_filters(durasi, *, keep_audio):
 
 
 def build_segment(asset_path, duration, segment_path, *, keep_audio=False,
-                  potong=None):
+                  potong=None, fade_in=True):
     """Satu bahan mentah (gambar atau video) -> satu segmen 9:16 sepanjang `duration`.
 
     `keep_audio=True` (mode audio asli) mempertahankan suara asli video, dan
@@ -367,7 +379,7 @@ def build_segment(asset_path, duration, segment_path, *, keep_audio=False,
     """
     ext = os.path.splitext(asset_path)[1].lower()
     vf = scale_crop_filter()
-    fade_v, fade_a = fade_filters(duration, keep_audio=keep_audio)
+    fade_v, fade_a = fade_filters(duration, keep_audio=keep_audio, fade_in=fade_in)
     if fade_v:
         vf = f"{vf},{fade_v}"
     audio_enc = ["-c:a", "aac", "-ar", AUDIO_RATE, "-ac", AUDIO_CHANNELS]
@@ -807,12 +819,14 @@ def render_from_agent_script(
             for j, (a, b) in enumerate(item["ranges"]):
                 seg_path = os.path.join(output_dir, f"_segment_{i}_{j}.mp4")
                 build_segment(item["path"], b - a, seg_path,
-                              keep_audio=True, potong=(a, b))
+                              keep_audio=True, potong=(a, b),
+                              fade_in=bool(segment_paths))
                 segment_paths.append(seg_path)
     else:
         for i, asset_path in enumerate(existing_assets):
             seg_path = os.path.join(output_dir, f"_segment_{i}.mp4")
-            build_segment(asset_path, durasi_klip[i], seg_path, keep_audio=False)
+            build_segment(asset_path, durasi_klip[i], seg_path, keep_audio=False,
+                          fade_in=i > 0)
             segment_paths.append(seg_path)
 
     silent_combined = os.path.join(output_dir, "_combined_silent.mp4")
@@ -833,6 +847,17 @@ def render_from_agent_script(
         print("🚀 Menggabungkan voice-over...")
         mux_audio(with_text, temp_audio, output_video)
 
+    # Cover diambil SETELAH mux dan SEBELUM cleanup: hanya `output_video` yang
+    # sudah punya teks terbakar, rasio kanvas, dan encoding final. Mengambilnya
+    # dari segmen atau bahan mentah akan menghasilkan gambar tanpa hook.
+    thumb_path = None
+    if THUMBNAIL_ENABLED:
+        detik = thumbnail_time(scenes, total_duration)
+        thumb_path = extract_thumbnail(
+            output_video, os.path.splitext(output_video)[0] + ".jpg", detik)
+        if thumb_path:
+            print(f"🖼️ Cover diambil dari detik {detik:.2f}: {thumb_path}")
+
     for tmp in [*segment_paths, silent_combined, with_text, temp_audio]:
         if tmp and os.path.exists(tmp):
             os.remove(tmp)
@@ -842,6 +867,7 @@ def render_from_agent_script(
     write_status(
         "SUCCESS",
         file_path=output_video,
+        thumb_path=thumb_path,
         duration=total_duration,
         audio_mode=audio_mode,
         judul=data.get("judul"),

@@ -30,8 +30,24 @@ cp .env.example .env   # lalu isi nilainya
 | `OPENAI_API_KEY` | ya | untuk riset tren & penulisan naskah (gpt-4o) |
 | `TELEGRAM_BOT_TOKEN` | ya (untuk approval) | token bot dari BotFather |
 | `TELEGRAM_CHAT_ID` | ya (untuk approval) | tujuan pengiriman draft; wajib karena bot yang memulai percakapan |
+| `ALLOWED_CHAT_IDS` | ya (untuk Telegram) | daftar chat yang boleh memakai pipeline, dipisah koma. KOSONG = tidak ada yang diizinkan (gagal-tertutup) |
 | `APPROVAL_TIMEOUT_SECONDS` | tidak | default `600` |
 | `TARGET_PLATFORM` | tidak | default `Instagram Reels` |
+
+Bentuk video keluaran (semuanya opsional, nilai salah ketik DITOLAK di titik
+masuk — sebelum lock render dan sebelum satu pun panggilan LLM, bukan diam-diam
+jatuh ke default):
+
+| Variabel | Default | Keterangan |
+|---|---|---|
+| `VIDEO_ASPECT` | `9:16` | `9:16` (Reels/TikTok), `1:1` (feed), `16:9` (YouTube) |
+| `FIT_MODE` | `crop` | `crop` (isi penuh, tepi terpotong), `blur` (latar blur), `letterbox` (latar hitam) |
+| `AUDIO_MODE` | `original` | `original` = suara asli video user; `ai` = voice-over AI |
+| `TTS_PERSONA` | `ramah` | persona suara AI, dipakai kalau `AUDIO_MODE=ai` |
+| `SUBTITLE_FONT` | `DejaVu Sans` | nama keluarga font (bukan path); dicari lewat `fc-match` |
+| `TRIM_SILENCE` | `1` | potong jeda/silence dari video user |
+| `TRANSITION` | `fade` | transisi antar klip |
+| `THUMBNAIL_ENABLED` | `1` | ambil cover JPG dari tengah scene pertama & lampirkan ke video Telegram |
 
 ## Cara menjalankan
 

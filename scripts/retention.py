@@ -9,7 +9,9 @@ Dua hal berbeda yang sengaja dipisah:
    Dipanggil di AWAL render, DI DALAM lock render.
 
 2. `cleanup_run_files()` / `sweep_old_run_files()` — file HASIL per-run
-   (video_{run_id}.mp4, creative_brief_{run_id}.json) yang umurnya panjang.
+   (video_{run_id}.mp4, video_{run_id}.jpg, creative_brief_{run_id}.json) yang
+   umurnya panjang. Cover sengaja diberi awalan nama yang sama dengan videonya
+   supaya tidak ada pola retensi yang perlu diingat terpisah.
 
 `workspace/raw/` TIDAK PERNAH disentuh modul ini: bahan mentah milik user adalah
 masukan, bukan sampah kerja, dan menghapusnya bisa menggagalkan run yang sedang
@@ -20,13 +22,17 @@ import glob
 import os
 import time
 
-from common import BRIEF_PATH, DRAFT_VIDEO_PATH, DRAFTS_DIR, STATE_DIR
+from common import BRIEF_PATH, DRAFT_THUMB_PATH, DRAFT_VIDEO_PATH, DRAFTS_DIR, STATE_DIR
 
 RUN_FILE_RETENTION_DAYS = int(os.getenv("RUN_FILE_RETENTION_DAYS", "7"))
 
 # Nama file tetap yang TIDAK boleh ikut tersapu retensi: keduanya adalah path
 # kerja milik run yang sedang berjalan, bukan artefak lama.
-_LINDUNGI = {os.path.basename(DRAFT_VIDEO_PATH), os.path.basename(BRIEF_PATH)}
+_LINDUNGI = {
+    os.path.basename(DRAFT_VIDEO_PATH),
+    os.path.basename(DRAFT_THUMB_PATH),
+    os.path.basename(BRIEF_PATH),
+}
 
 
 def _hapus(path, label):
@@ -60,6 +66,10 @@ def clear_render_workspace():
 
     if _hapus(DRAFT_VIDEO_PATH, "draft lama"):
         jumlah += 1
+    # Cover run sebelumnya ikut dibuang: kalau render baru gagal membuat cover,
+    # cover lama akan terkirim bersama video baru -- gambar milik konten lain.
+    if _hapus(DRAFT_THUMB_PATH, "cover lama"):
+        jumlah += 1
 
     if jumlah:
         print(f"[info] retention: {jumlah} sisa file render dibersihkan sebelum mulai.")
@@ -77,6 +87,9 @@ def cleanup_run_files(run_id, *, video=True, brief=True):
     jumlah = 0
     if video:
         jumlah += _hapus(os.path.join(DRAFTS_DIR, f"video_{run_id}.mp4"), "video per-run")
+        # Cover mengikuti nasib videonya: video=False berarti keduanya sudah
+        # dipindah ke published/, jadi tidak ada yang perlu dihapus.
+        jumlah += _hapus(os.path.join(DRAFTS_DIR, f"video_{run_id}.jpg"), "cover per-run")
     if brief:
         jumlah += _hapus(
             os.path.join(STATE_DIR, f"creative_brief_{run_id}.json"), "brief per-run"
@@ -99,8 +112,10 @@ def sweep_old_run_files(max_age_days=None):
     batas = time.time() - days * 86400
     jumlah = 0
 
-    kandidat = glob.glob(os.path.join(DRAFTS_DIR, "video_*.mp4")) + glob.glob(
-        os.path.join(STATE_DIR, "creative_brief_*.json")
+    kandidat = (
+        glob.glob(os.path.join(DRAFTS_DIR, "video_*.mp4"))
+        + glob.glob(os.path.join(DRAFTS_DIR, "video_*.jpg"))
+        + glob.glob(os.path.join(STATE_DIR, "creative_brief_*.json"))
     )
     for path in kandidat:
         if os.path.basename(path) in _LINDUNGI:
