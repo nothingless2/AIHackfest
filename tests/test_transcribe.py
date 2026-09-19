@@ -14,6 +14,7 @@ import pytest
 import agent1_2_brief as brief
 import cost_estimate as ce
 import transcribe
+import transcribe as t
 
 
 def buat_video(path, *, dengan_audio, detik=2):
@@ -263,3 +264,82 @@ def test_bahasa_terdeteksi_ikut_dicatat(tmp_path, mock_transcribe):
     src = buat_video(tmp_path / "v.mp4", dengan_audio=True)
     hasil = transcribe.transcribe_assets_detailed([src])
     assert hasil["v.mp4"]["language"] == "indonesian"
+
+
+# ---------- anggaran waktu transkripsi ----------
+
+def _bahan_palsu(tmp_path, jumlah):
+    """File video tiruan; has_audio/extract_audio/media_duration di-stub."""
+    return [str(tmp_path / f"klip{i}.mp4") for i in range(jumlah)]
+
+
+@pytest.fixture
+def transkrip_terkendali(monkeypatch, tmp_path):
+    monkeypatch.setattr(t, "has_audio", lambda p: True)
+    monkeypatch.setattr(t, "media_duration", lambda p: 5.0)
+
+    def extract(src, dst):
+        open(dst, "wb").write(b"x")
+        return dst
+
+    monkeypatch.setattr(t, "extract_audio", extract)
+    monkeypatch.setattr(t, "OPENAI_API_KEY", "kunci-palsu")
+    monkeypatch.setattr(t, "TRANSCRIBE_ENABLED", True)
+    return monkeypatch
+
+
+def test_yang_lambat_dilepas_yang_cepat_tetap_dipakai(transkrip_terkendali, tmp_path):
+    """Kegagalan nyata 19 Sep: transkripsi lambat membuat SELURUH tahap dibunuh
+    timeout tanpa satu pun hasil. Sekarang yang sempat selesai tetap dipakai."""
+    import time as _t
+
+    def transkrip(path, *, durasi=0.0, vocab_prompt=None):
+        # Setengah berkas lambat, setengah cepat — dibedakan dari isi namanya.
+        urutan = int(open(path, "rb").read().decode() or 0)
+        if urutan >= 2:
+            _t.sleep(2)
+        return {"text": f"ucapan {urutan}", "segments": [], "words": []}
+
+    def extract(src, dst):
+        open(dst, "w").write(src[-5])  # simpan nomor klip ke berkas audio
+        return dst
+
+    transkrip_terkendali.setattr(t, "extract_audio", extract)
+    transkrip_terkendali.setattr(t, "transcribe_file_detailed", transkrip)
+    transkrip_terkendali.setattr(t, "TRANSCRIBE_BUDGET", 0.5)
+
+    hasil = t.transcribe_assets_detailed(_bahan_palsu(tmp_path, 4))
+
+    assert len(hasil) == 2, "yang cepat harus tetap terpakai"
+    assert all("ucapan" in v["text"] for v in hasil.values())
+
+
+def test_anggaran_habis_tidak_melempar(transkrip_terkendali, tmp_path):
+    """Pipeline harus LANJUT tanpa transkrip, bukan gagal."""
+    import time as _t
+
+    def lambat(path, *, durasi=0.0, vocab_prompt=None):
+        _t.sleep(2)
+
+    transkrip_terkendali.setattr(t, "transcribe_file_detailed", lambat)
+    transkrip_terkendali.setattr(t, "TRANSCRIBE_BUDGET", 0.5)
+
+    assert t.transcribe_assets_detailed(_bahan_palsu(tmp_path, 3)) == {}
+
+
+def test_batas_waktu_nyata_tidak_melebihi_anggaran():
+    """Penjaga yang paling mudah dilanggar tanpa sadar.
+
+    future.cancel() tidak mempan untuk permintaan yang sudah jalan, dan
+    ThreadPoolExecutor menunggu thread pekerjanya saat ditutup. Jadi batas waktu
+    transkripsi yang sebenarnya = timeout per permintaan x jumlah percobaan.
+    Kalau angka itu melebihi anggaran, 'anggaran' cuma tulisan.
+    """
+    assert t.TRANSCRIBE_TIMEOUT * t.TRANSCRIBE_MAX_ATTEMPTS <= t.TRANSCRIBE_BUDGET
+
+
+def test_timeout_melebihi_latensi_terukur():
+    """66,9 dtk untuk satu klip 5,6 dtk pernah terukur lewat relay, dan 5 klip
+    paralel pernah 188 dtk. Timeout yang lebih pendek membunuh panggilan yang
+    sebenarnya akan berhasil -- itulah kegagalan 19 Sep."""
+    assert t.TRANSCRIBE_TIMEOUT >= 120

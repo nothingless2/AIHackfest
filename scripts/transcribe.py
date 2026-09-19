@@ -21,12 +21,38 @@ Aturan yang dijaga:
 import os
 import subprocess
 import tempfile
+import time
 
 from common import OPENAI_API_KEY
 
 TRANSCRIBE_MODEL = os.getenv("TRANSCRIBE_MODEL", "whisper-1")
 TRANSCRIBE_ENABLED = os.getenv("TRANSCRIBE_ENABLED", "1") not in ("0", "false", "False")
-TRANSCRIBE_TIMEOUT = int(os.getenv("TRANSCRIBE_TIMEOUT_SECONDS", "60"))
+# 210 detik, naik dari 60. DIUKUR, bukan ditebak: lewat RelayRouter satu klip
+# 5,6 detik butuh 66,9 detik, dan 5 klip paralel selesai antara 7 dan 188 detik.
+# Dengan timeout 60 detik, panggilan yang SEBENARNYA akan berhasil justru
+# dibunuh lalu diulang — itulah yang membuat tahap brief mentok 255 detik tanpa
+# satu pun transkrip selesai.
+TRANSCRIBE_TIMEOUT = int(os.getenv("TRANSCRIBE_TIMEOUT_SECONDS", "180"))
+# SATU percobaan, bukan tiga. Dua alasan, dan yang kedua lebih menentukan:
+# 1. satu percobaan saja sudah bisa makan 3 menit, jadi percobaan kedua tidak
+#    pernah muat di anggaran tahap;
+# 2. thread yang sedang menunggu jaringan TIDAK BISA dibatalkan -- lihat catatan
+#    di TRANSCRIBE_BUDGET. Jadi yang benar-benar membatasi waktu adalah timeout
+#    per permintaan dikali jumlah percobaan.
+TRANSCRIBE_MAX_ATTEMPTS = int(os.getenv("TRANSCRIBE_MAX_ATTEMPTS", "1"))
+# Anggaran untuk SELURUH transkripsi. Lewat dari ini, sisa bahan dilepas dan
+# pipeline lanjut dengan transkrip seadanya -- video dengan subtitle sebagian
+# jauh lebih berguna daripada tahap yang dibunuh timeout tanpa hasil apa pun.
+#
+# CATATAN JUJUR: anggaran ini TIDAK bisa membunuh permintaan yang sudah berjalan.
+# future.cancel() hanya mempan untuk yang belum mulai, dan ThreadPoolExecutor
+# menunggu thread pekerjanya selesai saat ditutup. Jadi batas waktu yang
+# SEBENARNYA adalah TRANSCRIBE_TIMEOUT x TRANSCRIBE_MAX_ATTEMPTS -- karena itu
+# keduanya sengaja disetel supaya sama dengan anggaran ini, bukan lebih besar.
+TRANSCRIBE_BUDGET = int(os.getenv("TRANSCRIBE_BUDGET_SECONDS", "180"))
+# Permintaan dikirim bersamaan; relay mengantrekannya, tapi terukur tetap ~1,8x
+# lebih cepat daripada berurutan (5 klip: 188 dtk paralel vs ~335 dtk serial).
+TRANSCRIBE_CONCURRENCY = int(os.getenv("TRANSCRIBE_CONCURRENCY", "5"))
 TRANSCRIBE_MAX_ASSETS = int(os.getenv("TRANSCRIBE_MAX_ASSETS", "6"))
 TRANSCRIBE_MAX_SECONDS = int(os.getenv("TRANSCRIBE_MAX_SECONDS", "600"))
 
@@ -138,6 +164,7 @@ def transcribe_file_detailed(audio_path, *, durasi=0.0, vocab_prompt=None):
         sekali,
         is_retriable=openai_is_retriable,
         extract_retry_after=openai_retry_after,
+        max_attempts=TRANSCRIBE_MAX_ATTEMPTS,
         label=f"transkripsi {TRANSCRIBE_MODEL}",
     )
 
@@ -204,6 +231,14 @@ def transcribe_assets(paths, *, max_assets=None, konteks=""):
     }
 
 
+def _buang(path):
+    """Hapus berkas sementara tanpa pernah menggagalkan apa pun karenanya."""
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
 def transcribe_assets_detailed(paths, *, max_assets=None, konteks=""):
     """Seperti transcribe_assets, tapi menyertakan potongan bertimestamp.
 
@@ -219,6 +254,8 @@ def transcribe_assets_detailed(paths, *, max_assets=None, konteks=""):
     vocab = build_vocab_prompt(konteks)
     hasil = {}
 
+    # --- Tahap 1 (lokal, cepat): siapkan audio untuk tiap bahan yang layak.
+    siap = []
     for path in paths[:batas]:
         ext = os.path.splitext(path)[1].lower()
         if ext not in VIDEO_EXTENSIONS and ext not in AUDIO_EXTENSIONS:
@@ -235,30 +272,64 @@ def transcribe_assets_detailed(paths, *, max_assets=None, konteks=""):
 
         tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
         tmp.close()
-        try:
-            if not extract_audio(path, tmp.name):
-                continue
-            data = transcribe_file_detailed(tmp.name, durasi=durasi, vocab_prompt=vocab) or {}
-            # strip defensif: jangan bergantung pada pemanggil sudah
-            # membersihkannya. Transkrip berisi spasi saja bukan "isi" dan tidak
-            # boleh masuk ke prompt seolah-olah user mengatakan sesuatu.
-            teks = (data.get("text") or "").strip()
-            if teks:
-                hasil[os.path.basename(path)] = {
-                    "text": teks,
-                    "segments": data.get("segments") or [],
-                    "words": data.get("words") or [],
-                    "language": data.get("language"),
-                    "duration": durasi,
-                }
-                print(f"[info] transcribe: {os.path.basename(path)} -> {len(teks)} karakter, "
-                      f"{len(data.get('segments') or [])} potongan bertimestamp")
-        except Exception as e:
-            print(f"[warn] transcribe: {os.path.basename(path)} gagal: {type(e).__name__}: {e}")
-        finally:
+        if extract_audio(path, tmp.name):
+            siap.append((path, tmp.name, durasi))
+        else:
+            _buang(tmp.name)
+
+    if not siap:
+        return hasil
+
+    # --- Tahap 2 (jaringan, lambat): semua dikirim bersamaan, dengan anggaran
+    # waktu KERAS. Yang belum selesai saat anggaran habis dilepas begitu saja.
+    import concurrent.futures as cf
+
+    t0 = time.time()
+    print(f"[info] transcribe: {len(siap)} bahan, anggaran {TRANSCRIBE_BUDGET} detik "
+          f"({TRANSCRIBE_CONCURRENCY} permintaan bersamaan).")
+
+    with cf.ThreadPoolExecutor(max_workers=TRANSCRIBE_CONCURRENCY) as pool:
+        futures = {
+            pool.submit(transcribe_file_detailed, audio, durasi=durasi, vocab_prompt=vocab): (path, audio)
+            for path, audio, durasi in siap
+        }
+        selesai, tertunda = cf.wait(futures, timeout=TRANSCRIBE_BUDGET)
+
+        for fut in selesai:
+            path, audio = futures[fut]
+            nama = os.path.basename(path)
             try:
-                os.unlink(tmp.name)
-            except OSError:
-                pass
+                data = fut.result() or {}
+            except Exception as e:
+                print(f"[warn] transcribe: {nama} gagal: {type(e).__name__}: {e}")
+                continue
+            teks = (data.get("text") or "").strip()
+            if not teks:
+                continue
+            durasi = dict((p, d) for p, _, d in siap).get(path, 0.0)
+            hasil[nama] = {
+                "text": teks,
+                "segments": data.get("segments") or [],
+                "words": data.get("words") or [],
+                "language": data.get("language"),
+                "duration": durasi,
+            }
+            print(f"[info] transcribe: {nama} -> {len(teks)} karakter, "
+                  f"{len(data.get('segments') or [])} potongan bertimestamp")
+
+        if tertunda:
+            # Dilaporkan terang-terangan: user berhak tahu sebagian videonya
+            # tidak bersubtitle, alih-alih mengira transkripsinya memang kosong.
+            print(f"[warn] transcribe: {len(tertunda)} bahan TIDAK selesai dalam "
+                  f"{TRANSCRIBE_BUDGET} detik dan dilepas — video tetap dibuat, "
+                  f"tapi bagian itu tanpa subtitle.")
+            for fut in tertunda:
+                fut.cancel()
+
+    for _, audio, _ in siap:
+        _buang(audio)
+
+    print(f"[info] transcribe: {len(hasil)}/{len(siap)} bahan selesai "
+          f"dalam {time.time() - t0:.0f} detik.")
 
     return hasil

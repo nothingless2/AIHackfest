@@ -37,7 +37,15 @@ CORE_STAGES = [
     # Tetap NON-KRITIS: kalau sumber tren mati atau lambat, pipeline harus lanjut
     # tanpa data tren, bukan berhenti.
     ("agent5_insight.py", "ContentInsight", False, 90),
-    ("agent1_2_brief.py", "TrendAnalysts & BrainIdea", True, 255),
+    # 400 detik (naik dari 255). Dihitung ulang setelah transkripsi lewat relay
+    # terukur JAUH lebih lambat daripada OpenAI langsung (satu klip 5,6 dtk =
+    # 66,9 dtk; 5 klip paralel = 188 dtk). Anggaran terburuk:
+    #   transkripsi (anggaran KERAS di transcribe.py)      = 180
+    #   ekstraksi frame untuk vision (lokal)               =  15
+    #   panggilan brief 3 percobaan x 45 dtk + backoff     = 138
+    #   -------------------------------------------------------
+    #                                                        333  -> margin ~20%
+    ("agent1_2_brief.py", "TrendAnalysts & BrainIdea", True, 400),
     # 360 detik (naik dari 300) — dihitung ulang setelah 2.1 menambah kemungkinan
     # TTS KEDUA. Anggaran terburuk:
     #   TTS  3 percobaan x 30 dtk + backoff 3 dtk          =  93
