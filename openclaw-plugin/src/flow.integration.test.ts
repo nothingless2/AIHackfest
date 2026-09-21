@@ -146,12 +146,76 @@ describe("content_factory_inspect", () => {
   }, 30_000);
 });
 
+describe("musik yang diunggah user", () => {
+  let dirMusik: string;
+  const mp3 = (dir: string, nama = "lagu.mp3") => {
+    const p = join(dir, nama);
+    execFileSync("ffmpeg", ["-y", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=330:duration=6", "-c:a", "libmp3lame", p]);
+    return p;
+  };
+  beforeAll(() => {
+    dirMusik = join(inbound, "openclaw-staged-musik");
+    mkdirSync(dirMusik, { recursive: true });
+    for (const i of [1, 2]) bikinVideo(join(dirMusik, `input-${i}.mp4`));
+    mp3(dirMusik);
+  });
+  const semua = () => [join(dirMusik, "input-1.mp4"), join(dirMusik, "input-2.mp4"), join(dirMusik, "lagu.mp3")];
+
+  it("inspect melaporkan berkas audio sebagai MUSIK, bukan video", async () => {
+    const r = await tools.content_factory_inspect.execute("call_mus_ins", { mediaPaths: semua(), userContext: "edit tiktok" });
+    expect(r.details.status).toBe("inspected");
+    expect(teks(r)).toContain("MUSIK dari user");
+    expect(teks(r)).toContain("2 video");
+    expect(teks(r)).toContain("Suara asli videonya bagaimana");
+    expect(teks(r)).toContain('audioMode="mute"');
+  }, 60_000);
+
+  it("run memisahkan musik dari bahan: hanya video disalin ke raw, musik ke folder terpisah", async () => {
+    const ins = await tools.content_factory_inspect.execute("call_mus_ins2", { mediaPaths: semua(), userContext: "edit tiktok" });
+    rmSync(join(root, "workspace", "state", "stub_run.json"), { force: true });
+    rmSync(join(root, "workspace", "raw"), { recursive: true, force: true });
+    const r = await tools.content_factory_run.execute("call_mus_run", {
+      mediaPaths: semua(), inspectId: ins.details.inspectId, userAnswered: true,
+      userContext: "edit tiktok. Ini dokumentasi acara Aksi Merah Laksamana Muda", audioMode: "mute",
+    });
+    expect(r.details.status, teks(r)).toBe("started");
+    expect(await tunggu(() => existsSync(join(root, "workspace", "state", "stub_run.json")))).toBe(true);
+    const env = JSON.parse(readFileSync(join(root, "workspace", "state", "stub_run.json"), "utf-8"));
+    expect(env.CONTENT_FACTORY_ASSETS.split(",")).toHaveLength(2);
+    expect(env.CONTENT_FACTORY_ASSETS).not.toContain(".mp3");
+    expect(env.CONTENT_FACTORY_AUDIO_MODE).toBe("mute");
+    expect(env.CONTENT_FACTORY_MUSIC_FILE).toContain(join("workspace", "music_user"));
+    expect(env.CONTENT_FACTORY_MUSIC_FILE.endsWith("lagu.mp3")).toBe(true);
+    expect(existsSync(env.CONTENT_FACTORY_MUSIC_FILE)).toBe(true);
+    expect(readdirSync(join(root, "workspace", "raw")).some((n) => n.endsWith(".mp3"))).toBe(false);
+  }, 60_000);
+
+  it("menolak dua berkas musik dan tidak menyalin apa pun", async () => {
+    mp3(dirMusik, "lagu2.mp3");
+    const paths = [...semua(), join(dirMusik, "lagu2.mp3")];
+    rmSync(join(root, "workspace", "raw"), { recursive: true, force: true });
+    const r = await tools.content_factory_run.execute("call_mus_dua", { mediaPaths: paths, inspectId: "0123456789ab", userAnswered: true });
+    expect(r.details.error).toBe("multiple_music_files");
+    expect(existsSync(join(root, "workspace", "raw"))).toBe(false);
+    rmSync(join(dirMusik, "lagu2.mp3"), { force: true });
+  }, 30_000);
+
+  it("menolak kalau yang dikirim hanya musik", async () => {
+    const r = await tools.content_factory_run.execute("call_mus_saja", { mediaPaths: [join(dirMusik, "lagu.mp3")], inspectId: "0123456789ab", userAnswered: true });
+    expect(r.details.error).toBe("no_visual_media");
+  }, 30_000);
+});
+
 describe("gerbang di content_factory_run", () => {
   let inspectId: string;
   beforeAll(async () => {
     const r = await tools.content_factory_inspect.execute(
       "call_ins_gerbang", { mediaPaths: berkas(segar, 3), userContext: "edit ya" });
     inspectId = r.details.inspectId;
+    // Mulai dari keadaan bersih: kelompok lain (mis. musik) meninggalkan stub_run.json dan
+    // salinan di raw, dan pemeriksaan "tidak ada render" di bawah bergantung pada keduanya.
+    rmSync(join(root, "workspace", "state", "stub_run.json"), { force: true });
+    rmSync(join(root, "workspace", "raw"), { recursive: true, force: true });
   }, 60_000);
 
   const tidakAdaRender = () => !existsSync(join(root, "workspace", "state", "stub_run.json"));

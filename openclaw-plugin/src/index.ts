@@ -7,7 +7,22 @@ import { basename, extname, resolve, relative, isAbsolute, dirname } from "node:
 import { homedir } from "node:os";
 import { runPythonJson } from "./pythonCall.js";
 
+/** Berkas audio yang diunggah user = MUSIK untuk video ini, bukan bahan video. */
+export const AUDIO_EXTENSIONS = new Set([".mp3", ".m4a", ".aac", ".wav", ".ogg", ".opus", ".flac"]);
+
+/**
+ * Pisahkan lampiran jadi bahan (gambar/video) dan musik (audio). Dilakukan KODE, bukan
+ * model: model tidak perlu tahu berkas mana yang musik, dan tidak bisa keliru
+ * memperlakukan lagu sebagai bahan video atau sebaliknya.
+ */
+export function pisahMusik(paths: string[]): { bahan: string[]; musik: string[] } {
+  const musik = paths.filter((p) => AUDIO_EXTENSIONS.has(extname(p).toLowerCase()));
+  const bahan = paths.filter((p) => !AUDIO_EXTENSIONS.has(extname(p).toLowerCase()));
+  return { bahan, musik };
+}
+
 const SUPPORTED_EXTENSIONS = new Set([
+  ...AUDIO_EXTENSIONS,
   ".jpg",
   ".jpeg",
   ".png",
@@ -175,7 +190,9 @@ const mediaPathsSchema = Type.Array(
     minItems: 1,
     description:
       "Daftar path lokal semua gambar/video mentah yang diupload user pada pesan ini, " +
-      "yang harus disusun jadi satu konten.",
+      "yang harus disusun jadi satu konten. Kalau user juga mengirim SATU berkas audio " +
+      "(mp3/m4a/wav/ogg/flac), sertakan di daftar yang sama: sistem memakainya sebagai " +
+      "musik video, bukan sebagai bahan.",
   },
 );
 
@@ -209,14 +226,15 @@ const runParams = Type.Object({
     }),
   ),
   audioMode: Type.Optional(
-    Type.Union([Type.Literal("ai"), Type.Literal("original")], {
+    Type.Union([Type.Literal("ai"), Type.Literal("original"), Type.Literal("mute")], {
       description:
-        "Sumber suara video. 'original' = pakai audio asli dari video user, TANPA " +
-        "voice-over AI — isi HANYA kalau user memang memintanya (mis. \"jangan pakai " +
-        "suara AI\", \"pakai suara asli saya\"). 'ai' = voice-over AI. " +
-        "Kosongkan kalau user tidak menyebut soal suara sama sekali. " +
-        "Catatan: kalau video ternyata tidak ada ucapannya, sistem otomatis kembali " +
-        "ke voice-over AI supaya videonya tidak sunyi.",
+        "Sumber suara video. 'original' = pakai audio asli video user (bawaan). 'mute' = " +
+        "BISUKAN suara asli sepenuhnya; yang terdengar hanya musik (berkas musik yang " +
+        "dikirim user, atau pustaka). Subtitle tetap dibuat dari ucapan yang dibisukan. " +
+        "'ai' = voice-over AI. Isi HANYA kalau user memintanya (mis. \"bisukan videonya\", " +
+        "\"jangan pakai suara asli\", \"pakai musik ini saja\"). Kosongkan kalau user tidak " +
+        "menyebut soal suara. Bahan yang bersuara tapi tanpa ucapan (keramaian, musik) tetap " +
+        "memakai suara aslinya; hanya bahan yang benar-benar hening yang beralih ke voice-over AI.",
     }),
   ),
   subtitleStyle: Type.Optional(
@@ -525,7 +543,7 @@ export default defineToolPlugin({
               inspectId?: string;
               userAnswered?: boolean;
               userContext?: string;
-              audioMode?: "ai" | "original";
+              audioMode?: "ai" | "original" | "mute";
               voicePersona?: string;
               aspectRatio?: string;
               fitMode?: string;
@@ -632,6 +650,22 @@ export default defineToolPlugin({
               );
             }
 
+            const { bahan: bahanPaths, musik: musikPaths } = pisahMusik(mediaPaths);
+            if (musikPaths.length > 1) {
+              return fail(
+                `Hanya satu berkas musik yang bisa dipakai per video, tapi ada ${musikPaths.length}. ` +
+                  "Minta user memilih satu.",
+                { error: "multiple_music_files", count: musikPaths.length },
+              );
+            }
+            if (bahanPaths.length === 0) {
+              return fail(
+                "Yang dikirim hanya berkas audio (musik). Butuh setidaknya satu gambar atau video " +
+                  "untuk diedit.",
+                { error: "no_visual_media" },
+              );
+            }
+
             // Tujuan pengiriman HARUS chat pemicu (lihat catatan panjang di bawah). Dicek
             // SEBELUM menyalin file, supaya penolakan tidak meninggalkan salinan.
             const originChatId = toolContext.nativeChannelId;
@@ -692,11 +726,21 @@ export default defineToolPlugin({
             mkdirSync(rawDir, { recursive: true });
 
             const runPrefix = toolCallId.slice(0, 8);
-            const copiedNames = mediaPaths.map((srcPath) => {
+            const copiedNames = bahanPaths.map((srcPath) => {
               const destName = `${runPrefix}_${basename(srcPath)}`;
               copyFileSync(srcPath, resolve(rawDir, destName));
               return destName;
             });
+
+            // Musik dari user disalin ke folder TERPISAH dari workspace/raw (yang isinya
+            // bahan visual) supaya tidak pernah terbaca sebagai bahan.
+            let musicDest: string | undefined;
+            if (musikPaths.length === 1) {
+              const musicDir = resolve(projectRoot, "workspace", "music_user");
+              mkdirSync(musicDir, { recursive: true });
+              musicDest = resolve(musicDir, `${runPrefix}_${basename(musikPaths[0])}`);
+              copyFileSync(musikPaths[0], musicDest);
+            }
 
             // Catatan: kalau chat pemicu tidak diketahui, pipeline ditolak (dicek di atas)
             // -- BUKAN dilanjutkan dengan chat cadangan dari .env. Fallback itulah yang
@@ -733,6 +777,9 @@ export default defineToolPlugin({
             }
             if (subtitleStyle) {
               pipelineEnv.SUBTITLE_STYLE = subtitleStyle;
+            }
+            if (musicDest) {
+              pipelineEnv.CONTENT_FACTORY_MUSIC_FILE = musicDest;
             }
             if (staticText === true) {
               pipelineEnv.CONTENT_FACTORY_STATIC_TEXT = "1";

@@ -36,7 +36,7 @@ from edit_plan import MERGE_GAP  # noqa: E402
 from retry import with_retry_async  # noqa: E402
 from music import (  # noqa: E402
     MusicError, auto_volume, build_filter as music_filter, has_audio_stream,
-    music_wanted, pick_track, requested_mood,
+    music_wanted, pick_track, requested_mood, solo_volume,
 )
 from spoken import prompt_rule, spoken_text  # noqa: E402
 from subtitle_layout import layout_group  # noqa: E402
@@ -1217,7 +1217,10 @@ def tambah_musik(video_path, track, out_path, durasi):
     punya = has_audio_stream(video_path)
     # Volume diukur dari loudness video ini, bukan angka tetap: gain tetap
     # membuat musik tenggelam di rekaman keras dan terlalu maju di rekaman pelan.
-    vol = auto_volume(video_path, track) if punya else None
+    # Video TANPA audio (dibisukan): musik adalah satu-satunya suara, jadi dibawa ke
+    # target kenyaringan solo -- bukan MUSIC_VOLUME 0,15 yang dirancang sebagai latar
+    # dan akan nyaris tak terdengar.
+    vol = auto_volume(video_path, track) if punya else solo_volume(track)
     run_ffmpeg(
         ["-i", video_path, "-stream_loop", "-1", "-i", track,
          "-filter_complex", music_filter(durasi, punya_ucapan=punya, volume=vol),
@@ -1241,7 +1244,10 @@ def render_from_agent_script(
         data = json.load(f)
 
     audio_mode = (data.get("audio_mode") or "ai").strip().lower()
-    pakai_audio_asli = audio_mode == "original"
+    bisu = audio_mode == "mute"
+    # `pakai_audio_asli` = jalur berbasis durasi klip + transkrip (seleksi, subtitle kata).
+    # Mode mute memakai jalur yang SAMA, hanya audio klipnya dibuang.
+    pakai_audio_asli = audio_mode in ("original", "mute")
     edit_dipakai = False
 
     full_vo = data.get("full_voice_over", "")
@@ -1271,7 +1277,8 @@ def render_from_agent_script(
     if pakai_audio_asli:
         # Durasi ditentukan bahan, bukan TTS: tiap klip main sepanjang aslinya
         # supaya ucapan user tidak terpotong di tengah kalimat.
-        print("🔊 Memakai AUDIO ASLI dari video user (tanpa voice-over AI).")
+        print("🔇 Video DIBISUKAN (suara asli tidak dipakai)." if bisu
+              else "🔊 Memakai AUDIO ASLI dari video user (tanpa voice-over AI).")
         plan_edit = data.get("edit_plan")
         rencana, dibuang, edit_dipakai = [], 0.0, False
         if plan_edit and plan_edit.get("status") == "applied":
@@ -1343,7 +1350,7 @@ def render_from_agent_script(
         for (i, j, a, b), (f_in, f_out) in zip(potongan, bendera):
             seg_path = os.path.join(output_dir, f"_segment_{i}_{j}.mp4")
             build_segment(rencana[i]["path"], b - a, seg_path,
-                          keep_audio=True, potong=(a, b),
+                          keep_audio=not bisu, potong=(a, b),
                           fade_in=f_in, fade_out=f_out)
             segment_paths.append(seg_path)
     else:
@@ -1389,19 +1396,22 @@ def render_from_agent_script(
             track = None
         if track:
             sementara = os.path.join(output_dir, "_with_music.mp4")
+            solo = not has_audio_stream(output_video)      # dibisukan: musik satu-satunya suara
             try:
                 tambah_musik(output_video, track, sementara, total_duration)
                 os.replace(sementara, output_video)
                 musik_dipakai = os.path.basename(track)
-                print(f"🎵 Musik latar: {musik_dipakai} "
-                  f"(level menyesuaikan suara video + auto-ducking)")
+                print(f"🎵 Musik: {musik_dipakai} (satu-satunya suara, level ke ±16 LUFS)" if solo
+                      else f"🎵 Musik latar: {musik_dipakai} "
+                           f"(level menyesuaikan suara video + auto-ducking)")
             except Exception as e:
                 # Musik itu hiasan: video yang sudah jadi jauh lebih berharga.
                 print(f"[warn] gagal menambahkan musik ({e}); video tetap dipakai tanpa musik.")
                 if os.path.exists(sementara):
                     os.remove(sementara)
         else:
-            print("[info] belum ada track di assets/music/ — video dibuat tanpa musik.")
+            print("[info] belum ada track di assets/music/ — video dibuat tanpa musik."
+                  + (" Karena suara asli dibisukan, video ini TANPA SUARA sama sekali." if bisu else ""))
 
     # Cover diambil SETELAH mux dan SEBELUM cleanup: hanya `output_video` yang
     # sudah punya teks terbakar, rasio kanvas, dan encoding final. Mengambilnya

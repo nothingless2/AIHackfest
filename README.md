@@ -42,7 +42,8 @@ jatuh ke default):
 |---|---|---|
 | `VIDEO_ASPECT` | `9:16` | `9:16` (Reels/TikTok), `1:1` (feed), `16:9` (YouTube) |
 | `FIT_MODE` | `crop` | `crop` (isi penuh, tepi terpotong), `blur` (latar blur), `letterbox` (latar hitam) |
-| `AUDIO_MODE` | `original` | `original` = suara asli video user; `ai` = voice-over AI |
+| `AUDIO_MODE` | `original` | `original` = suara asli video user; `mute` = suara asli DIBISUKAN (hanya musik yang terdengar; subtitle tetap dibuat); `ai` = voice-over AI |
+| `MUSIC_SOLO_TARGET_LUFS` | `-16` | kenyaringan musik bila ia satu-satunya suara (mode `mute`). Musik latar di bawah ucapan memakai `MUSIC_BELOW_SPEECH_DB` |
 | `TTS_PERSONA` | `ramah` | persona suara AI, dipakai kalau `AUDIO_MODE=ai` |
 | `SUBTITLE_STYLE` | `karaoke` | `karaoke` (frasa diam, kata aktif menyala kuning, kotak gelap), `karaoke-tebal` (tanpa kotak), `karaoke-kapital` (huruf besar); gaya lama `putih-kotak`, `kuning-kotak`, `putih-tebal`, `kuning` (teks menumpuk kata demi kata, seluruhnya di-center ulang tiap kata baru) |
 | `SUBTITLE_FONT` | `DejaVu Sans` | nama keluarga font (bukan path); dicari lewat `fc-match` |
@@ -84,6 +85,11 @@ Pipeline **berhenti** kalau tahap kritis gagal (exit code diperiksa), jadi tidak
 lanjut memproses data basi.
 
 ### B. Lewat chat Telegram (plugin OpenClaw)
+
+**Musik sendiri:** kirim satu berkas audio (mp3/m4a/wav/ogg/flac) bersama videonya. Sistem
+memisahkannya dari bahan visual, menanyakan nasib suara asli (bisukan / pertahankan), dan
+menyamakan kenyaringannya. Berkas musik disimpan di `workspace/music_user/` dan dibuang setelah
+7 hari. Hak cipta musik itu tanggung jawab pengirim.
 
 **Agent bertanya dulu, lalu memproses** (dua tool, tanpa timer atau proses latar belakang):
 

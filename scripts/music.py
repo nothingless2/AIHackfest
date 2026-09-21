@@ -98,6 +98,16 @@ def pick_track(mood=None, folder=None, run_id=""):
     Mood diminta tapi tidak ada yang cocok -> MusicError, BUKAN diam-diam
     memakai track lain: musik yang salah suasana lebih buruk daripada tanpa musik.
     """
+    berkas = external_track()
+    if berkas and folder is None:
+        # Divalidasi di sini (dipanggil di titik masuk, sebelum lock dan sebelum LLM):
+        # berkas yang hilang atau tidak berisi audio ditolak dengan pesan jelas, bukan
+        # diam-diam diganti lagu lain.
+        if not os.path.isfile(berkas):
+            raise MusicError(f"Berkas musik yang kamu kirim tidak ditemukan: {os.path.basename(berkas)}")
+        if not has_audio_stream(berkas):
+            raise MusicError(f"Berkas {os.path.basename(berkas)} tidak berisi audio yang bisa dibaca")
+        return berkas
     tracks = list_tracks(folder)
     if not tracks:
         return None
@@ -189,6 +199,27 @@ def build_filter(durasi, *, punya_ucapan=True, volume=None, fade=None):
     )
 
 
+# Berkas musik yang DIUNGGAH user untuk run ini (diisi plugin). Mengalahkan pustaka dan
+# mood: user yang menyebut musiknya sendiri tidak boleh dilayani dengan lagu lain.
+def external_track():
+    p = (os.getenv("CONTENT_FACTORY_MUSIC_FILE") or "").strip()
+    return p or None
+
+
+# Target kenyaringan musik SOLO (video dibisukan, tidak ada suara lain yang harus
+# didahulukan). -16 LUFS adalah patokan umum untuk konten sosial media. Beda dengan
+# musik latar (auto_volume) yang harus duduk DI BAWAH ucapan.
+SOLO_TARGET_LUFS = float(os.getenv("MUSIC_SOLO_TARGET_LUFS", "-16"))
+
+
+def solo_volume(track_path):
+    """Gain linier supaya musik mencapai SOLO_TARGET_LUFS. Tidak terukur -> 1.0 (apa adanya)."""
+    lufs = loudness(track_path)
+    if lufs is None:
+        return 1.0
+    return max(MUSIC_GAIN_MIN, min(MUSIC_GAIN_MAX, 10 ** ((SOLO_TARGET_LUFS - lufs) / 20.0)))
+
+
 def requested_mood():
     """Mood yang diminta user untuk run ini (parameter tool), atau None."""
     return (os.getenv("CONTENT_FACTORY_MUSIC_MOOD") or "").strip() or None
@@ -201,4 +232,6 @@ def music_wanted():
         return False
     if v in ("1", "on", "yes", "ya", "true"):
         return True
+    if external_track():
+        return True      # user menyertakan musiknya sendiri: tidak bergantung MUSIC_ENABLED
     return MUSIC_ENABLED

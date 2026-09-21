@@ -265,3 +265,30 @@ dari staging -> restart gateway, dengan verifikasi manifest & build di tiap lang
   tanpa `--channel` (sesi `explicit:` terpisah).
 - Fitur baru dari jawaban user: teks STATIS sepanjang video (`staticText`). Teks panjang mengecil,
   tidak dipecah.
+
+## 20 Sept — mute + musik eksternal
+
+- `audioMode: "mute"`: suara asli dibuang seluruhnya; transkripsi tetap dipakai untuk subtitle dan
+  seleksi konten. Tidak dihentikan kegagalan transkripsi (beda dengan `original`, aturan #7).
+- Musik dari user: berkas audio di daftar lampiran dipisah KODE dari bahan visual (`pisahMusik`),
+  disalin ke `workspace/music_user/`, dan mengalahkan pustaka/mood. Musik solo dibawa ke -16 LUFS
+  (musik latar di bawah ucapan tetap 10 dB di bawahnya). Terukur: suara asli -24,2 dB -> -53,0 dB,
+  musik -19,9 dB, total -17,2 LUFS.
+- `inspect` mengenali berkas audio sebagai MUSIK (durasinya tidak dijumlahkan sebagai durasi
+  bahan) dan menanyakan nasib suara asli. Default: bisukan untuk bahan tanpa ucapan, pertahankan
+  untuk bahan berucap (membisukan video berucapan menghilangkan apa yang dikatakan).
+- BELUM DIVERIFIKASI di Telegram sungguhan: apakah lampiran audio (lagu, voice note) di-stage OpenClaw
+  ke `media/inbound/openclaw-staged-*` dengan ekstensi yang dikenal.
+
+### Peta fitur ala CapCut (jujur, 20 Sept)
+Sudah ada: potong jeda, seleksi konten AI, subtitle karaoke, transisi fade/hard-cut cerdas, rasio +
+crop/blur/letterbox, musik + ducking + level otomatis, mute + musik user, voice-over AI (5 persona),
+durasi target, cover, teks statis, pertanyaan berpilihan.
+Murah (ffmpeg, tanpa GPU): kecepatan/slow-mo/speed ramp, filter warna + auto-enhance, zoom/punch-in
+otomatis + Ken Burns foto, stabilisasi (libvidstab tersedia), noise removal + loudnorm ucapan,
+watermark/logo, end-card CTA, variasi transisi (xfade memendekkan durasi -- perlu penyesuaian sub).
+Sedang: reframing otomatis mengikuti wajah (horizontal -> vertikal), deteksi klip buram/goyang,
+potong pada beat musik, penekanan kata kunci di subtitle, preset gaya.
+Berat/di luar jangkauan mesin ini (4 core, tanpa GPU): hapus latar berkualitas, avatar/stiker/upscale
+AI generatif, editor timeline manual (produk berbeda: ini editor berbasis chat), musik/efek/font/
+template komersial (lisensi), musik trending TikTok (tidak ada API resmi).

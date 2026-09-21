@@ -171,7 +171,7 @@ def build_transcript_note(transkrip):
     )
 
 
-def build_durasi_note(durasi_bahan):
+def build_durasi_note(durasi_bahan, bisu=False):
     """Durasi NYATA tiap bahan, supaya scene mengikuti batas antar klip.
 
     Tanpa ini model menulis waktu scene sesuka hati (0-5, 5-10, ...) dan teks satu
@@ -185,8 +185,9 @@ def build_durasi_note(durasi_bahan):
     daftar = ", ".join(f"bahan {i} = {d:.1f} dtk" for i, d in enumerate(durasi_bahan, 1))
     return (
         f"DURASI NYATA TIAP BAHAN (urutan sama dengan gambar): {daftar}; total {total:.1f} dtk.\n"
-        f"Video akhir berdurasi sekitar {total:.0f} dtk dan SUARA ASLI dipertahankan, jadi "
-        "'full_voice_over' TIDAK dibacakan (hanya draf caption; tidak perlu 20-35 detik). "
+        f"Video akhir berdurasi sekitar {total:.0f} dtk dan "
+        + ("suara asli DIBISUKAN (yang terdengar hanya musik)" if bisu else "SUARA ASLI dipertahankan")
+        + ", jadi 'full_voice_over' TIDAK dibacakan (hanya draf caption; tidak perlu 20-35 detik). "
         "Buat 'scenes' yang mengikuti batas antar bahan: satu scene per bahan, dengan "
         "start/end sesuai durasi di atas, dan scene terakhir berakhir <= total."
     )
@@ -203,7 +204,8 @@ def build_teks_statis_note():
 
 
 def build_prompt(asset_names, performance, *, jumlah_gambar, pool=None, konteks="",
-                 transkrip=None, target_duration=None, durasi_bahan=None, teks_statis=False):
+                 transkrip=None, target_duration=None, durasi_bahan=None, teks_statis=False,
+                 audio_bisu=False):
     # Durasi & aturan lafal disuntikkan, bukan hardcode: tanpa permintaan user,
     # duration_text() mengembalikan kalimat lama kata per kata sehingga brief
     # untuk run yang tidak meminta durasi tidak berubah sama sekali.
@@ -216,7 +218,7 @@ def build_prompt(asset_names, performance, *, jumlah_gambar, pool=None, konteks=
     performance_note = build_performance_note(performance)
     trend_note, _ = build_trend_note(pool)
     transcript_note = build_transcript_note(transkrip)
-    klip_note = build_durasi_note(durasi_bahan)
+    klip_note = build_durasi_note(durasi_bahan, bisu=audio_bisu)
     if teks_statis:
         klip_note = (klip_note + "\n\n" if klip_note else "") + build_teks_statis_note()
     konteks_note = (
@@ -361,12 +363,12 @@ def run():
 
     teks_statis = (os.getenv("CONTENT_FACTORY_STATIC_TEXT") or "").strip().lower() in ("1", "true", "ya", "on")
     durasi_bahan = None
-    if mode_audio == "original":
+    if mode_audio in ("original", "mute"):
         durasi_bahan = [d for d in (media_duration(p) for p in asset_paths) if d and d > 0]
     prompt_text = build_prompt(
         asset_names, performance, jumlah_gambar=len(image_parts), pool=pool,
         konteks=konteks, transkrip=transkrip, target_duration=target_durasi,
-        durasi_bahan=durasi_bahan, teks_statis=teks_statis,
+        durasi_bahan=durasi_bahan, teks_statis=teks_statis, audio_bisu=(mode_audio == "mute"),
     )
     result = chat_json(
         [{"role": "user",
@@ -441,7 +443,7 @@ def run():
     # Gagal-aman: apa pun yang tidak beres -> rencana None -> render memakai
     # perilaku lama (semua klip). Alasannya SELALU dicatat di edit_status.
     rencana_edit, status_edit = None, {"status": "dilewati", "alasan": "mode voice-over AI"}
-    if mode_audio == "original":
+    if mode_audio in ("original", "mute"):
         if (os.getenv("CONTENT_FACTORY_EDIT") or "auto").strip().lower() == "full":
             status_edit = {"status": "dilewati",
                            "alasan": "diminta memakai semua bahan apa adanya"}

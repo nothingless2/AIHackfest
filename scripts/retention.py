@@ -120,6 +120,9 @@ def sweep_old_run_files(max_age_days=None):
         # Status pemeriksaan bahan (scripts/inspect_media.py). Valid hanya 24 jam
         # (INSPECT_TTL_HOURS); sisanya sampah -- dan memuat cuplikan permintaan user.
         + glob.glob(os.path.join(STATE_DIR, "inspect", "*.json"))
+        # Musik yang diunggah user untuk satu run (workspace/music_user/). Hak ciptanya
+        # milik user, dan berkasnya besar -- tidak untuk disimpan selamanya.
+        + glob.glob(os.path.join(os.path.dirname(STATE_DIR), "music_user", "*"))
     )
     for path in kandidat:
         if os.path.basename(path) in _LINDUNGI:

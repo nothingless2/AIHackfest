@@ -49,6 +49,7 @@ MAKS_PERTANYAAN = 5
 VAD_TIMEOUT = 40
 
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
+AUDIO_EXT = {".mp3", ".m4a", ".aac", ".wav", ".ogg", ".opus", ".flac"}
 VIDEO_EXT = {".mp4", ".mov", ".mkv", ".avi", ".webm"}
 
 # Rasio detik-berucap terhadap durasi. Diukur pada klip nyata: talking-head 0,93-0,97,
@@ -92,7 +93,8 @@ def _orientasi(w, h):
 def probe_clip(path):
     """Fakta satu bahan. Yang tidak bisa diukur bernilai None, tidak ditebak."""
     ext = os.path.splitext(path)[1].lower()
-    info = {"nama": os.path.basename(path), "jenis": "gambar" if ext in IMAGE_EXT else "video",
+    jenis = "gambar" if ext in IMAGE_EXT else ("musik" if ext in AUDIO_EXT else "video")
+    info = {"nama": os.path.basename(path), "jenis": jenis,
             "ukuran_mb": None, "durasi": None, "lebar": None, "tinggi": None,
             "orientasi": None, "punya_audio": False, "volume_db": None,
             "ucapan_detik": None, "error": None}
@@ -129,7 +131,18 @@ def probe_clip(path):
         elif s.get("codec_type") == "audio":
             info["punya_audio"] = True
     info["orientasi"] = _orientasi(info["lebar"], info["tinggi"])
-    if info["jenis"] == "video":
+    if info["jenis"] == "musik":
+        # Berkas audio: durasi dan kenyaringan saja. Tanpa aliran audio yang terbaca ia
+        # tidak bisa dipakai sebagai musik -- dilaporkan sebagai galat, bukan diam-diam.
+        try:
+            info["durasi"] = round(float(d.get("format", {}).get("duration")), 2)
+        except (TypeError, ValueError):
+            pass
+        if not info["punya_audio"]:
+            info["error"] = "berkas ini tidak berisi audio yang bisa dibaca"
+        else:
+            info["volume_db"] = _volume_rata(path)
+    elif info["jenis"] == "video":
         try:
             info["durasi"] = round(float(d.get("format", {}).get("duration")), 2)
         except (TypeError, ValueError):
@@ -163,6 +176,8 @@ def klasifikasi(info):
     """'berucap' | 'tanpa_ucapan' | 'ragu' | 'tanpa_suara' | 'gambar' | 'tidak_terukur'."""
     if info["jenis"] == "gambar":
         return "gambar"
+    if info["jenis"] == "musik":
+        return "musik"
     if not info["punya_audio"]:
         return "tanpa_suara"
     if info["ucapan_detik"] is None or not info["durasi"]:
@@ -191,6 +206,7 @@ def ringkas(fakta):
     k = [f["kelas"] for f in fakta]
     return {
         "n": len(fakta),
+        "n_musik": sum(f["jenis"] == "musik" for f in fakta),
         "n_video": sum(f["jenis"] == "video" for f in fakta),
         "n_gambar": k.count("gambar"),
         "n_berucap": k.count("berucap"),
@@ -203,7 +219,8 @@ def ringkas(fakta):
         "n_suasana": sum(
             f["kelas"] in ("tanpa_ucapan", "ragu") and (f["volume_db"] or -99) > AMBANG_SUARA_DB
             for f in fakta),
-        "total_detik": round(sum(f["durasi"] or 0 for f in fakta), 1),
+        # hanya VIDEO: durasi musik bukan durasi bahan
+        "total_detik": round(sum((f["durasi"] or 0) for f in fakta if f["jenis"] == "video"), 1),
     }
 
 
@@ -213,7 +230,8 @@ _PLATFORM = re.compile(r"\b(tiktok|tik\s*tok|reels?|instagram|ig|shorts?|youtube
                        r"stories|facebook|fb|linkedin)\b", re.I)
 _RASIO = re.compile(r"\b(9\s*:\s*16|1\s*:\s*1|16\s*:\s*9)\b")
 _AUDIO = re.compile(r"(suara\s*ai|voice\s*-?\s*over|voiceover|narasi|dubbing|suara\s*asli|"
-                    r"audio\s*asli|tanpa\s*suara|tanpa\s*voice)", re.I)
+                    r"audio\s*asli|tanpa\s*suara|tanpa\s*voice|mute|bisukan|senyapkan|"
+                    r"matikan\s*suara|hilangkan\s*suara)", re.I)
 _FIT = re.compile(r"\b(blur|buram|crop|potong tengah|letterbox|hitam|penuh layar|isi penuh)\b", re.I)
 _STATIS = re.compile(r"\b(statis|satu teks|teks tetap|tidak berubah|sepanjang video)\b", re.I)
 _MUSIK = re.compile(r"\b(musik|lagu|backsound|bgm|music|soundtrack)\b", re.I)
@@ -335,7 +353,26 @@ def susun_pertanyaan(ringk, tahu):
                       "ada ruang kosong",
         })
 
-    if not (tahu["audio"] or tahu["musik"]):
+    if ringk.get("n_musik", 0) > 0 and not tahu["audio"]:
+        # User mengirim musiknya sendiri: yang belum jelas adalah nasib suara asli video.
+        # (Menyebut "musik" di permintaan tidak menjawab ini, jadi `tahu["musik"]` diabaikan.)
+        q.append({
+            "kode": "audio",
+            "tanya": "Kamu mengirim berkas musik. Suara asli videonya bagaimana?",
+            "opsi": _opsi("Bisukan suara asli, hanya musikmu yang terdengar",
+                          "Pertahankan suara asli, musikmu jadi latar yang mengecil saat ada yang bicara",
+                          rekomendasi=0 if not (ringk["n_berucap"] > 0) else 1),
+            "catatan": "",
+            "param": {"A": {"audioMode": "mute"},
+                      "B": {"audioMode": "original"}},
+            "default": "video dibisukan, hanya musikmu yang terdengar"
+                       if not (ringk["n_berucap"] > 0)
+                       else "suara asli dipertahankan, musikmu jadi latar",
+            "alasan": "ada berkas musik; suara asli video harus dipertahankan atau dibisukan"
+                      + ("; video berisi ucapan, jadi membisukannya menghilangkan apa yang dikatakan"
+                         if ringk["n_berucap"] > 0 else ""),
+        })
+    elif not (tahu["audio"] or tahu["musik"]):
         if tanpa_ucapan_semua and ringk["n_suasana"] > 0:
             q.append({
                 "kode": "audio",
@@ -425,6 +462,12 @@ def _fmt_klip(i, f):
         return f"- Bahan {i}: TIDAK TERBACA ({f['error']})"
     if f["jenis"] == "gambar":
         return f"- Bahan {i}: gambar {f['lebar']}x{f['tinggi']}"
+    if f["jenis"] == "musik":
+        rincian = [f"{f['durasi']:.1f} dtk" if f["durasi"] else "durasi ?"]
+        if f["volume_db"] is not None:
+            rincian.append(f"volume {f['volume_db']:.0f} dB")
+        return f"- Bahan {i}: MUSIK dari user ({', '.join(rincian)})" if not f["error"] else \
+               f"- Bahan {i}: berkas audio TIDAK TERBACA ({f['error']})"
     bagian = [f"{f['durasi']:.1f} dtk" if f["durasi"] else "durasi ?", f["orientasi"] or "?"]
     if not f["punya_audio"]:
         bagian.append("tanpa suara")
@@ -443,8 +486,9 @@ def susun_teks(fakta, pertanyaan, tahu, ringk, *, inspect_id, paths):
     menyampaikannya dengan bahasanya sendiri."""
     baris = ["PEMERIKSAAN BAHAN (angka terukur, bukan tebakan):"]
     baris += [_fmt_klip(i, f) for i, f in enumerate(fakta, 1)]
-    baris.append(f"Total {ringk['n_video']} video / {ringk['n_gambar']} gambar, "
-                 f"{ringk['total_detik']:.1f} dtk video.")
+    baris.append(f"Total {ringk['n_video']} video / {ringk['n_gambar']} gambar"
+                 + (f" / {ringk['n_musik']} musik" if ringk.get("n_musik") else "")
+                 + f", {ringk['total_detik']:.1f} dtk video.")
     if ringk["n_video"] and ringk["n_berucap"] == 0 and ringk["n_tidak_terukur"] == 0:
         baris.append("Tidak ada video yang berisi ucapan: tidak ada yang bisa ditranskrip, jadi isi "
                      "cerita TIDAK diketahui dari bahan itu sendiri.")

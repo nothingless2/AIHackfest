@@ -588,3 +588,60 @@ def test_konteks_user_masuk_cli_check(tmp_path):
     _, g2 = _cli("check", {"inspect_id": r["inspect_id"], "chat_id": "555", "paths": [v],
                            "user_answered": True, "konteks": "edit ya. Ini acara donor darah Aksi Merah"}, env)
     assert g2["ok"] is True
+
+
+# ---------- musik dari user ----------
+
+def _lagu(path, detik=30):
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", f"sine=frequency=330:duration={detik}",
+                    "-c:a", "libmp3lame", str(path)], check=True, capture_output=True)
+    return str(path)
+
+
+def test_berkas_audio_dikenali_sebagai_musik_bukan_video(tmp_path):
+    f = im.probe_clip(_lagu(tmp_path / "lagu.mp3"))
+    assert f["jenis"] == "musik" and f["durasi"] == pytest.approx(30, abs=0.5) and f["punya_audio"]
+    assert im.klasifikasi(f) == "musik"
+
+
+def test_musik_tidak_dihitung_sebagai_video_dan_durasinya_bukan_durasi_bahan(tmp_path):
+    v = _video(tmp_path / "v.mp4", detik=4, w=640, h=360)
+    fakta = im.kumpulkan_fakta([v, _lagu(tmp_path / "lagu.mp3")])
+    r = im.ringkas(fakta)
+    assert r["n_video"] == 1 and r["n_musik"] == 1
+    assert r["total_detik"] == pytest.approx(4.0, abs=0.5), "durasi musik tidak boleh ikut dijumlahkan"
+
+
+def test_musik_ditanya_nasib_suara_asli_dengan_pilihan_mute(tmp_path):
+    ringk = _ringk(n_musik=1, n_horizontal=0)
+    q = im.susun_pertanyaan(ringk, _tahu("edit untuk tiktok"))
+    audio = [p for p in q if p["kode"] == "audio"][0]
+    assert audio["param"]["A"] == {"audioMode": "mute"}
+    assert audio["param"]["B"] == {"audioMode": "original"}
+    assert len(audio["opsi"]) == 2
+
+
+def test_default_musik_bisukan_untuk_bahan_tanpa_ucapan_tapi_pertahankan_untuk_berucap():
+    """Membisukan video berucapan menghilangkan apa yang dikatakan -- default-nya berbeda."""
+    tanpa = [p for p in im.susun_pertanyaan(_ringk(n_musik=1), _tahu("edit tiktok")) if p["kode"] == "audio"][0]
+    assert [o["huruf"] for o in tanpa["opsi"] if o["rekomendasi"]] == ["A"]
+    berucap = [p for p in im.susun_pertanyaan(
+        _ringk(n_musik=1, n_berucap=3, n_tanpa_ucapan=0, n_suasana=0), _tahu("edit tiktok")) if p["kode"] == "audio"][0]
+    assert [o["huruf"] for o in berucap["opsi"] if o["rekomendasi"]] == ["B"]
+
+
+@pytest.mark.parametrize("konteks", ["bisukan videonya", "tolong mute suara aslinya", "hilangkan suara asli",
+                                     "matikan suara"])
+def test_permintaan_mute_dianggap_sudah_menjawab_audio(konteks):
+    assert im.dari_konteks(konteks)["audio"] is True
+
+
+def test_menyebut_musik_saja_tidak_menjawab_nasib_suara_asli():
+    """'tambahkan musik' tidak berarti 'bisukan suara asli'; pertanyaannya tetap diajukan."""
+    q = im.susun_pertanyaan(_ringk(n_musik=1), _tahu("edit tiktok, tambahkan musik ini"))
+    assert "audio" in _kode(q)
+
+
+def test_pemetaan_musik_masuk_teks_agent():
+    q = im.susun_pertanyaan(_ringk(n_musik=1), _tahu("edit tiktok"))
+    assert 'audioMode="mute"' in "\n".join(im.susun_pemetaan(q))

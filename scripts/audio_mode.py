@@ -71,8 +71,12 @@ class TranscriptionUnavailable(RuntimeError):
 
 MODE_AI = "ai"
 MODE_ORIGINAL = "original"
+# Suara asli video DIBUANG seluruhnya; yang terdengar hanya musik (bawaan pustaka atau
+# berkas yang diunggah user). Transkripsi tetap dipakai untuk subtitle dan seleksi
+# konten -- membisukan video tidak berarti menghapus apa yang diucapkan dari layar.
+MODE_MUTE = "mute"
 MODE_AUTO = "auto"
-VALID_MODES = {MODE_AI, MODE_ORIGINAL, MODE_AUTO}
+VALID_MODES = {MODE_AI, MODE_ORIGINAL, MODE_MUTE, MODE_AUTO}
 
 # DEFAULT: pakai suara asli video. Voice-over AI hanya kalau user memintanya,
 # ATAU kalau bahan ternyata tidak ada ucapannya sama sekali (mis. hanya foto) --
@@ -115,6 +119,11 @@ def resolve_audio_mode(diminta, transkrip, *, eksplisit=False, gagal=None, ada_s
     """
     ada_ucapan = bool(transkrip)
     asal = "diminta user" if eksplisit else "default"
+
+    if diminta == MODE_MUTE:
+        # Tidak ada yang bisa gagal di sini: suara asli memang tidak dipakai. Kegagalan
+        # transkripsi hanya berarti tanpa subtitle, bukan run yang dihentikan.
+        return MODE_MUTE, f"video dibisukan ({asal}); suara asli tidak dipakai"
 
     if diminta == MODE_ORIGINAL and not ada_ucapan and gagal:
         tak_pasti = {n: k for n, k in gagal.items() if k not in ALASAN_PASTI_TANPA_UCAPAN}
