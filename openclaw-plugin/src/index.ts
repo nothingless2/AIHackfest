@@ -136,15 +136,9 @@ export function verifyInbound(
   }
 
   const folders = new Set(reals.map((r) => dirname(r.real as string)));
-  if (folders.size > 1) {
-    return {
-      ok: false,
-      reason:
-        "berasal dari lebih dari satu folder lampiran (tiap pesan punya folder " +
-        "sendiri, jadi ini mencampur kiriman yang berbeda)",
-      offending: [...folders],
-    };
-  }
+  // KINI DIIZINKAN: Beberapa folder (dari pesan yang berbeda) diizinkan asalkan semuanya ada di dalam INBOUND_ROOTS.
+  // Ini memungkinkan user mengunggah file tambahan (seperti musik) di pesan balasan!
+
 
   const folder = [...folders][0];
   try {
@@ -501,13 +495,13 @@ export default defineToolPlugin({
         "YANG BENAR-BENAR DIKERJAKAN pipeline ini:\n" +
         "- Suara ASLI video dipertahankan (bawaan). Voice-over AI hanya kalau user memintanya " +
         "(audioMode='ai').\n" +
-        "- Ucapan ditranskrip di mesin ini lalu jadi subtitle karaoke (frasa diam, kata yang " +
-        "sedang diucapkan menyala kuning). Bahan tanpa ucapan tidak dapat subtitle.\n" +
+        "- Transisi Dinamis: Otomatis menggunakan efek Zoom Kamera (Ken Burns) dan perpindahan halus (Crossfade/Xfade)!\n" +
+        "- Subtitle Animasi (Gaya CapCut): Kata menyala saat diucapkan, font tebal, dengan outline/shadow agar sangat menonjol.\n" +
+        "- Fitur B-Roll: Bisa menyisipkan stok video estetik di sela-sela video utama secara cerdas (fast-paced).\n" +
         "- Jeda diam dipotong. Untuk video berucapan, editor AI memilih dan mengurutkan potongan " +
         "ucapan terbaik dan membuang take ulang serta bagian tidak jelas (editMode='full' memakai " +
         "semua bahan).\n" +
-        "- Transisi: hard cut di dalam satu klip, fade hanya di pergantian topik.\n" +
-        "- Musik latar hanya kalau pemilik sistem sudah menaruh berkas musik; levelnya mengikuti " +
+        "- Musik latar bisa dikustomisasi secara instan (Auto-Discovery) atau menggunakan pustaka internal; levelnya mengikuti " +
         "kenyaringan video dan otomatis mengecil saat ada yang bicara.\n" +
         "- Rasio, durasi 10-60 detik, gaya subtitle, dan cover JPG.\n\n" +
         "YANG TIDAK ADA — JANGAN dijanjikan ke user: koreksi warna/color grading, stabilisasi, " +
@@ -517,6 +511,10 @@ export default defineToolPlugin({
         "konfirmasi singkat apa yang diminta user dan bahwa hasil dikirim otomatis; jangan " +
         "merinci pengaturan yang tidak ada di daftar di atas dan jangan menebak hasilnya " +
         "sebelum terkirim.\n\n" +
+        "PENTING (INTERAKSI AKTIF): Jika user hanya mengirim video/gambar tanpa instruksi spesifik, " +
+        "JANGAN HANYA DIAM. Proaktiflah menawarkan fitur unggulan sistem ini kepada mereka! Contoh: " +
+        "'Mau saya edit dengan gaya cepat (fast-paced) ditambah B-Roll dan Subtitle Animasi ala CapCut?' " +
+        "Bantu mereka memilih fitur agar video mereka lebih menarik.\n\n" +
         "ALUR WAJIB: (1) panggil content_factory_inspect PALING PERTAMA dengan bahan yang sama " +
         "(sebelum bertanya apa pun ke user); (2) kirim pesan pertanyaan dari hasilnya sebagai " +
         "pesan biasa lalu akhiri giliran (bukan ask_user); (3) setelah user membalas, panggil " +

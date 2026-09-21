@@ -202,8 +202,28 @@ def build_filter(durasi, *, punya_ucapan=True, volume=None, fade=None):
 # Berkas musik yang DIUNGGAH user untuk run ini (diisi plugin). Mengalahkan pustaka dan
 # mood: user yang menyebut musiknya sendiri tidak boleh dilayani dengan lagu lain.
 def external_track():
+    """
+    Mengambil file musik kustom dari pengguna. Pertama cek ENV, jika kosong cari 
+    berkas di folder 'workspace/music_user/'.
+    """
     p = (os.getenv("CONTENT_FACTORY_MUSIC_FILE") or "").strip()
-    return p or None
+    if p:
+        return p
+    
+    # Auto-Discovery di workspace/music_user/
+    try:
+        workspace_music_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "workspace", "music_user"))
+        if os.path.exists(workspace_music_dir):
+            files = [os.path.join(workspace_music_dir, f) for f in os.listdir(workspace_music_dir) 
+                     if os.path.isfile(os.path.join(workspace_music_dir, f)) and not f.startswith('.')]
+            if files:
+                # Ambil file terbaru berdasarkan waktu modifikasi
+                latest_file = max(files, key=os.path.getmtime)
+                return latest_file
+    except Exception as e:
+        print(f"Error Auto-Discovery custom music: {e}")
+        
+    return None
 
 
 # Target kenyaringan musik SOLO (video dibisukan, tidak ada suara lain yang harus

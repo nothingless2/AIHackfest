@@ -65,6 +65,11 @@ def resolve_font(nama=None, berat=None):
     tidak terpasang tidak menggagalkan render -- tapi hasilnya bisa bukan yang
     diminta. Karena itu diperingatkan kalau keluarga yang kembali berbeda.
     """
+    if os.getenv("SUBTITLE_STYLE", "karaoke") == "capcut":
+        local_font = os.path.join(os.path.dirname(__file__), "..", "..", "assets", "fonts", "Montserrat-ExtraBold.ttf")
+        if os.path.exists(local_font):
+            return os.path.abspath(local_font)
+
     minta = nama or SUBTITLE_FONT
     pola = f"{minta}:{berat or SUBTITLE_FONT_WEIGHT}"
     try:
@@ -321,7 +326,7 @@ BLUR_SMALL_W = int(os.getenv("BLUR_SMALL_WIDTH", "160"))
 BLUR_SIGMA = float(os.getenv("BLUR_SIGMA", "18"))
 
 
-def scale_crop_filter(w=None, h=None, fit=None):
+def scale_crop_filter(w=None, h=None, fit=None, duration=None):
     """Filter ffmpeg untuk memuat bahan ke kanvas w x h.
 
     CATATAN BUG LAMA: versi sebelumnya memakai
@@ -336,22 +341,28 @@ def scale_crop_filter(w=None, h=None, fit=None):
     fit = (fit or TARGET_FIT).lower()
 
     if fit == "letterbox":
-        return (f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
-                f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black,fps={FPS}")
-
-    if fit == "blur":
+        base = (f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
+                f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black")
+    elif fit == "blur":
         kecil_h = max(2, int(BLUR_SMALL_W * h / w) // 2 * 2)
-        return (
+        base = (
             f"split[bg][fg];"
             f"[bg]scale={BLUR_SMALL_W}:{kecil_h}:force_original_aspect_ratio=increase,"
             f"crop={BLUR_SMALL_W}:{kecil_h},gblur=sigma={BLUR_SIGMA},"
             f"scale={w}:{h}[bgx];"
             f"[fg]scale={w}:{h}:force_original_aspect_ratio=decrease[fgx];"
-            f"[bgx][fgx]overlay=(W-w)/2:(H-h)/2,fps={FPS}"
+            f"[bgx][fgx]overlay=(W-w)/2:(H-h)/2"
         )
+    else:
+        base = (f"scale={w}:{h}:force_original_aspect_ratio=increase,"
+                f"crop={w}:{h}")
 
-    return (f"scale={w}:{h}:force_original_aspect_ratio=increase,"
-            f"crop={w}:{h},fps={FPS}")
+    enable_zoom = os.getenv("ENABLE_DYNAMIC_ZOOM", "False").lower() == "true"
+    if enable_zoom and duration and duration > 0:
+        zoom_filter = f",zoompan=z='min(1.05,1.0+0.05*(time/{duration}))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s={w}x{h}:fps={FPS}"
+        return f"{base}{zoom_filter}"
+
+    return f"{base},fps={FPS}"
 
 
 def fade_filters(durasi, *, keep_audio, fade_in=True, fade_out=True):
@@ -583,8 +594,17 @@ def build_segment(asset_path, duration, segment_path, *, keep_audio=False,
     sama, jadi satu segmen tanpa audio akan merusak penggabungan.
     """
     ext = os.path.splitext(asset_path)[1].lower()
-    vf = scale_crop_filter()
-    fade_v, fade_a = fade_filters(duration, keep_audio=keep_audio,
+    enable_xfade = os.getenv("ENABLE_XFADE", "False").lower() == "true"
+    pad = TRANSITION_DURATION if enable_xfade else 0
+    actual_duration = duration + pad
+
+    vf = scale_crop_filter(duration=actual_duration)
+    
+    if enable_xfade:
+        fade_in = False
+        fade_out = False
+        
+    fade_v, fade_a = fade_filters(actual_duration, keep_audio=keep_audio,
                                   fade_in=fade_in, fade_out=fade_out)
     if fade_v:
         vf = f"{vf},{fade_v}"
@@ -594,14 +614,19 @@ def build_segment(asset_path, duration, segment_path, *, keep_audio=False,
     # `potong` = (mulai, selesai) untuk mengambil sepotong klip saja (pemotongan
     # jeda). -ss diletakkan SEBELUM -i supaya ffmpeg mencari cepat ke posisi itu
     # alih-alih mendekode dari awal.
-    iris = ["-ss", f"{potong[0]:.3f}", "-to", f"{potong[1]:.3f}"] if potong else []
+    
+    iris = []
+    if potong:
+        mulai = max(0.0, potong[0] - (pad / 2))
+        selesai = potong[1] + (pad / 2)
+        iris = ["-ss", f"{mulai:.3f}", "-to", f"{selesai:.3f}"]
 
     if ext in IMAGE_EXTENSIONS:
         args = ["-loop", "1", "-i", asset_path]
         if keep_audio:
             args += ["-f", "lavfi", "-i",
                      f"anullsrc=channel_layout=stereo:sample_rate={AUDIO_RATE}"]
-        args += ["-t", f"{duration:.3f}", "-vf", vf,
+        args += ["-t", f"{actual_duration:.3f}", "-vf", vf,
                  "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "fast"]
         args += audio_enc if keep_audio else []
         run_ffmpeg(args + [segment_path], f"gambar {os.path.basename(asset_path)}")
@@ -616,7 +641,7 @@ def build_segment(asset_path, duration, segment_path, *, keep_audio=False,
             # -stream_loop -1 mengulang video kalau lebih pendek dari `duration`;
             # -t memotongnya persis di durasi target.
             args = ["-stream_loop", "-1", "-i", asset_path,
-                    "-t", f"{duration:.3f}", "-vf", vf, "-an",
+                    "-t", f"{actual_duration:.3f}", "-vf", vf, "-an",
                     "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "fast"]
         run_ffmpeg(args + [segment_path], f"video {os.path.basename(asset_path)}")
 
@@ -624,8 +649,50 @@ def build_segment(asset_path, duration, segment_path, *, keep_audio=False,
         raise ValueError(f"Ekstensi tidak didukung untuk '{asset_path}': {ext}")
 
 
-def concat_segments(segment_paths, output_path, workdir):
-    """Gabung semua segmen jadi satu (hard cut, tanpa crossfade mahal)."""
+def concat_segments(segment_paths, output_path, workdir, keep_audio=False):
+    """Gabung semua segmen jadi satu. Menggunakan Xfade jika diaktifkan."""
+    enable_xfade = os.getenv("ENABLE_XFADE", "False").lower() == "true"
+    
+    if enable_xfade and len(segment_paths) > 1:
+        # XFADE Logic
+        args = []
+        for p in segment_paths:
+            args.extend(["-i", p])
+            
+        filter_complex = []
+        offset = 0.0
+        last_v = "0:v"
+        last_a = "0:a" if keep_audio else None
+        
+        for i in range(1, len(segment_paths)):
+            prev_dur = media_duration(segment_paths[i-1])
+            offset += (prev_dur - TRANSITION_DURATION)
+            
+            next_v = f"{i}:v"
+            out_v = f"v{i}"
+            filter_complex.append(f"[{last_v}][{next_v}]xfade=transition=fade:duration={TRANSITION_DURATION}:offset={offset}[{out_v}]")
+            last_v = out_v
+            
+            if keep_audio:
+                next_a = f"{i}:a"
+                out_a = f"a{i}"
+                filter_complex.append(f"[{last_a}][{next_a}]acrossfade=d={TRANSITION_DURATION}[{out_a}]")
+                last_a = out_a
+                
+        args.extend(["-filter_complex", ";".join(filter_complex)])
+        args.extend(["-map", f"[{last_v}]"])
+        if keep_audio:
+            args.extend(["-map", f"[{last_a}]"])
+            
+        args.extend(["-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "fast"])
+        if keep_audio:
+            args.extend(["-c:a", "aac", "-ar", AUDIO_RATE, "-ac", AUDIO_CHANNELS])
+        
+        args.append(output_path)
+        run_ffmpeg(args, "penggabungan segmen dengan xfade")
+        return
+
+    # HARD CUT Logic (Default)
     list_path = os.path.join(workdir, "_concat_list.txt")
     with open(list_path, "w", encoding="utf-8") as f:
         for p in segment_paths:
@@ -677,6 +744,8 @@ SUBTITLE_STYLES = {
     "karaoke-tebal":   {"color": "white", "highlight": "0xFFD400", "border": 6},
     "karaoke-kapital": {"color": "white", "highlight": "0xFFD400",
                         "box": "black@0.55", "pad": 24, "upper": True},
+    # --- CapCut Style: Tebal, uppercase, shadow kuat, warna mencolok
+    "capcut": {"color": "white", "highlight": "0x00FF99", "border": 8, "shadow": 7, "upper": True},
     # --- Gaya lama: teks KUMULATIF (kata muncul satu per satu, seluruh teks
     # di-center ulang tiap kata baru sehingga kata sebelumnya bergeser ke kiri).
     "putih-kotak":  {"color": "white",  "box": "black@0.55", "pad": 24},
@@ -752,7 +821,10 @@ def _drawtext(teks, fs, y, gaya, enable, alpha=None):
     if gaya.get("box"):
         bagian.append(f":box=1:boxcolor={gaya['box']}:boxborderw={gaya.get('pad', 24)}")
     else:
-        bagian.append(f":bordercolor=black:borderw={gaya.get('border', 4)}")
+        border = gaya.get('border', 4)
+        shadow = gaya.get('shadow', 0)
+        sh_str = f":shadowcolor=black@0.8:shadowx={shadow}:shadowy={shadow}" if shadow else ""
+        bagian.append(f":bordercolor=black:borderw={border}{sh_str}")
     if alpha:
         bagian.append(f":alpha='{alpha}'")
     bagian.append(f":enable='{enable}'")
@@ -792,8 +864,10 @@ def _filter_kata(kata, x, dasar, fs, gaya, aktif, grup):
         f":x={x}:y={dasar}-ascent:fontcolor_expr='{warna}'",
     ]
     if not gaya.get("box"):
-        bagian.append(f":bordercolor=black:borderw={gaya.get('border', 5)}"
-                      ":shadowcolor=black@0.55:shadowx=3:shadowy=3")
+        border = gaya.get('border', 5)
+        shadow = gaya.get('shadow', 3)
+        sh_str = f":shadowcolor=black@0.8:shadowx={shadow}:shadowy={shadow}" if shadow else ""
+        bagian.append(f":bordercolor=black:borderw={border}{sh_str}")
     bagian.append(f":enable='between(t,{g0:.3f},{g1:.3f})'")
     return "".join(bagian)
 
@@ -1274,6 +1348,23 @@ def render_from_agent_script(
     if not existing_assets:
         raise ValueError("Tidak ada bahan mentah (media_assets) untuk dirender.")
 
+    # [B-ROLL LOGIC] Interleave stok B-Roll pada mode AI Voice-Over
+    if not pakai_audio_asli:
+        import glob
+        broll_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "workspace", "broll_user"))
+        brolls = glob.glob(os.path.join(broll_dir, "*.*"))
+        brolls = [b for b in brolls if os.path.isfile(b) and not os.path.basename(b).startswith('.')]
+        if brolls:
+            brolls = sorted(brolls)
+            new_assets = []
+            for i in range(max(len(existing_assets), len(brolls))):
+                if i < len(existing_assets):
+                    new_assets.append(existing_assets[i])
+                if i < len(brolls):
+                    new_assets.append(brolls[i])
+            existing_assets = new_assets
+            print(f"🎥 Menyisipkan {len(brolls)} file B-Roll (total klip visual menjadi {len(existing_assets)}).")
+
     if pakai_audio_asli:
         # Durasi ditentukan bahan, bukan TTS: tiap klip main sepanjang aslinya
         # supaya ucapan user tidak terpotong di tengah kalimat.
@@ -1367,7 +1458,7 @@ def render_from_agent_script(
 
     silent_combined = os.path.join(output_dir, "_combined_silent.mp4")
     if len(segment_paths) > 1:
-        concat_segments(segment_paths, silent_combined, output_dir)
+        concat_segments(segment_paths, silent_combined, output_dir, keep_audio=pakai_audio_asli and not bisu)
     else:
         os.replace(segment_paths[0], silent_combined)
 

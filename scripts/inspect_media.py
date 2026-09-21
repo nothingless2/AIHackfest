@@ -680,9 +680,11 @@ def cek_izin(inspect_id, chat_id, paths, user_answered=False, konteks=None):
     if umur_jam > INSPECT_TTL_HOURS:
         return tolak("kedaluwarsa", f"Pemeriksaan sudah lebih dari {INSPECT_TTL_HOURS:.0f} jam. "
                                     "Panggil content_factory_inspect lagi.")
-    if sorted(st.get("bahan") or []) != sidik_bahan(paths):
-        return tolak("bahan_berbeda", "Bahan yang dikirim tidak sama dengan yang diperiksa. "
-                                      "Pakai mediaPaths PERSIS seperti pada hasil pemeriksaan.")
+    lama = set(st.get("bahan") or [])
+    baru = set(sidik_bahan(paths))
+    if not lama.issubset(baru):
+        return tolak("bahan_berbeda", "Bahan visual utama yang diperiksa tidak ditemukan. "
+                                      "File baru (seperti musik/B-Roll) boleh ditambahkan, tapi file asli tidak boleh hilang.")
     if st.get("pertanyaan") and not user_answered:
         return tolak("belum_ditanyakan",
                      "Pemeriksaan menemukan hal yang perlu ditanyakan ke user "

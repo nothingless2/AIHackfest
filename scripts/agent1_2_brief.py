@@ -111,6 +111,7 @@ def build_performance_note(performance):
 def build_trend_note(pool):
     """Kolam tren NYATA sebagai daftar bernomor. LLM hanya boleh memilih nomor."""
     items = (pool or {}).get("items") or []
+    items = items[:15]  # Batasi maksimal 15 tren teratas untuk menghemat token
     if not items:
         return ("TIDAK ADA data tren yang berhasil diambil. Set trend_index = null "
                 "dan tentukan sudut konten murni dari isi gambar."), []
@@ -300,9 +301,9 @@ Balas HANYA JSON murni dengan struktur persis berikut:
   }},
   "creative_brief": {{
     "judul": "string",
-    "deskripsi": "deskripsi konten 2-3 kalimat untuk kolom caption/description platform: apa isinya, untuk siapa, dan apa yang didapat penonton. Berbeda dari judul (pendek) dan dari hashtags.",
+    "deskripsi": "deskripsi konten MAKSIMAL 30 kata untuk kolom caption platform. Harus singkat dan padat.",
     "target_trend": "string",
-    "full_voice_over": "string",
+    "full_voice_over": "naskah voice-over MAKSIMAL 60 kata. Sangat ringkas, padat, dan langsung ke intinya.",
 {baris_spoken}    "scenes": [
       {{"start": 0, "end": 4, "text": "teks on-screen singkat"}}
     ],
