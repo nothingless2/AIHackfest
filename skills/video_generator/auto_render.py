@@ -1348,23 +1348,6 @@ def render_from_agent_script(
     if not existing_assets:
         raise ValueError("Tidak ada bahan mentah (media_assets) untuk dirender.")
 
-    # [B-ROLL LOGIC] Interleave stok B-Roll pada mode AI Voice-Over
-    if not pakai_audio_asli:
-        import glob
-        broll_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "workspace", "broll_user"))
-        brolls = glob.glob(os.path.join(broll_dir, "*.*"))
-        brolls = [b for b in brolls if os.path.isfile(b) and not os.path.basename(b).startswith('.')]
-        if brolls:
-            brolls = sorted(brolls)
-            new_assets = []
-            for i in range(max(len(existing_assets), len(brolls))):
-                if i < len(existing_assets):
-                    new_assets.append(existing_assets[i])
-                if i < len(brolls):
-                    new_assets.append(brolls[i])
-            existing_assets = new_assets
-            print(f"🎥 Menyisipkan {len(brolls)} file B-Roll (total klip visual menjadi {len(existing_assets)}).")
-
     if pakai_audio_asli:
         # Durasi ditentukan bahan, bukan TTS: tiap klip main sepanjang aslinya
         # supaya ucapan user tidak terpotong di tengah kalimat.
