@@ -330,3 +330,38 @@ Kalau test gagal, itu sinyal untuk berhenti dan memperbaiki, bukan melewatinya.
 - Uji manual: render end-to-end (`render_from_agent_script`, mode AI, edge-tts) dengan
   ketiga fitur aktif bersamaan -- sukses, durasi keluaran 7,83 dtk cocok narasi.
 - 720 pytest + 52 vitest lolos, `tsc` bersih.
+
+## 23 Sept — jembatan ke Hermes (menggantikan OpenClaw)
+
+User memutuskan pindah dari OpenClaw ke Hermes (agent lain, sudah terpasang manual
+di mesin ini sejak 19-21 Sept lewat installer resmi Nous Research -- ditelusuri,
+BUKAN instalasi tak dikenal) untuk jembatan Telegram. `openclaw-gateway.service`
+sudah di-stop+disable (bentrok getUpdates: keduanya memakai token bot yang sama).
+`~/.openclaw` BELUM dihapus -- ditahan sampai Hermes terbukti jalan.
+
+Temuan arsitektur (dari membaca source Hermes langsung, `/usr/local/lib/hermes-agent`):
+tool MCP custom di Hermes TIDAK menerima identitas chat tepercaya lewat argumen
+tool-call (beda dari OpenClaw yang menangkap `nativeChannelId` lewat closure
+server-side) -- `HERMES_SESSION_CHAT_ID` dkk. adalah contextvar internal Hermes,
+dipakai gateway-nya sendiri untuk notifikasi proses latar belakang, bukan
+diteruskan ke proses anak. Karena itu jalur yang dibangun BUKAN MCP server, tapi:
+agent memanggil `scripts/hermes_render.py` (baru) lewat tool terminal Hermes
+sendiri (`background=true, notify_on_complete=true`); skrip itu HANYA merender
+dan mengembalikan path file lewat JSON -- pengiriman ke chat dilakukan agent
+Hermes sendiri setelah dibangunkan kembali di sesi/chat yang sama, memakai
+kemampuan kirim-file bawaannya (levelnya Hermes sendiri yang menjamin chat benar,
+sama seperti kemampuan kirim pesan biasa).
+
+`scripts/hermes_render.py` memakai ulang seluruh core pipeline (`run_core_stages_locked`,
+`cek_izin`, `resolve_canvas`, `music.py`, `style.py`) -- validasi lampiran lewat
+realpath-di-dalam-root yang sama semangatnya dengan `verifyInbound` OpenClaw, root-nya
+`~/.hermes/cache/`. Skill instruksinya di `hermes-skill/content-factory/SKILL.md`
+(belum dipasang ke `~/.hermes/skills/` -- itu langkah manual user).
+
+Uji manual: render end-to-end lewat `hermes_render.main()` dengan bahan di folder
+cache tiruan -- sukses, JSON hasil benar (video_path, judul, deskripsi, biaya).
+728 pytest lolos (+8 test baru untuk validasi path/staging).
+
+BELUM DIUJI: giliran nyata lewat Telegram sungguhan lewat Hermes (perlu pesan
+nyata dari user); apakah `notify_on_complete` benar-benar mengembalikan stdout
+proses ke agent seperti yang diasumsikan skill-nya.
