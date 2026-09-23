@@ -39,6 +39,9 @@ from music import (  # noqa: E402
     music_wanted, pick_track, requested_mood, solo_volume,
 )
 from spoken import prompt_rule, spoken_text  # noqa: E402
+from style import (  # noqa: E402
+    auto_zoom_enabled, resolve_color_filter, resolve_speed_factor,
+)
 from subtitle_layout import layout_group  # noqa: E402
 from thumbnail import (  # noqa: E402
     THUMBNAIL_ENABLED, extract_thumbnail, thumbnail_time,
@@ -326,7 +329,12 @@ BLUR_SMALL_W = int(os.getenv("BLUR_SMALL_WIDTH", "160"))
 BLUR_SIGMA = float(os.getenv("BLUR_SIGMA", "18"))
 
 
-def scale_crop_filter(w=None, h=None, fit=None, duration=None):
+# Ken Burns: seberapa besar gambar membesar dari awal ke akhir klipnya. Subtle
+# dengan sengaja -- efek yang terlalu agresif terasa seperti kesalahan, bukan gaya.
+ZOOM_MAX_FACTOR = float(os.getenv("ZOOM_MAX_FACTOR", "1.12"))
+
+
+def scale_crop_filter(w=None, h=None, fit=None, duration=None, zoom=False, color_filter=None):
     """Filter ffmpeg untuk memuat bahan ke kanvas w x h.
 
     CATATAN BUG LAMA: versi sebelumnya memakai
@@ -335,6 +343,10 @@ def scale_crop_filter(w=None, h=None, fit=None, duration=None):
     jadi untuk sumber yang lebih sempit dari kanvas hasilnya lebih kecil dari
     lebar target dan crop gagal. Tidak pernah terlihat selama kanvas selalu 9:16;
     langsung meledak begitu rasio jadi parameter. Kedua dimensi kini disebut.
+
+    `zoom=True` menambah efek Ken Burns (HANYA dipakai pemanggil untuk bahan
+    GAMBAR -- lihat build_segment). `color_filter` adalah chain filter ffmpeg
+    siap pakai dari style.resolve_color_filter(), atau None.
     """
     w = w or TARGET_W
     h = h or TARGET_H
@@ -357,12 +369,28 @@ def scale_crop_filter(w=None, h=None, fit=None, duration=None):
         base = (f"scale={w}:{h}:force_original_aspect_ratio=increase,"
                 f"crop={w}:{h}")
 
-    enable_zoom = os.getenv("ENABLE_DYNAMIC_ZOOM", "False").lower() == "true"
-    if enable_zoom and duration and duration > 0:
-        zoom_filter = f",zoompan=z='min(1.05,1.0+0.05*(time/{duration}))':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s={w}x{h}:fps={FPS}"
-        return f"{base}{zoom_filter}"
+    if zoom and duration and duration > 0:
+        # Resep zoompan standar untuk SATU gambar diam yang di-loop (`-loop 1`):
+        # d = total frame OUTPUT yang diminta (bukan 1) -- itu yang membuat
+        # zoompan sendiri men-generate seluruh durasi dari satu input, dan
+        # kenapa filter `fps=` terpisah TIDAK ditambahkan lagi sesudahnya
+        # (zoompan sudah menormalkan lewat parameter s=/fps= miliknya sendiri).
+        # Versi sebelumnya memakai variabel `time` yang TIDAK ADA di zoompan,
+        # sehingga zoom selalu diam di 1.0 -- tidak pernah membesar.
+        frame_total = max(2, round(duration * FPS))
+        step = (ZOOM_MAX_FACTOR - 1.0) / frame_total
+        base += (
+            f",zoompan=z='min(zoom+{step:.6f},{ZOOM_MAX_FACTOR})':"
+            f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+            f"d={frame_total}:s={w}x{h}:fps={FPS}"
+        )
+    else:
+        base += f",fps={FPS}"
 
-    return f"{base},fps={FPS}"
+    if color_filter:
+        base += f",{color_filter}"
+
+    return base
 
 
 def fade_filters(durasi, *, keep_audio, fade_in=True, fade_out=True):
@@ -585,21 +613,31 @@ def sambungan_scene(durasi_klip, scenes):
 
 
 def build_segment(asset_path, duration, segment_path, *, keep_audio=False,
-                  potong=None, fade_in=True, fade_out=True):
+                  potong=None, fade_in=True, fade_out=True, speed_factor=1.0):
     """Satu bahan mentah (gambar atau video) -> satu segmen 9:16 sepanjang `duration`.
 
     `keep_audio=True` (mode audio asli) mempertahankan suara asli video, dan
     memberi gambar trek audio SENYAP sepanjang durasinya. Trek senyap itu wajib:
     concat demuxer dengan -c copy menuntut semua segmen punya susunan stream yang
     sama, jadi satu segmen tanpa audio akan merusak penggabungan.
+
+    `speed_factor` (speed ramp) HANYA diterapkan untuk VIDEO tanpa audio yang
+    dipertahankan (`keep_audio=False`) -- lihat catatan di style.resolve_speed_factor()
+    kenapa mode audio asli/mute tidak pernah mengirim nilai selain 1.0 ke sini.
+    Zoom otomatis (Ken Burns) hanya untuk GAMBAR, diputuskan di sini dari ekstensi
+    berkas, bukan diminta pemanggil.
     """
     ext = os.path.splitext(asset_path)[1].lower()
+    is_image = ext in IMAGE_EXTENSIONS
     enable_xfade = os.getenv("ENABLE_XFADE", "False").lower() == "true"
     pad = TRANSITION_DURATION if enable_xfade else 0
     actual_duration = duration + pad
 
-    vf = scale_crop_filter(duration=actual_duration)
-    
+    _, filter_warna = resolve_color_filter()
+    vf = scale_crop_filter(duration=actual_duration,
+                           zoom=is_image and auto_zoom_enabled(),
+                           color_filter=filter_warna)
+
     if enable_xfade:
         fade_in = False
         fade_out = False
@@ -640,8 +678,16 @@ def build_segment(asset_path, duration, segment_path, *, keep_audio=False,
         else:
             # -stream_loop -1 mengulang video kalau lebih pendek dari `duration`;
             # -t memotongnya persis di durasi target.
+            #
+            # speed ramp: `-t` di sini adalah batas durasi OUTPUT (posisinya
+            # setelah -i), jadi tetap actual_duration apa pun speed_factor-nya --
+            # setpts hanya mengubah SEBERAPA BANYAK bahan sumber terpakai untuk
+            # mengisi jendela waktu itu (lebih cepat = lebih banyak, lebih lambat
+            # = diulang lebih sering lewat -stream_loop). Slot di timeline gabungan
+            # tidak pernah berubah, jadi ini aman untuk scene/subtitle di sekitarnya.
+            vf_speed = vf if speed_factor == 1.0 else f"{vf},setpts=PTS/{speed_factor}"
             args = ["-stream_loop", "-1", "-i", asset_path,
-                    "-t", f"{actual_duration:.3f}", "-vf", vf, "-an",
+                    "-t", f"{actual_duration:.3f}", "-vf", vf_speed, "-an",
                     "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "fast"]
         run_ffmpeg(args + [segment_path], f"video {os.path.basename(asset_path)}")
 
@@ -1428,11 +1474,19 @@ def render_from_agent_script(
                           fade_in=f_in, fade_out=f_out)
             segment_paths.append(seg_path)
     else:
+        # speed ramp HANYA di jalur ini (voice-over AI): tidak ada ucapan asli
+        # tersinkron ke klip mana pun di sini (narasinya lagu/trek terpisah,
+        # scene dipatok ke waktu narasi -- bukan ke isi klip), jadi mengubah
+        # kecepatan klip tidak membuat apa pun lepas sinkron. Mode audio asli/
+        # mute (cabang di atas) TIDAK memanggil resolve_speed_factor() sama
+        # sekali -- lihat catatan di style.resolve_speed_factor().
+        faktor_kecepatan = resolve_speed_factor()
         bendera = fade_flags(sambungan_scene(durasi_klip, scenes), len(existing_assets))
         for i, asset_path in enumerate(existing_assets):
             seg_path = os.path.join(output_dir, f"_segment_{i}.mp4")
             build_segment(asset_path, durasi_klip[i], seg_path, keep_audio=False,
-                          fade_in=bendera[i][0], fade_out=bendera[i][1])
+                          fade_in=bendera[i][0], fade_out=bendera[i][1],
+                          speed_factor=faktor_kecepatan)
             segment_paths.append(seg_path)
 
     fade_dipakai = sum(1 for f_in, _ in bendera if f_in)

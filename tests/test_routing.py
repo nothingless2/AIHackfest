@@ -91,6 +91,42 @@ def test_lock_sibuk_pesan_ke_peminta_bukan_ke_pemegang(rekam, monkeypatch, izink
     assert rekam["send_video"] == []
 
 
+def test_speed_factor_salah_ditolak_sebelum_render(rekam, monkeypatch, izinkan_ab):
+    """Nilai speedFactor di luar jangkauan harus ditolak SEBELUM lock render dan
+    sebelum panggilan LLM apa pun -- pola yang sama dengan canvas/musik."""
+    monkeypatch.setenv("CONTENT_FACTORY_CHAT_ID", CHAT_A)
+    monkeypatch.setenv("SPEED_FACTOR", "9.0")
+
+    dipanggil = []
+    monkeypatch.setattr(
+        run_and_deliver, "run_core_stages_locked",
+        lambda *a, **k: dipanggil.append(True),
+    )
+
+    rc = run_and_deliver.main()
+
+    assert rc == os.EX_CONFIG
+    assert dipanggil == [], "render tidak boleh dijalankan"
+    assert rekam["notify"] == [CHAT_A]
+    assert rekam["send_video"] == []
+
+
+def test_color_filter_tidak_dikenal_ditolak_sebelum_render(rekam, monkeypatch, izinkan_ab):
+    monkeypatch.setenv("CONTENT_FACTORY_CHAT_ID", CHAT_A)
+    monkeypatch.setenv("COLOR_FILTER", "neon-cyberpunk")
+
+    dipanggil = []
+    monkeypatch.setattr(
+        run_and_deliver, "run_core_stages_locked",
+        lambda *a, **k: dipanggil.append(True),
+    )
+
+    rc = run_and_deliver.main()
+
+    assert rc == os.EX_CONFIG
+    assert dipanggil == [], "render tidak boleh dijalankan"
+
+
 def test_pesan_penolakan_tidak_membocorkan_isi_run_pemegang(monkeypatch, izinkan_ab):
     """Pesan ke peminta tidak boleh menyebut judul/isi run milik orang lain."""
     monkeypatch.setenv("CONTENT_FACTORY_CHAT_ID", CHAT_B)

@@ -332,6 +332,40 @@ const runParams = Type.Object({
       },
     ),
   ),
+  colorFilter: Type.Optional(
+    Type.Union(
+      [Type.Literal("natural"), Type.Literal("vivid"), Type.Literal("warm"),
+       Type.Literal("cool"), Type.Literal("bw")],
+      {
+        description:
+          "Filter warna. 'natural' sedikit menajamkan kontras/saturasi, 'vivid' " +
+          "warna mencolok ala media sosial, 'warm' condong hangat/kekuningan, " +
+          "'cool' condong sejuk/kebiruan, 'bw' hitam-putih. Isi HANYA kalau user " +
+          "memintanya (mis. 'warnanya dibikin lebih hidup', 'hitam putih saja'). " +
+          "Berlaku untuk semua mode audio.",
+      },
+    ),
+  ),
+  speedFactor: Type.Optional(
+    Type.Number({
+      minimum: 0.5,
+      maximum: 2.0,
+      description:
+        "Kelipatan kecepatan pemutaran klip, mis. 1.5 = 1.5x lebih cepat, 0.7 = " +
+        "slow-motion. HANYA berlaku saat audioMode='ai' (voice-over AI) -- di " +
+        "mode audio asli/mute orang di videonya masih terlihat bicara, jadi " +
+        "kecepatan klip tidak diubah supaya subtitle tidak lepas dari gerak " +
+        "bibirnya. Isi hanya kalau user secara eksplisit meminta cepat/lambat.",
+    }),
+  ),
+  autoZoom: Type.Optional(
+    Type.Boolean({
+      description:
+        "true untuk menyalakan efek zoom perlahan (Ken Burns) pada bahan FOTO " +
+        "(bukan video). Isi hanya kalau user memintanya, mis. 'foto-fotonya " +
+        "dikasih efek zoom'. Default: mati (foto tampil diam).",
+    }),
+  ),
   voicePersona: Type.Optional(
     Type.Union(
       [Type.Literal("ramah"), Type.Literal("profesional"), Type.Literal("energik"),
@@ -510,10 +544,16 @@ export default defineToolPlugin({
         "- Musik latar: dari pustaka internal (mengikuti mood), atau dari berkas audio yang user " +
         "unggah bersama video pada pesan yang sama (levelnya mengikuti kenyaringan video dan " +
         "otomatis mengecil saat ada yang bicara).\n" +
-        "- Rasio, durasi 10-60 detik, gaya subtitle, dan cover JPG.\n\n" +
-        "YANG TIDAK ADA — JANGAN dijanjikan ke user: koreksi warna/color grading, stabilisasi, " +
-        "efek/filter/zoom otomatis, B-roll/stok video, stiker, pemilihan thumbnail 'frame paling " +
-        "tajam', memilih lagu tren, dubbing bahasa lain, upload otomatis ke platform.\n\n" +
+        "- Rasio, durasi 10-60 detik, gaya subtitle, dan cover JPG.\n" +
+        "- Filter warna (colorFilter: natural/vivid/warm/cool/bw), berlaku untuk semua mode audio.\n" +
+        "- Zoom perlahan/Ken Burns (autoZoom=true) untuk bahan FOTO saja, bukan video.\n" +
+        "- Speed ramp (speedFactor 0.5-2.0x) HANYA saat audioMode='ai' — di mode audio asli/mute " +
+        "orang di videonya masih terlihat bicara, jadi kecepatan klip tidak diubah supaya " +
+        "subtitle tidak lepas dari gerak bibirnya. Kalau user minta cepat/lambat di mode itu, " +
+        "jelaskan batasan ini, jangan diam-diam diabaikan.\n\n" +
+        "YANG TIDAK ADA — JANGAN dijanjikan ke user: stabilisasi, B-roll/stok video otomatis, " +
+        "stiker, pemilihan thumbnail 'frame paling tajam', memilih lagu tren, dubbing bahasa " +
+        "lain, upload otomatis ke platform, reframing wajah otomatis.\n\n" +
         "Pipeline sendiri mengirim laporan hasilnya (video, cover, dan catatan) ke chat. Cukup " +
         "konfirmasi singkat apa yang diminta user dan bahwa hasil dikirim otomatis; jangan " +
         "merinci pengaturan yang tidak ada di daftar di atas dan jangan menebak hasilnya " +
@@ -554,6 +594,9 @@ export default defineToolPlugin({
               staticText?: boolean;
               subtitleStyle?: string;
               musicMood?: string;
+              colorFilter?: string;
+              speedFactor?: number;
+              autoZoom?: boolean;
             },
             signal?: AbortSignal,
           ) {
@@ -576,7 +619,7 @@ export default defineToolPlugin({
             const {
               mediaPaths, userContext, audioMode, voicePersona, aspectRatio, fitMode,
               durationSeconds, music, musicMood, editMode, subtitleStyle,
-              inspectId, userAnswered, staticText,
+              inspectId, userAnswered, staticText, colorFilter, speedFactor, autoZoom,
             } =
               params;
 
@@ -778,6 +821,15 @@ export default defineToolPlugin({
             }
             if (subtitleStyle) {
               pipelineEnv.SUBTITLE_STYLE = subtitleStyle;
+            }
+            if (colorFilter) {
+              pipelineEnv.COLOR_FILTER = colorFilter;
+            }
+            if (speedFactor !== undefined) {
+              pipelineEnv.SPEED_FACTOR = String(speedFactor);
+            }
+            if (autoZoom === true) {
+              pipelineEnv.AUTO_ZOOM = "1";
             }
             if (musicDest) {
               pipelineEnv.CONTENT_FACTORY_MUSIC_FILE = musicDest;

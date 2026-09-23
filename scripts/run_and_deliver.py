@@ -25,6 +25,7 @@ import sys
 from canvas import CanvasError, resolve_canvas
 from duration import requested_duration
 from music import MusicError, music_wanted, pick_track, requested_mood
+from style import StyleError, resolve_color_filter, resolve_speed_factor
 from common import (
     brief_path_for_run,
     chat_allowed,
@@ -177,6 +178,21 @@ def main():
     except MusicError as e:
         print(f"[error] {e}")
         log_event("run_rejected", run_id, chat_id=chat_id, reason="music_mood_invalid")
+        notify("pipeline", str(e), chat_id=chat_id)
+        return os.EX_CONFIG
+
+    # Gaya editing (filter warna, speed ramp, zoom) divalidasi di sini juga,
+    # dengan alasan yang sama seperti kanvas & mood musik di atas.
+    try:
+        nama_filter, _ = resolve_color_filter()
+        if nama_filter:
+            print(f"[info] filter warna: {nama_filter}")
+        faktor_kecepatan = resolve_speed_factor()
+        if faktor_kecepatan != 1.0:
+            print(f"[info] speed ramp: {faktor_kecepatan}x (hanya berlaku di mode voice-over AI)")
+    except StyleError as e:
+        print(f"[error] {e}")
+        log_event("run_rejected", run_id, chat_id=chat_id, reason="style_invalid")
         notify("pipeline", str(e), chat_id=chat_id)
         return os.EX_CONFIG
 
