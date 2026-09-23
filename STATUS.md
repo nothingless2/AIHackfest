@@ -317,3 +317,16 @@ pesan commit `efe0018`. Poin yang perlu diketahui:
 
 Pelajaran: **jangan pernah melonggarkan gerbang test untuk membuat commit lolos.**
 Kalau test gagal, itu sinyal untuk berhenti dan memperbaiki, bukan melewatinya.
+
+## 23 Sept — filter warna, speed ramp, zoom otomatis (diperbaiki dari percobaan gagal 21 Sept)
+
+- `colorFilter`/`speedFactor`/`autoZoom` disambungkan sebagai parameter tool plugin nyata
+  (bukan flag env statis di `.env`), tervalidasi eager sebelum lock+LLM (`scripts/style.py`).
+- Bug zoompan lama (`time` -- variabel yang tidak ada) diganti resep standar; diverifikasi
+  dengan gambar berbingkai + ukur saturasi piksel, bukan baca string filter.
+- `speedFactor` sengaja HANYA aktif di `audioMode=ai`: `-t` di build_segment adalah batas
+  durasi OUTPUT, jadi setpts tidak mengubah slot timeline (aman untuk scene/subtitle),
+  tapi mode audio asli/mute tetap dikecualikan karena orangnya masih terlihat bicara.
+- Uji manual: render end-to-end (`render_from_agent_script`, mode AI, edge-tts) dengan
+  ketiga fitur aktif bersamaan -- sukses, durasi keluaran 7,83 dtk cocok narasi.
+- 720 pytest + 52 vitest lolos, `tsc` bersih.
