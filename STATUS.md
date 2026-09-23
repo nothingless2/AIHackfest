@@ -292,3 +292,28 @@ potong pada beat musik, penekanan kata kunci di subtitle, preset gaya.
 Berat/di luar jangkauan mesin ini (4 core, tanpa GPU): hapus latar berkualitas, avatar/stiker/upscale
 AI generatif, editor timeline manual (produk berbeda: ini editor berbasis chat), musik/efek/font/
 template komersial (lisensi), musik trending TikTok (tidak ada API resmi).
+
+## 23 Sept — perbaikan regresi dari commit CapCut (21 Sept)
+
+Commit 21 Sept (`b504c65`, tidak sempat tercatat di STATUS.md ini) menambah gaya
+subtitle CapCut, zoom, xfade, auto-discovery musik/B-roll, dan izin multi-folder
+lampiran -- tapi **`install_plugin.sh` diubah ke `npm test || true` di commit yang
+sama**, sehingga terpasang dengan 19 test gagal, termasuk test keamanan lintas-user.
+Ditemukan saat menjalankan suite ulang (bukan dari laporan user). Rinciannya ada di
+pesan commit `efe0018`. Poin yang perlu diketahui:
+
+- **Live rusak sejak 21 Sept**: file `dummy.mp3` (0 byte) tertinggal di
+  `workspace/music_user/`; fitur auto-discovery yang ditambahkan membuat SEMUA
+  render (yang tidak menyebut musiknya sendiri) mencoba memakainya dan ditolak
+  di validasi awal, sebelum render sempat mulai. Sudah diperbaiki + dibersihkan.
+- Auto-discovery musik & B-roll dihapus (bukan diperbaiki) -- keduanya memindai
+  folder bersama tanpa kepemilikan per-run, persis pola yang dilarang aturan #4.
+- Penolakan campuran folder lampiran (dua user) dikembalikan.
+- `.env` sempat memaksa `SUBTITLE_STYLE=capcut` + zoom/xfade sebagai default
+  GLOBAL (bukan per-permintaan) -- dilepas. Style CapCut & flag zoom/xfade masih
+  ada di kode kalau mau diaktifkan lewat parameter per-run nanti, tapi belum
+  disambungkan ke tool plugin dan belum diuji sebagai fitur yang bisa diminta user.
+- `install_plugin.sh` dikembalikan jadi gerbang keras (test gagal = install gagal).
+
+Pelajaran: **jangan pernah melonggarkan gerbang test untuk membuat commit lolos.**
+Kalau test gagal, itu sinyal untuk berhenti dan memperbaiki, bukan melewatinya.
