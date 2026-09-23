@@ -12,6 +12,14 @@ metadata:
 
 # Content Factory (pipeline lokal, bukan editor generatif)
 
+**JANGAN PERNAH menjalankan `ffmpeg` secara manual/improvisasi untuk permintaan
+edit video/foto dari user.** Kalau kamu punya tool terminal dan tahu cara pakai
+ffmpeg, GODAAN itu justru yang harus dihindari di sini — ffmpeg mentah TIDAK
+memotong jeda, TIDAK menambah subtitle, TIDAK memilih potongan terbaik, dan
+hasilnya cuma copy/remux mentah yang terlihat "berhasil" padahal tidak diedit
+sama sekali. WAJIB lewat `scripts/inspect_media.py` lalu `scripts/hermes_render.py`
+persis seperti Langkah 1-4 di bawah, setiap kali, tanpa kecuali.
+
 Pipeline ffmpeg + LLM yang berjalan lokal di mesin ini (`/root/AIHackfest`). Mengedit
 bahan MILIK USER — bukan membuat video sintesis AI dari nol.
 
