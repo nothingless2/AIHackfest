@@ -494,3 +494,11 @@ Keputusan user: 2 alternatif (pilih lalu boleh edit), tingkat grafik "sedang", m
     komposit: overlay grafik lalu drawtext narasi), tanpa encode tambahan. Dites: tidak ada
     `run_ffmpeg` tambahan.
   - Timeout tahap render naik 480 -> 630 (satu render Remotion lagi dengan batas keras 120 dtk).
+- **Uji nyata (3 video user, voice-over ElevenLabs, 24 Sep malam)**:
+  - Draf 147 dtk: pemahaman 3 klip akurat, 2 gaya berbeda, rencana grafik valid.
+  - Render varian A 106 dtk (video 22 dtk): 5 elemen, tidak ada yang dibuang. Chip "DONOR DARAH"
+    tidak ada di detik 4,2 dan muncul setelah kata "donor". Langkah 1/2 dan 2/2 muncul saat
+    "teman" dan "Daftarin". Teks narasi tetap utuh.
+  - Render varian B ubahan (sebelum grafik): Whisper membaca persis naskah ubahan user.
+- Catatan biaya: ContentInsight (agent5) masih memakai `KEYWORD_MODEL=openai/gpt-4o-mini`
+  berbayar (±25 rb token prompt per run karena gambar), bukan model gratis.
