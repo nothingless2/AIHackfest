@@ -15,6 +15,7 @@ from spoken import SPOKEN_REWRITE, prompt_rule
 from transcribe import media_duration, transcribe_assets_report
 from vision import build_image_parts
 
+from naskah import ATURAN_GAYA, rapikan as rapikan_naskah
 from common import (
     LLM_MODEL,
     BRIEF_PATH,
@@ -281,8 +282,8 @@ Nama file bahan (urutan boleh disusun ulang; gambar di atas berurutan sesuai daf
 Aturan keras:
 - Hanya boleh memakai nama file dari daftar di atas. DILARANG mengarang nama file lain.
 - DILARANG menyebut objek, orang, tempat, atau aktivitas yang TIDAK terlihat di gambar.
-- Naskah voice-over harus Bahasa Indonesia, natural saat dibacakan, {durasi_note},
-  berstruktur Hook - Masalah - Solusi - CTA.
+- Naskah voice-over harus Bahasa Indonesia, {durasi_note}.
+{ATURAN_GAYA}
 {lafal_note}
 - "deskripsi" ditulis untuk dibaca calon penonton di kolom deskripsi platform,
   bukan ringkasan internal. Jangan mengulang judul apa adanya.
@@ -466,6 +467,15 @@ def run():
 
     if not brief.get("full_voice_over"):
         raise ValueError("LLM tidak menghasilkan 'full_voice_over'; brief tidak dapat dipakai.")
+    if mode_audio == "ai":
+        # Naskah HANYA dibacakan di mode voice-over AI; di mode lain ia draf caption.
+        brief, brief["naskah_status"] = rapikan_naskah(
+            brief, konteks, chat_json, model=MODEL, label="tulis ulang naskah",
+            max_attempts=1, timeout=60)
+        st = brief["naskah_status"]
+        if st.get("masalah"):
+            print(f"[info] naskah: {len(st['masalah'])} ciri hambar -> "
+                  + ("ditulis ulang" if st.get("ditulis_ulang") else f"TIDAK ditulis ulang ({st.get('gagal')})"))
 
     write_json(TREND_REPORT_PATH, trend_report)
     write_json(BRIEF_PATH, brief)

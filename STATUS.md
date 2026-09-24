@@ -444,3 +444,16 @@ melewati batas 450 dtk). Key Pexels di `.env` (ter-ignore git).
   Whisper mendengar naskah utuh; hanya "Laksamana" terdengar "laksa mana".
 - Gangguan jaringan VPS 13:40-15:28 WIB (Telegram + OpenRouter putus, server sehat). Temuan:
   3.698 login SSH gagal/12 jam, root+password diizinkan, tanpa firewall/fail2ban -- belum diubah.
+
+## 24 Sept (malam) — naskah gaya kreator + teks mengikuti suara
+
+- Referensi user (TikTok kreator, audio utuh; videonya terunggah terpotong ~35/50 dtk): teks satu
+  kata per tampilan, kapital tebal, berganti TEPAT mengikuti ucapan (~0,38 dtk/kata, tanpa efek);
+  naskah lisan menyapa penonton, ~2,6 kata/dtk.
+- `scripts/naskah.py`: aturan gaya di prompt + pemeriksa kode (frasa deskriptif, kalimat > 16 kata)
+  -> maks. 1 tulis ulang (mode ai). Naskah hambar hasil nyata sebelumnya tertangkap semua ciri.
+- Waktu per kata dari TTS: ElevenLabs `/with-timestamps` (per karakter) dan edge-tts WordBoundary.
+  Mode ai: teks per-scene LLM diganti teks narasi gaya `kata` (Montserrat, 66% tinggi); judul
+  statis tetap. `petakan_kata` memetakan ejaan tulisan ke waktu naskah lafal.
+- Uji nyata: kata berganti mengikuti narasi Liam; naskah menyapa ("Kalian, ini bukan sekadar
+  datang dan duduk...") dan lolos pemeriksa tanpa tulis ulang.

@@ -127,6 +127,11 @@ Teks tulisan di layar kini BERANIMASI (Remotion) dan emoji tampil berwarna. Kala
 `teks_animasi.gagal` ke user dalam satu kalimat. Animasi hanya untuk teks tulisan; subtitle
 dari ucapan tetap karaoke.
 
+Mode voice-over AI kini menampilkan teks NARASI satu kata per tampilan yang mengikuti suara
+(gaya `kata`, seperti video kreator). Minta user menulis TUJUAN kontennya (mis. "ajak anak muda
+donor darah") dan teruskan ke `--user-context`; naskah ditulis sebagai kreator yang menyapa
+penonton, bukan deskripsi gambar.
+
 Kalau `suara.cadangan` true, narasi memakai suara cadangan gratis (edge-tts) karena ElevenLabs
 gagal/kuota habis -- sebutkan `suara.alasan` singkat ke user.
 

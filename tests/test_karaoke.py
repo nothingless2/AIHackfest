@@ -286,7 +286,7 @@ def test_tanpa_durasi_bahan_prompt_lama_tidak_berubah():
     import agent1_2_brief as brief
     p = brief.build_prompt(["a.mp4"], {}, jumlah_gambar=1)
     assert "DURASI NYATA" not in p
-    assert "natural saat dibacakan, 20-35 detik (kira-kira 55-95 kata)," in p
+    assert "harus Bahasa Indonesia, 20-35 detik (kira-kira 55-95 kata)." in p
 
 
 def test_kalimat_naskah_tidak_rusak_saat_ada_durasi_bahan():
@@ -294,7 +294,7 @@ def test_kalimat_naskah_tidak_rusak_saat_ada_durasi_bahan():
     catatan klip sehingga kalimat '...natural saat dibacakan, {durasi}' jadi kacau."""
     import agent1_2_brief as brief
     p = brief.build_prompt(["a.mp4"], {}, jumlah_gambar=1, durasi_bahan=[5.0])
-    assert "natural saat dibacakan, 20-35 detik (kira-kira 55-95 kata)," in p
+    assert "harus Bahasa Indonesia, 20-35 detik (kira-kira 55-95 kata)." in p
 
 
 def test_prompt_tanpa_ucapan_melarang_menebak_jenis_acara():

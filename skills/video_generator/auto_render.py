@@ -255,7 +255,54 @@ ELEVENLABS_SUARA = {
     ("pria", None): ("JBFqnCBsd6RMkjVDRZzb", "George"),
 }
 TTS_CATATAN = {}
+TTS_KATA = []        # [{word, start, end}] dari mesin TTS: dasar teks yang mengikuti suara
 
+
+def kata_dari_karakter(chars, starts, ends):
+    """Waktu per KARAKTER (ElevenLabs) -> waktu per kata (dipisah spasi)."""
+    kata, buf, t0, t1 = [], "", None, None
+    for c, s, e in zip(chars, starts, ends):
+        if c.isspace():
+            if buf:
+                kata.append({"word": buf, "start": round(t0, 3), "end": round(t1, 3)})
+            buf, t0 = "", None
+            continue
+        if not buf:
+            t0 = s
+        buf += c
+        t1 = e
+    if buf:
+        kata.append({"word": buf, "start": round(t0, 3), "end": round(t1, 3)})
+    return kata
+
+
+def petakan_kata(tulisan, waktu):
+    """Kata TULISAN (full_voice_over, ejaan benar) diberi waktu dari kata UCAPAN (naskah
+    lafal yang dibacakan TTS). Jumlah sama -> satu-satu. Beda (ejaan fonetis memecah/
+    menggabung kata) -> dipetakan menurut posisi karakter relatif, monoton naik."""
+    kt = (tulisan or "").split()
+    if not kt or not waktu:
+        return []
+    if len(kt) == len(waktu):
+        return [{"word": w, "start": x["start"], "end": x["end"]} for w, x in zip(kt, waktu)]
+    import bisect
+    total_u = sum(len(x["word"]) + 1 for x in waktu)
+    pos_u, acc = [], 0
+    for x in waktu:
+        pos_u.append(acc / total_u)
+        acc += len(x["word"]) + 1
+    total_t = sum(len(w) + 1 for w in kt)
+    hasil, acc = [], 0
+    for w in kt:
+        f = acc / total_t
+        i = max(0, bisect.bisect_right(pos_u, f) - 1)
+        hasil.append({"word": w, "start": waktu[i]["start"]})
+        acc += len(w) + 1
+    for j, h in enumerate(hasil):
+        h["end"] = hasil[j + 1]["start"] if j + 1 < len(hasil) else waktu[-1]["end"]
+        if h["end"] <= h["start"]:
+            h["end"] = h["start"] + 0.12
+    return hasil
 
 def suara_elevenlabs():
     """(voice_id, nama) dari TTS_VOICE_GENDER + TTS_PERSONA; ELEVENLABS_VOICE_ID menimpa."""
@@ -279,8 +326,18 @@ async def _voice_edge(text, output_audio):
     sudah gagal menyimpan state koneksi dan tidak aman dipakai ulang."""
 
     async def sekali():
-        communicate = edge_tts.Communicate(text, voice=EDGE_VOICE, rate=EDGE_RATE)
-        await communicate.save(output_audio)
+        communicate = edge_tts.Communicate(text, voice=EDGE_VOICE, rate=EDGE_RATE,
+                                           boundary="WordBoundary")
+        kata = []
+        with open(output_audio, "wb") as f:
+            async for ch in communicate.stream():
+                if ch["type"] == "audio":
+                    f.write(ch["data"])
+                elif ch["type"] == "WordBoundary":
+                    mulai = ch["offset"] / 1e7          # satuan 100 ns
+                    kata.append({"word": ch["text"], "start": round(mulai, 3),
+                                 "end": round(mulai + ch["duration"] / 1e7, 3)})
+        TTS_KATA[:] = kata
 
     await with_retry_async(
         sekali, is_retriable=_tts_retriable,
@@ -354,8 +411,14 @@ async def _voice_elevenlabs(text, output_audio):
     def sekali():
         try:
             with _elevenlabs_http(f"https://api.elevenlabs.io/v1/text-to-speech/{vid}"
-                                  "?output_format=mp3_44100_128", data=badan) as r:
-                isi = r.read()
+                                  "/with-timestamps?output_format=mp3_44100_128", data=badan) as r:
+                jawab = json.load(r)
+            import base64
+            isi = base64.b64decode(jawab.get("audio_base64") or "")
+            a = jawab.get("alignment") or {}
+            TTS_KATA[:] = kata_dari_karakter(a.get("characters") or [],
+                                             a.get("character_start_times_seconds") or [],
+                                             a.get("character_end_times_seconds") or [])
         except urllib.error.HTTPError as e:
             pesan = e.read()[:200].decode(errors="replace")
             if e.code in (401, 402, 403, 422) or "quota" in pesan.lower():
@@ -378,6 +441,7 @@ async def generate_voice(text, output_audio):
     jalur gratis yang bekerja.
     """
     TTS_CATATAN.clear()
+    TTS_KATA.clear()
     if TTS_PROVIDER == "elevenlabs":
         vid, nama = suara_elevenlabs()
         try:
@@ -1004,7 +1068,14 @@ SUBTITLE_STYLES = {
     "putih-tebal":  {"color": "white",  "border": 5},
     "kuning":       {"color": "yellow", "border": 4},  # gaya lama
 }
+# Satu kata per tampilan, besar & kapital, berganti TEPAT mengikuti suara (meniru video
+# referensi user 24 Sep: kata berganti tiap ~0,38 dtk tanpa efek; "halus"-nya dari sinkron).
+SUBTITLE_STYLES["kata"] = {"color": "white", "border": 3, "shadow": 6, "upper": True,
+                           "per_kata": True, "font": "Montserrat-ExtraBold.ttf",
+                           "ukuran": 0.062, "y_rel": 0.66}
 SUBTITLE_STYLE = os.getenv("SUBTITLE_STYLE", "karaoke")
+# Gaya teks NARASI voice-over AI (bukan ucapan asli): bawaan "kata" kecuali user memilih gaya.
+NARASI_STYLE = os.getenv("SUBTITLE_STYLE") or "kata"
 DEFAULT_SUBTITLE_STYLE = "karaoke"
 
 
@@ -1227,6 +1298,31 @@ def filter_karaoke(kata, jendela, W, fs, y_top, gaya):
     return filters
 
 
+def filter_per_kata(kata, akhir, W, H, gaya):
+    """Satu drawtext per kata, aktif dari mulainya sampai kata berikutnya dimulai."""
+    fs = max(16, round(H * gaya.get("ukuran", 0.06)))
+    font = os.path.join(ASSETS_FONTS, gaya["font"]) if gaya.get("font") else FONT_PATH
+    if not os.path.exists(font):
+        font = FONT_PATH
+    y = round(H * gaya.get("y_rel", 0.66))
+    hasil = []
+    for i, w in enumerate(kata):
+        teks = hapus_emoji(w["word"])
+        if not teks:
+            continue
+        teks = teks.upper() if gaya.get("upper") else teks
+        dari = float(w["start"])
+        sampai = float(kata[i + 1]["start"]) if i + 1 < len(kata) else akhir
+        if sampai <= dari:
+            continue
+        f = fs
+        while f > 16 and text_width(font, f, teks) > W * 0.9:
+            f -= 4
+        hasil.append(_drawtext(escape_drawtext(teks), f, f"{y}-text_h/2", gaya,
+                               f"between(t,{dari:.3f},{sampai:.3f})", font_path=font))
+    return hasil
+
+
 def build_drawtext_chain(scenes, video_height, video_width=None):
     """Filter drawtext per scene, dengan animasi.
 
@@ -1255,6 +1351,10 @@ def build_drawtext_chain(scenes, video_height, video_width=None):
             text = hapus_emoji(text)      # teks tulisan saja; subtitle ucapan tetap apa adanya
             if not text:
                 continue
+        gaya_sc = SUBTITLE_STYLES.get(sc.get("gaya")) or gaya
+        if kata and gaya_sc.get("per_kata"):
+            filters.extend(filter_per_kata(kata, float(end), W, video_height, gaya_sc))
+            continue
         if kata and gaya.get("highlight"):
             filters.extend(filter_karaoke(kata, (float(start), float(end)), W, fs, y, gaya))
             continue
@@ -1832,6 +1932,17 @@ def render_from_agent_script(
             or data.get("judul") or ""
         scenes = ([{"start": 0.0, "end": float(total_duration), "text": teks_statis,
                     "statis": True}] if teks_statis else [])
+
+    if not pakai_audio_asli and TTS_KATA and (os.getenv("NARASI_TEKS") or "1") != "0":
+        # Teks yang MENGIKUTI SUARA narasi menggantikan teks per-scene tulisan LLM (yang
+        # tidak sinkron dengan narasi). Teks statis (judul) tetap ada di atasnya.
+        narasi = petakan_kata(full_vo, TTS_KATA)
+        if narasi:
+            statis = [s for s in scenes if s.get("statis")]
+            scenes = statis + [{"start": narasi[0]["start"], "end": float(total_duration),
+                                "text": " ".join(w["word"] for w in narasi),
+                                "words": narasi, "gaya": NARASI_STYLE}]
+            print(f"💬 Teks narasi mengikuti suara: {len(narasi)} kata (gaya {NARASI_STYLE}).")
 
     scenes = clamp_scenes(scenes, total_duration)
 

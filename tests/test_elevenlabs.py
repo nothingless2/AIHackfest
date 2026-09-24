@@ -29,7 +29,11 @@ def eleven(monkeypatch):
         panggilan.append((url, json.loads(data) if data else None))
         if "subscription" in url:
             return _Resp(json.dumps({"character_limit": 10000, "character_count": 100}).encode())
-        return _Resp(b"ID3-mp3-palsu")
+        import base64
+        return _Resp(json.dumps({"audio_base64": base64.b64encode(b"ID3-mp3-palsu").decode(),
+                                 "alignment": {"characters": list("Halo semua"),
+                                               "character_start_times_seconds": [i * .1 for i in range(10)],
+                                               "character_end_times_seconds": [i * .1 + .1 for i in range(10)]}}).encode())
 
     monkeypatch.setattr(ar, "_elevenlabs_http", http)
     edge = []
@@ -51,6 +55,8 @@ def test_elevenlabs_dipakai_dengan_model_dan_bahasa_indonesia(eleven, tmp_path):
     url, badan = [p for p in panggilan if "text-to-speech" in p[0]][0]
     assert badan == {"text": "Halo semua", "model_id": ar.ELEVENLABS_MODEL, "language_code": "id"}
     assert ar.TTS_CATATAN == {"mesin": "elevenlabs", "suara": "Bella"}
+    assert [w["word"] for w in ar.TTS_KATA] == ["Halo", "semua"], "waktu per kata ikut diambil"
+    assert "/with-timestamps" in url
 
 
 @pytest.mark.parametrize("kode", [401, 402, 403])
