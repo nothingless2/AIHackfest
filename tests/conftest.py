@@ -126,6 +126,9 @@ def _cache_mood_musik_di_tmp(monkeypatch, tmp_path):
     import music_mood
 
     monkeypatch.setattr(music_mood, "_cache_path", lambda: str(tmp_path / "music_mood_cache.json"))
+    import visual_quality
+
+    monkeypatch.setattr(visual_quality, "_cache_path", lambda: str(tmp_path / "visual_quality_cache.json"))
     yield
 
 

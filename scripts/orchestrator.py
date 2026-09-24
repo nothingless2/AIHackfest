@@ -61,6 +61,13 @@ CORE_STAGES = [
     ("agent3_render.py", "ContentMakers", True, 480),
 ]
 
+# Draf naskah (scripts/draf_naskah.py): ContentInsight + brief saja, TANPA render. Brief draf
+# menulis 2 varian dan memeriksa masing-masing (maksimal 2 tulis ulang, bukan 1):
+#   anggaran brief lama 378 + satu tulis ulang tambahan 60 dtk = 438 -> 540 (margin ~19%).
+DRAFT_STAGES = [CORE_STAGES[0], ("agent1_2_brief.py", "TrendAnalysts & BrainIdea (draf)", True, 540)]
+# Render dari draf yang disetujui user: brief TIDAK dibuat ulang.
+RENDER_STAGES = [CORE_STAGES[2]]
+
 _active_proc = None  # ditulis run_stage() tepat setelah Popen; dibaca signal handler
 
 
@@ -144,7 +151,8 @@ def run_stages(stages, *, run_id, capture_output, on_noncritical_failure, on_sta
 
 def run_core_stages_locked(
     run_id, *,
-    chat_id, capture_output, on_stage_start=None, on_noncritical_failure=None
+    chat_id, capture_output, on_stage_start=None, on_noncritical_failure=None,
+    stages=None, salin_video=True, sebelum_tahap=None,
 ):
     """Jalankan CORE_STAGES di dalam lock render. Kalau sukses, salin
     DRAFT_VIDEO_PATH/BRIEF_PATH ke path ber-run_id SEBELUM lock dilepas --
@@ -155,6 +163,11 @@ def run_core_stages_locked(
     run_lock.FileLockBusyError menjalar ke pemanggil (TIDAK ditangkap di sini)
     kalau lock sedang dipegang proses lain -- caller yang memutuskan pesan &
     exit code untuk kasus itu.
+
+    stages: daftar tahap (bawaan CORE_STAGES). salin_video=False untuk tahap tanpa render
+    (draf): hanya brief yang disalin. sebelum_tahap(): dipanggil DI DALAM lock, setelah
+    workspace dibersihkan -- tempat menulis brief draf & mengklaim draf secara atomik.
+    Pengecualiannya menjalar ke pemanggil.
     """
     if on_noncritical_failure is None:
         def on_noncritical_failure(label, code):
@@ -170,20 +183,23 @@ def run_core_stages_locked(
         t0 = time.time()
         status = "ERROR"
         try:
+            if sebelum_tahap:
+                sebelum_tahap()
             code, failure = run_stages(
-                CORE_STAGES,
+                CORE_STAGES if stages is None else stages,
                 run_id=run_id,
                 capture_output=capture_output,
                 on_noncritical_failure=on_noncritical_failure,
                 on_stage_start=on_stage_start,
             )
             if code == 0:
-                shutil.copy2(DRAFT_VIDEO_PATH, draft_video_path_for_run(run_id))
+                if salin_video:
+                    shutil.copy2(DRAFT_VIDEO_PATH, draft_video_path_for_run(run_id))
                 shutil.copy2(BRIEF_PATH, brief_path_for_run(run_id))
                 # Cover bersifat tambahan: ketiadaannya TIDAK menggagalkan run
                 # yang videonya sudah jadi. Disalin di dalam lock, sama seperti
                 # video, supaya tidak pernah tertimpa run berikutnya.
-                if os.path.exists(DRAFT_THUMB_PATH):
+                if salin_video and os.path.exists(DRAFT_THUMB_PATH):
                     shutil.copy2(DRAFT_THUMB_PATH, draft_thumb_path_for_run(run_id))
                 status = "SUCCESS"
                 return status, None

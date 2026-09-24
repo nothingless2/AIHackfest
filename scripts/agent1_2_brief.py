@@ -13,9 +13,11 @@ from duration import duration_text, requested_duration
 from edit_plan import buat_rencana, ringkas as ringkas_edit
 from spoken import SPOKEN_REWRITE, prompt_rule
 from transcribe import media_duration, transcribe_assets_report
-from vision import build_image_parts
+from vision import IMAGE_EXTENSIONS, build_image_parts
+import visual_quality as _vq
 
 from naskah import ATURAN_GAYA, rapikan as rapikan_naskah
+from draf_naskah import FIELD_VARIAN
 from common import (
     LLM_MODEL,
     BRIEF_PATH,
@@ -173,6 +175,109 @@ def build_transcript_note(transkrip):
     )
 
 
+GAYA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "config", "gaya_naskah")
+MAKS_KATA_CUPLIKAN = 30
+
+
+def ukur_buruk(asset_paths):
+    """{path: [(a, b, alasan)]} bagian goyang/oleng tiap video -- sama dengan yang nanti
+    dibuang renderer (cache bersama). Gagal mengukur = tidak dicatat sebagai bersih: path
+    itu tidak masuk hasil dan alasannya dicetak (aturan #7)."""
+    if not _vq.aktif():
+        return {}
+    hasil = {}
+    for p in asset_paths:
+        if os.path.splitext(p)[1].lower() in IMAGE_EXTENSIONS:
+            continue
+        try:
+            hasil[p] = _vq.analisis_cached(p)["buruk"]
+        except Exception as e:
+            print(f"[warn] ukur goyang gagal untuk {os.path.basename(p)}: {type(e).__name__}: {e}"[:200])
+    return hasil
+
+
+def build_klip_note(asset_names, asset_paths, transkrip, gagal_transkrip, buruk, durasi):
+    """FAKTA TERUKUR per bahan, urutan sama dengan gambar. Semua diambil KODE (ffprobe,
+    transkrip, analisis goyang) -- model diberi tahu apa yang terjadi di tiap klip, bukan
+    hanya satu gambar diam."""
+    baris = []
+    for i, (nama, path) in enumerate(zip(asset_names, asset_paths), 1):
+        if os.path.splitext(path)[1].lower() in IMAGE_EXTENSIONS:
+            baris.append(f"{i}. FOTO.")
+            continue
+        d = durasi.get(path)
+        bagian = [f"{i}. VIDEO {d:.1f} dtk" if d else f"{i}. VIDEO"]
+        if nama in transkrip:
+            kata = transkrip[nama].split()
+            cuplikan = " ".join(kata[:MAKS_KATA_CUPLIKAN]) + (" ..." if len(kata) > MAKS_KATA_CUPLIKAN else "")
+            bagian.append(f'ucapan: "{cuplikan}"')
+        elif gagal_transkrip.get(nama) in ("tanpa_ucapan", "tanpa_audio"):
+            bagian.append("tanpa ucapan (hanya suara suasana)" if gagal_transkrip[nama] == "tanpa_ucapan"
+                          else "tanpa audio")
+        else:
+            bagian.append("ucapan tidak diketahui")
+        for a, b, alasan in buruk.get(path) or []:
+            bagian.append(f"detik {a:.1f}-{b:.1f} {alasan}, DIBUANG dari video akhir -- jangan dibahas")
+        baris.append("; ".join(bagian) + ".")
+    return ("FAKTA PER BAHAN (diukur kode, urutan sama dengan gambar):\n" + "\n".join(baris))
+
+
+def contoh_gaya(maks=2, maks_karakter=900):
+    """Contoh naskah kreator nyata dari config/gaya_naskah/*.txt (few-shot RITME bicara)."""
+    try:
+        berkas = sorted(f for f in os.listdir(GAYA_DIR) if f.endswith(".txt"))[:maks]
+    except OSError:
+        return ""
+    potongan = []
+    for f in berkas:
+        try:
+            with open(os.path.join(GAYA_DIR, f), encoding="utf-8") as fh:
+                teks = "\n".join(b for b in fh.read().splitlines() if b.strip() and not b.startswith("#"))
+        except OSError:
+            continue
+        if teks:
+            potongan.append(teks[:maks_karakter])
+    if not potongan:
+        return ""
+    return ("CONTOH CARA BICARA KREATOR NYATA (tiru RITME, sapaan, dan kalimat pendeknya -- "
+            "JANGAN tiru topik atau kata-katanya):\n"
+            + "\n---\n".join(potongan))
+
+
+DRAF_NOTE = """
+MODE DRAF -- user akan MEMILIH salah satu dari DUA varian sebelum video dibuat:
+- Buat tepat 2 varian untuk bahan dan permintaan yang SAMA, dengan GAYA yang jelas berbeda
+  (mis. A: santai, lucu, penuh energi; B: hangat, menyentuh, berujung ajakan). Pilih dua gaya
+  yang paling cocok dengan permintaan user.
+- Hook pembuka, pilihan kata, dan ajakan penutup kedua varian HARUS berbeda -- jangan
+  sekadar menukar beberapa kata.
+- Kedua varian tetap wajib mematuhi SEMUA aturan di atas."""
+
+
+def mode_draf():
+    return (os.getenv("CONTENT_FACTORY_DRAFT") or "").strip() == "1"
+
+
+def validasi_varian(varian, maks=2):
+    """Varian yang bisa dipakai: dict dengan judul & full_voice_over berisi teks.
+    Varian cacat dibuang (dicatat), bukan diperbaiki dengan tebakan."""
+    if not isinstance(varian, list):
+        return []
+    hasil = []
+    for i, v in enumerate(varian):
+        if not isinstance(v, dict):
+            print(f"[warn] varian {i + 1} bukan objek -- dibuang.")
+            continue
+        if not str(v.get("full_voice_over") or "").strip() or not str(v.get("judul") or "").strip():
+            print(f"[warn] varian {i + 1} tanpa judul/naskah -- dibuang.")
+            continue
+        v = dict(v)
+        v["gaya"] = str(v.get("gaya") or "").strip()[:40]
+        hasil.append(v)
+    return hasil[:maks]
+
+
 def build_durasi_note(durasi_bahan, bisu=False):
     """Durasi NYATA tiap bahan, supaya scene mengikuti batas antar klip.
 
@@ -207,7 +312,7 @@ def build_teks_statis_note():
 
 def build_prompt(asset_names, performance, *, jumlah_gambar, pool=None, konteks="",
                  transkrip=None, target_duration=None, durasi_bahan=None, teks_statis=False,
-                 audio_bisu=False):
+                 audio_bisu=False, klip_fakta="", gaya_contoh="", kontak=False, draf=False):
     # Durasi & aturan lafal disuntikkan, bukan hardcode: tanpa permintaan user,
     # duration_text() mengembalikan kalimat lama kata per kata sehingga brief
     # untuk run yang tidak meminta durasi tidak berubah sama sekali.
@@ -237,12 +342,37 @@ def build_prompt(asset_names, performance, *, jumlah_gambar, pool=None, konteks=
         f"Kamu DIBERI {jumlah_gambar} gambar/frame dari bahan mentah user di pesan ini. "
         "LIHAT gambar-gambar itu. Seluruh konsep, judul, dan naskah WAJIB berakar pada "
         "apa yang benar-benar terlihat di sana."
+        + (" Gambar dari VIDEO berupa lembar 2x2 berisi 4 momen BERURUTAN dari klip itu "
+           "(kiri-atas -> kanan-atas -> kiri-bawah -> kanan-bawah): baca sebagai alur "
+           "kejadian, bukan 4 hal terpisah." if kontak else "")
         if jumlah_gambar
         else
         "PERINGATAN: tidak ada gambar yang bisa diproses dari bahan user, jadi kamu TIDAK "
         "tahu isinya. Buat naskah yang sangat umum dan aman, dan JANGAN menyebut objek, "
         "tempat, merek, atau aktivitas spesifik apa pun."
     )
+
+    isi_brief = f"""{{{{
+    "judul": "string",
+    "deskripsi": "deskripsi konten MAKSIMAL 30 kata untuk kolom caption platform. Harus singkat dan padat.",
+    "target_trend": "string",
+    "full_voice_over": "naskah voice-over MAKSIMAL 60 kata. Sangat ringkas, padat, dan langsung ke intinya.",
+{baris_spoken}    "scenes": [
+      {{{{"start": 0, "end": 4, "text": "teks on-screen singkat"}}}}
+    ],
+    "hashtags": ["#contoh"]
+  }}}}"""
+    if draf:
+        bagian_brief = (
+            '  "varian": [\n'
+            '  ' + isi_brief.replace('{{\n', '{{\n    "gaya": "nama gaya varian A, 2-4 kata",\n', 1) + ',\n'
+            '  ' + isi_brief.replace('{{\n', '{{\n    "gaya": "nama gaya varian B, 2-4 kata",\n', 1) + '\n'
+            '  ]')
+        draf_note = DRAF_NOTE
+    else:
+        bagian_brief = '  "creative_brief": ' + isi_brief
+        draf_note = ""
+    bagian_brief = bagian_brief.replace("{{", "{").replace("}}", "}")
 
     return f"""
 Bertindaklah sebagai dua agent sekaligus:
@@ -260,6 +390,8 @@ BATAS PENGETAHUANMU (penting, jangan dilanggar):
 {konteks_note}
 
 {transcript_note}
+
+{klip_fakta}
 
 {klip_note}
 
@@ -284,32 +416,26 @@ Aturan keras:
 - DILARANG menyebut objek, orang, tempat, atau aktivitas yang TIDAK terlihat di gambar.
 - Naskah voice-over harus Bahasa Indonesia, {durasi_note}.
 {ATURAN_GAYA}
+{gaya_contoh}
 {lafal_note}
 - "deskripsi" ditulis untuk dibaca calon penonton di kolom deskripsi platform,
   bukan ringkasan internal. Jangan mengulang judul apa adanya.
 - "scenes" adalah teks on-screen singkat (maksimal 6 kata per scene), bukan salinan
   penuh voice-over. Waktu mulai/selesai tiap scene harus berurutan dan tidak tumpang tindih.
+{draf_note}
 
 Balas HANYA JSON murni dengan struktur persis berikut:
 {{
   "trend_report": {{
     "observed_material": "deskripsi FAKTUAL apa yang terlihat di gambar, 1-2 kalimat",
+    "pemahaman_bahan": ["SATU kalimat faktual per bahan, urutan sama dengan gambar: apa yang terjadi di klip itu"],
     "trend_index": 0,
     "trend_reason": "kenapa tren itu nyambung dengan gambar; kosongkan kalau null",
     "content_angle": "string",
     "recommended_hook_template": "string",
     "format_style": "string"
   }},
-  "creative_brief": {{
-    "judul": "string",
-    "deskripsi": "deskripsi konten MAKSIMAL 30 kata untuk kolom caption platform. Harus singkat dan padat.",
-    "target_trend": "string",
-    "full_voice_over": "naskah voice-over MAKSIMAL 60 kata. Sangat ringkas, padat, dan langsung ke intinya.",
-{baris_spoken}    "scenes": [
-      {{"start": 0, "end": 4, "text": "teks on-screen singkat"}}
-    ],
-    "hashtags": ["#contoh"]
-  }}
+{bagian_brief}
 }}
 """.strip()
 
@@ -332,7 +458,8 @@ def run():
 
     # Kirim ISI bahan, bukan cuma nama file. Tanpa ini model tidak pernah melihat
     # apa pun dan hanya menebak dari UUID di nama file.
-    image_parts = build_image_parts(asset_paths)
+    buruk = ukur_buruk(asset_paths)
+    image_parts = build_image_parts(asset_paths, kontak=True, buruk=buruk)
     if not image_parts:
         print("[warn] Tidak ada gambar yang bisa diproses — brief akan dibuat tanpa melihat bahan.")
     else:
@@ -367,10 +494,16 @@ def run():
     durasi_bahan = None
     if mode_audio in ("original", "mute"):
         durasi_bahan = [d for d in (media_duration(p) for p in asset_paths) if d and d > 0]
+    durasi_semua = {p: media_duration(p) for p in asset_paths
+                    if os.path.splitext(p)[1].lower() not in IMAGE_EXTENSIONS}
+    klip_fakta = build_klip_note(asset_names, asset_paths, transkrip, gagal_transkrip, buruk,
+                                 durasi_semua)
     prompt_text = build_prompt(
         asset_names, performance, jumlah_gambar=len(image_parts), pool=pool,
         konteks=konteks, transkrip=transkrip, target_duration=target_durasi,
         durasi_bahan=durasi_bahan, teks_statis=teks_statis, audio_bisu=(mode_audio == "mute"),
+        klip_fakta=klip_fakta, gaya_contoh=contoh_gaya() if mode_audio == "ai" else "",
+        kontak=True, draf=mode_draf(),
     )
     result = chat_json(
         [{"role": "user",
@@ -380,7 +513,16 @@ def run():
     )
 
     trend_report = result["trend_report"]
-    brief = result["creative_brief"]
+    varian = None
+    if mode_draf():
+        varian = validasi_varian(result.get("varian"))
+        if not varian:
+            raise ValueError("LLM tidak menghasilkan varian naskah yang bisa dipakai untuk draf.")
+        print(f"[info] draf: {len(varian)} varian naskah ({', '.join(v['gaya'] or '-' for v in varian)}).")
+        brief = dict(varian[0])
+    else:
+        brief = result["creative_brief"]
+    pemahaman = trend_report.pop("pemahaman_bahan", None)
 
     # Penegakan: seluruh FAKTA tren diambil dari item yang benar-benar difetch,
     # bukan dari teks LLM. LLM hanya menyumbang nomor pilihan + alasannya.
@@ -426,6 +568,10 @@ def run():
         "alasan": {n: gagal_transkrip.get(n, "tidak_diproses")
                    for n in asset_names if n not in rinci},
     }
+    # Pemahaman model atas tiap bahan -- DITAMPILKAN ke user di draf supaya salah tafsir
+    # terkoreksi sebelum render. Hanya string, maksimal satu per bahan.
+    brief["pemahaman_bahan"] = ([str(x).strip()[:200] for x in pemahaman if str(x).strip()][:len(asset_names)]
+                                if isinstance(pemahaman, list) else [])
     brief["media_assets"] = resolve_assets(asset_names)
     brief["asset_names"] = asset_names
     brief["brief_id"] = f"brief_{now_iso()}"
@@ -469,13 +615,26 @@ def run():
         raise ValueError("LLM tidak menghasilkan 'full_voice_over'; brief tidak dapat dipakai.")
     if mode_audio == "ai":
         # Naskah HANYA dibacakan di mode voice-over AI; di mode lain ia draf caption.
-        brief, brief["naskah_status"] = rapikan_naskah(
-            brief, konteks, chat_json, model=MODEL, label="tulis ulang naskah",
-            max_attempts=1, timeout=60)
-        st = brief["naskah_status"]
-        if st.get("masalah"):
-            print(f"[info] naskah: {len(st['masalah'])} ciri hambar -> "
-                  + ("ditulis ulang" if st.get("ditulis_ulang") else f"TIDAK ditulis ulang ({st.get('gagal')})"))
+        # Draf: tiap varian diperiksa sendiri (maksimal satu tulis ulang per varian).
+        for i, target in enumerate(varian or [brief]):
+            target, target["naskah_status"] = rapikan_naskah(
+                target, konteks, chat_json, model=MODEL, label="tulis ulang naskah",
+                max_attempts=1, timeout=60)
+            if varian:
+                varian[i] = target
+            else:
+                brief = target
+            st = target["naskah_status"]
+            if st.get("masalah"):
+                print(f"[info] naskah{' varian ' + 'AB'[i] if varian else ''}: {len(st['masalah'])} ciri hambar -> "
+                      + ("ditulis ulang" if st.get("ditulis_ulang") else f"TIDAK ditulis ulang ({st.get('gagal')})"))
+    if varian:
+        # Brief dasar = varian A (renderer lama tetap bisa membacanya); daftar varian ikut
+        # disimpan untuk draf.
+        for k in FIELD_VARIAN:
+            if k in varian[0]:
+                brief[k] = varian[0][k]
+        brief["varian"] = varian
 
     write_json(TREND_REPORT_PATH, trend_report)
     write_json(BRIEF_PATH, brief)

@@ -13,6 +13,8 @@ Ambang dikalibrasi pada guncangan sintetis berparameter diketahui dan klip nyata
 lihat tests/test_visual_quality.py.
 """
 
+import hashlib
+import json
 import os
 import subprocess
 
@@ -156,6 +158,47 @@ def analisis(path):
     buruk = rentang_buruk(m)
     return {"durasi": m["durasi"], "buruk": buruk,
             "buruk_detik": round(sum(b - a for a, b, _ in buruk), 2)}
+
+
+def _cache_path():
+    from common import STATE_DIR
+    return os.path.join(STATE_DIR, "visual_quality_cache.json")
+
+
+def _kunci(path):
+    st = os.stat(path)
+    ambang = f"{GERAK_MAKS}|{COCOK_MIN}|{TAJAM_REL_MIN}"
+    return hashlib.sha1(f"{os.path.abspath(path)}|{st.st_size}|{int(st.st_mtime)}|{ambang}"
+                        .encode()).hexdigest()
+
+
+def analisis_cached(path):
+    """Seperti analisis(), tapi hasilnya dipakai bersama tahap brief (lembar kontak untuk
+    BrainIdea) dan tahap render -- klip yang sama tidak didekode dua kali per run.
+    Kunci memuat path, ukuran, mtime, dan ambang: berkas/ambang berubah = diukur ulang."""
+    cp = _cache_path()
+    try:
+        with open(cp, encoding="utf-8") as f:
+            cache = json.load(f)
+    except (OSError, ValueError):
+        cache = {}
+    k = _kunci(path)
+    if k in cache:
+        c = cache[k]
+        return {**c, "buruk": [tuple(r) for r in c["buruk"]]}
+    hasil = analisis(path)
+    cache[k] = hasil
+    if len(cache) > 500:        # batas kasar; cache hanya optimasi
+        cache = dict(list(cache.items())[-500:])
+    try:
+        os.makedirs(os.path.dirname(cp), exist_ok=True)
+        tmp = cp + f".{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cache, f)
+        os.replace(tmp, cp)
+    except OSError:
+        pass
+    return hasil
 
 
 def aktif():

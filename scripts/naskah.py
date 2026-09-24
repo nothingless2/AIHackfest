@@ -32,6 +32,10 @@ POLA_HAMBAR = [
     r"\bberikut ini\b", r"\bpada kesempatan ini\b",
 ]
 MAKS_KATA_KALIMAT = 16      # sedikit longgar dari aturan prompt (12) supaya tidak cerewet
+# Huruf non-Latin yang bocor dari model gratis (terukur 24 Sep: "lalu确认 datang bareng" di
+# naskah bahasa Indonesia). TTS membacanya sebagai bahasa lain atau melewatinya.
+HURUF_ASING = re.compile(r"[\u0400-\u04FF\u0590-\u06FF\u0E00-\u0E7F\u3040-\u30FF"
+                         r"\u3400-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF]+")
 
 
 def periksa(teks):
@@ -40,6 +44,9 @@ def periksa(teks):
     if not t:
         return []
     masalah = []
+    asing = HURUF_ASING.findall(t)
+    if asing:
+        masalah.append(f'huruf asing "{" ".join(asing[:3])}" -- tulis dalam bahasa Indonesia')
     for pola in POLA_HAMBAR:
         m = re.search(pola, t, re.I)
         if m:

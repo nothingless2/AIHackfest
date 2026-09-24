@@ -704,7 +704,7 @@ def _buruk_visual(path):
     if os.path.splitext(path)[1].lower() not in VIDEO_EXTENSIONS:
         return []
     try:
-        return _vq.analisis(path)["buruk"]
+        return _vq.analisis_cached(path)["buruk"]
     except Exception as e:
         _catat_visual("gagal_ukur", {"file": os.path.basename(path), "alasan": f"{type(e).__name__}: {e}"[:160]})
         return None

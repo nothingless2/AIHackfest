@@ -30,8 +30,11 @@ terbaik, subtitle karaoke, musik latar dengan auto-ducking, filter warna
 zoom Ken Burns otomatis (HANYA bahan foto), rasio 9:16/1:1/16:9, durasi 10-60
 detik, cover JPG.
 
+Sebelum render, BrainIdea MENONTON bahan (4 momen per klip + ucapan) lalu mengirim 2 pilihan
+naskah; video baru dibuat setelah user memilih (Langkah 3-5).
+
 **YANG TIDAK ADA** — jangan dijanjikan: koreksi warna profesional/LUT, stabilisasi,
-B-roll otomatis, stiker, dubbing bahasa lain, upload otomatis ke platform.
+stiker, dubbing bahasa lain, upload otomatis ke platform.
 
 ## Kapan dipakai
 
@@ -48,7 +51,7 @@ lain (mis. "buatkan video animasi dari teks" — itu bukan tool ini).
   Kalau ditolak dengan alasan render_sibuk, sampaikan itu ke user dan jangan
   mencoba lagi otomatis.
 - Proses render makan waktu 2-5 menit — SELALU jalankan sebagai proses latar
-  belakang (langkah 3), jangan sinkron.
+  belakang (langkah 3 dan 5), jangan sinkron.
 
 ## Langkah 1 — Periksa bahan (cepat, sinkron)
 
@@ -83,14 +86,15 @@ tool blocking apa pun.
 Kalau hasil langkah 1 TIDAK ada `pertanyaan`, lanjut langsung ke langkah 3
 dengan pengaturan bawaan.
 
-## Langkah 3 — Render (lambat, WAJIB latar belakang)
+## Langkah 3 — Draf naskah (WAJIB latar belakang, ±1-2 menit)
 
 Setelah user menjawab (atau kalau tidak ada pertanyaan), petakan jawabannya
-lewat `pemetaan` dari hasil langkah 1, lalu jalankan sebagai proses LATAR
-BELAKANG dengan `notify_on_complete=true`:
+lewat `pemetaan` dari hasil langkah 1, lalu jalankan perintah di bawah DENGAN `--draft`
+sebagai proses LATAR BELAKANG dengan `notify_on_complete=true`. `--draft` belum merender:
+BrainIdea menonton bahan dan menulis 2 pilihan naskah.
 
 ```
-python3 /root/AIHackfest/scripts/hermes_render.py \
+python3 /root/AIHackfest/scripts/hermes_render.py --draft \
   --media-path "<path 1>" [--media-path "<path 2>" ...] \
   --chat-id "<label chat yang SAMA PERSIS dengan di langkah 1>" \
   --inspect-id "<inspectId dari langkah 1>" \
@@ -150,6 +154,9 @@ Posisi/font hanya berlaku untuk teks tulisan di layar; subtitle dari ucapan teta
 bawah dengan gayanya sendiri. Kalau user menulis jawaban bebas (mis. "tengah, font
 santai"), pakai HANYA nilai dari daftar di atas — jangan menyebut nama font lain.
 
+**JANGAN melewati draf** (menjalankan tanpa `--draft` lalu langsung render): user meminta
+melihat naskah sebelum video dibuat.
+
 Kalau langkah 1 tidak menghasilkan pertanyaan (tidak ada gerbang untuk dilewati),
 boleh tambahkan `--no-require-inspect` dan hilangkan `--inspect-id`/`--user-answered`.
 
@@ -166,14 +173,45 @@ Isi flag lain HANYA yang benar-benar diminta/tersirat dari user — jangan meneb
 nilai yang tidak disebutkan; defaultnya sudah dirancang baik (subtitle karaoke,
 suara asli, hard cut + fade di pergantian topik, 20-35 detik, 9:16).
 
-## Langkah 4 — Setelah proses selesai
+## Langkah 4 — Kirim draf, tunggu pilihan user
+
+Hasil `--draft` (JSON satu baris) berisi `ok`, `draft_id`, dan `pesan`.
+- **`ok: true`**: kirim `pesan` APA ADANYA ke user (sudah berisi apa yang BrainIdea tangkap
+  dari tiap klip, naskah A dan B, dan cara membalas). Simpan `draft_id`. Tunggu balasan.
+- **`ok: false`**: sampaikan `alasan` ke user.
+
+Membaca balasan user:
+- "A" / "B" (atau "yang pertama/kedua") -> `--varian A` / `--varian B`.
+- User mengubah kalimat (mis. "A, tapi pembukanya: Halo semua!") -> ambil naskah varian itu dari
+  `varian[].naskah` di hasil draf, terapkan PERSIS perubahan yang diminta user (jangan
+  menulis ulang bagian lain), lalu kirim naskah LENGKAP hasilnya lewat `--naskah "..."`.
+  Kalau user menulis naskahnya sendiri seluruhnya, pakai teks user apa adanya.
+- User mengoreksi pemahaman ("itu bukan antrean, itu pendaftaran") atau minta gaya lain ->
+  jalankan Langkah 3 lagi dengan koreksi itu ditambahkan ke `--user-context` (draf baru).
+
+## Langkah 5 — Render dari draf (lambat, WAJIB latar belakang)
+
+```
+python3 /root/AIHackfest/scripts/hermes_render.py \
+  --chat-id "<label chat yang SAMA PERSIS>" \
+  --draft-id "<draft_id dari langkah 3>" --varian A|B [--naskah "<naskah lengkap ubahan user>"]
+```
+
+Pengaturan (mode audio, durasi, font, musik, dst.) diambil otomatis dari draf -- TIDAK perlu
+diulang. Kalau user sekarang meminta perubahan gaya (font, posisi teks, warna, musik, suara),
+tambahkan flag itu saja. Mode audio, durasi, teks statis, dan konteks TERKUNCI di draf: kalau
+user ingin mengubahnya, buat draf baru (Langkah 3). Satu draf hanya bisa dirender sekali
+(`draf_sudah_dipakai`); render yang gagal boleh diulang dengan draf yang sama.
+
+## Langkah 6 — Setelah render selesai
 
 Baca output JSON (satu baris) dari proses latar belakang itu.
 
 - **`ok: true`**: kirim file di `video_path` ke chat ini (pakai kemampuan kirim
   file/media bawaanmu, BUKAN skrip ini), dengan caption ringkas dari `judul` +
   `deskripsi` + `hashtags`. Sebutkan `catatan_durasi` kalau ada isinya (artinya
-  durasi diminta user dijepit ke batas yang berbeda).
+  durasi diminta user dijepit ke batas yang berbeda). Kalau `catatan_naskah` berisi sesuatu,
+  sebutkan singkat (naskah user tetap dipakai apa adanya).
 - **`ok: false`**: sampaikan `alasan` apa adanya ke user dalam kalimat biasa.
   Jangan mencoba lagi otomatis kalau alasannya `render_sibuk`.
 

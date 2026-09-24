@@ -32,7 +32,9 @@ from broll import BrollError, resolve_broll
 from canvas import CanvasError, resolve_canvas
 from overlay_remotion import animasi_diminta
 from common import (
+    BRIEF_PATH,
     brief_path_for_run,
+    write_json,
     draft_thumb_path_for_run,
     draft_video_path_for_run,
     ensure_dirs,
@@ -44,9 +46,13 @@ from common import (
 )
 from cost_estimate import ringkasan_biaya
 from duration import requested_duration
-from inspect_media import cek_izin
+import draf_naskah
+from draf_naskah import DrafError
+from inspect_media import cek_izin, sidik_bahan
 from music import MusicError, music_wanted, pick_track, requested_mood
-from orchestrator import install_signal_handlers, run_core_stages_locked
+from orchestrator import (
+    DRAFT_STAGES, RENDER_STAGES, install_signal_handlers, run_core_stages_locked,
+)
 from retention import sweep_old_run_files
 from run_lock import FileLockBusyError, generate_run_id, sanitize_run_id
 from run_log import log_event
@@ -105,7 +111,7 @@ def _stage_assets(paths, run_prefix):
     return names
 
 
-def _parse_args(argv):
+def _parser():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--media-path", action="append", default=[], dest="media_paths",
                    help="Path lampiran (boleh diulang). Wajib di dalam ~/.hermes/cache/.")
@@ -139,7 +145,51 @@ def _parse_args(argv):
     p.add_argument("--text-animation", default=None, help="pop|loncat|geser|fade|none (teks tulisan di layar).")
     p.add_argument("--text-position", default=None, help="atas|tengah|bawah (teks on-screen, bukan subtitle ucapan).")
     p.add_argument("--text-font", default=None, help="standar|tegas|modern|elegan|santai|bersih.")
-    return p.parse_args(argv)
+    p.add_argument("--draft", action="store_true",
+                   help="Hanya buat DRAF naskah (2 varian) untuk dipilih user; belum merender.")
+    p.add_argument("--draft-id", default=None, help="Render dari draf yang dipilih user.")
+    p.add_argument("--varian", default=None, help="Varian draf pilihan user: A atau B.")
+    p.add_argument("--naskah", default=None,
+                   help="Naskah LENGKAP hasil ubahan user (menggantikan naskah varian).")
+    return p
+
+
+def _parse_args(argv):
+    return _parser().parse_args(argv)
+
+
+# Pengaturan yang menentukan ISI draf (brief). Saat render dari draf, nilainya dikunci:
+# mengubahnya berarti naskah yang disetujui user dibuat dari pengaturan berbeda.
+DIKUNCI_DRAF = {"audio_mode", "duration_seconds", "static_text", "edit_mode", "user_context"}
+# Tidak relevan saat render dari draf: gerbang inspect sudah dilewati saat draf dibuat.
+DIABAIKAN_DRAF = {"media_paths", "inspect_id", "user_answered", "require_inspect", "chat_id",
+                  "draft", "draft_id", "varian", "naskah", "help"}
+
+
+def _flag_eksplisit(parser, argv):
+    """dest dari flag yang BENAR-BENAR ditulis di argv (bukan nilai bawaan)."""
+    ditulis = {a.split("=", 1)[0] for a in argv if a.startswith("--")}
+    return {a.dest for a in parser._actions if any(o in ditulis for o in a.option_strings)}
+
+
+def _args_draf(args):
+    """Pengaturan yang disimpan di draf (tanpa bahan & field gerbang)."""
+    return {k: v for k, v in vars(args).items() if k not in DIABAIKAN_DRAF}
+
+
+def _gabung_args_draf(parser, args, argv, tersimpan):
+    """Pengaturan draf + flag yang ditulis ulang saat render. Flag gaya (font, warna, musik,
+    ...) boleh diganti; flag yang dikunci harus sama dengan saat draf."""
+    eksplisit = _flag_eksplisit(parser, argv)
+    for dest in sorted(eksplisit & DIKUNCI_DRAF):
+        if getattr(args, dest) != tersimpan.get(dest):
+            raise DrafError("draf_terkunci",
+                            f"'{dest}' sudah ditetapkan saat draf dibuat ({tersimpan.get(dest)!r}). "
+                            "Untuk mengubahnya, buat draf baru.")
+    for dest, nilai in tersimpan.items():
+        if dest not in eksplisit and hasattr(args, dest):
+            setattr(args, dest, nilai)
+    return args
 
 
 def _apply_env(args):
@@ -179,6 +229,35 @@ def _apply_env(args):
     if args.music_file:
         (validated,) = _validate_media_paths([args.music_file])
         os.environ["CONTENT_FACTORY_MUSIC_FILE"] = validated
+        args.music_file = validated
+
+
+def _selesai_draf(run_id, chat_id, run_prefix, nama_bahan, args, media_paths):
+    """Simpan draf dari brief run ini, cetak pesan siap kirim. Belum ada video."""
+    brief = read_json(brief_path_for_run(run_id), {}) or {}
+    try:
+        draft_id = draf_naskah.simpan(brief, chat_id=chat_id or "", prefix=run_prefix,
+                                      bahan=nama_bahan, sidik=sidik_bahan(media_paths),
+                                      args=_args_draf(args))
+    except DrafError as e:
+        print(json.dumps({"ok": False, "kode": e.kode, "alasan": str(e)}, ensure_ascii=False))
+        log_event("run_rejected", run_id, chat_id=chat_id, reason=e.kode)
+        return 1
+    d = draf_naskah.muat(draft_id, chat_id or "")
+    hasil = {
+        "ok": True,
+        "mode": "draf",
+        "run_id": run_id,
+        "draft_id": draft_id,
+        "pesan": draf_naskah.susun_pesan(d),
+        "varian": [{"huruf": draf_naskah.HURUF[i], "gaya": v.get("gaya"), "judul": v.get("judul"),
+                    "naskah": v.get("full_voice_over")} for i, v in enumerate(d["varian"])],
+        "audio_mode": brief.get("audio_mode"),
+        "biaya": ringkasan_biaya(run_id),
+    }
+    print(json.dumps(hasil, ensure_ascii=False))
+    log_event("draft_ready", run_id, chat_id=chat_id)
+    return 0
 
 
 def _on_noncritical_failure(label, code):
@@ -186,7 +265,9 @@ def _on_noncritical_failure(label, code):
 
 
 def main(argv=None):
-    args = _parse_args(sys.argv[1:] if argv is None else argv)
+    argv = sys.argv[1:] if argv is None else argv
+    parser = _parser()
+    args = parser.parse_args(argv)
     install_signal_handlers()
     ensure_dirs()
     sweep_old_run_files()
@@ -205,34 +286,64 @@ def main(argv=None):
     # asli Stringless ditolak). Kontrol akses jalur ini adalah pairing Hermes:
     # hanya user yang di-approve admin yang bisa memanggil terminal.
 
-    # Berkas AUDIO yang terkirim sebagai --media-path adalah musik user, bukan bahan visual
-    # (setara pisahMusik di plugin OpenClaw). Dipindah ke --music-file, bukan ditolak.
-    audio = [p for p in args.media_paths if os.path.splitext(p)[1].lower() in AUDIO_EXT]
-    if audio:
-        if len(audio) > 1 or args.music_file:
-            return gagal("musik_ganda", "Kirim satu berkas musik saja untuk satu video.")
-        args.music_file = audio[0]
-        args.media_paths = [p for p in args.media_paths if p not in audio]
-        if args.music is None:
-            args.music = "on"
-    try:
-        media_paths = _validate_media_paths(args.media_paths)
-    except MediaPathError as e:
-        return gagal("lampiran_invalid", str(e))
+    draf = None
+    if args.draft_id:
+        if args.draft:
+            return gagal("argumen_invalid", "--draft dan --draft-id tidak boleh bersamaan.")
+        try:
+            sidik = None
+            if args.media_paths:
+                sidik = sidik_bahan(_validate_media_paths(
+                    [p for p in args.media_paths if os.path.splitext(p)[1].lower() not in AUDIO_EXT]))
+            draf = draf_naskah.muat(args.draft_id, chat_id or "", sidik=sidik)
+            draf_naskah.indeks_varian(args.varian, len(draf["varian"]))
+            args = _gabung_args_draf(parser, args, argv, draf.get("args") or {})
+            brief_pilihan = draf_naskah.brief_terpilih(draf, args.varian, args.naskah)
+        except MediaPathError as e:
+            return gagal("lampiran_invalid", str(e))
+        except DrafError as e:
+            return gagal(e.kode, str(e))
+        run_prefix = draf["prefix"]
+        nama_bahan = draf["bahan"]
+        hilang = [n for n in nama_bahan if not os.path.isfile(os.path.join(RAW_DIR, n))]
+        if hilang:
+            return gagal("draf_bahan_hilang", "Bahan draf ini sudah tidak ada di server. Kirim ulang bahannya.")
+    else:
+        if args.varian or args.naskah:
+            return gagal("argumen_invalid", "--varian/--naskah hanya bersama --draft-id.")
+        # Berkas AUDIO yang terkirim sebagai --media-path adalah musik user, bukan bahan visual
+        # (setara pisahMusik di plugin OpenClaw). Dipindah ke --music-file, bukan ditolak.
+        audio = [p for p in args.media_paths if os.path.splitext(p)[1].lower() in AUDIO_EXT]
+        if audio:
+            if len(audio) > 1 or args.music_file:
+                return gagal("musik_ganda", "Kirim satu berkas musik saja untuk satu video.")
+            args.music_file = audio[0]
+            args.media_paths = [p for p in args.media_paths if p not in audio]
+            if args.music is None:
+                args.music = "on"
+        try:
+            media_paths = _validate_media_paths(args.media_paths)
+        except MediaPathError as e:
+            return gagal("lampiran_invalid", str(e))
 
-    if args.require_inspect:
-        izin = cek_izin(args.inspect_id, chat_id or "", media_paths, args.user_answered,
-                        args.user_context)
-        if not izin.get("ok"):
-            return gagal(izin.get("kode", "gerbang_ditolak"), izin.get("teks", ""))
+        if args.require_inspect:
+            izin = cek_izin(args.inspect_id, chat_id or "", media_paths, args.user_answered,
+                            args.user_context)
+            if not izin.get("ok"):
+                return gagal(izin.get("kode", "gerbang_ditolak"), izin.get("teks", ""))
 
-    run_prefix = run_id[:8]
-    nama_bahan = _stage_assets(media_paths, run_prefix)
+        run_prefix = run_id[:8]
+        nama_bahan = _stage_assets(media_paths, run_prefix)
     os.environ["CONTENT_FACTORY_RUN_PREFIX"] = run_prefix
     os.environ["CONTENT_FACTORY_ASSETS"] = ",".join(nama_bahan)
     os.environ["CONTENT_FACTORY_RUN_ID"] = run_id
+    if args.draft:
+        os.environ["CONTENT_FACTORY_DRAFT"] = "1"
 
-    _apply_env(args)
+    try:
+        _apply_env(args)
+    except MediaPathError as e:
+        return gagal("musik_invalid", f"musik: {e}")
 
     try:
         resolve_canvas()
@@ -267,19 +378,43 @@ def main(argv=None):
     if target_durasi:
         os.environ["CONTENT_FACTORY_DURATION"] = str(target_durasi)
 
+    opsi = {}
+    diklaim = []
+    if draf:
+        def sebelum_tahap():
+            # DI DALAM lock: klaim atomik dulu (dari dua render draf yang sama hanya satu
+            # lolos), baru brief pilihan user ditulis ke path kerja render.
+            draf_naskah.klaim(draf["draft_id"])
+            diklaim.append(True)
+            write_json(BRIEF_PATH, {**brief_pilihan, "brief_id": f"brief_draf_{run_id}"})
+        opsi = {"stages": RENDER_STAGES, "sebelum_tahap": sebelum_tahap}
+    elif args.draft:
+        opsi = {"stages": DRAFT_STAGES, "salin_video": False}
+
     try:
         status, detail = run_core_stages_locked(
             run_id, chat_id=chat_id, capture_output=True,
-            on_noncritical_failure=_on_noncritical_failure,
+            on_noncritical_failure=_on_noncritical_failure, **opsi,
         )
     except FileLockBusyError as e:
         return gagal("render_sibuk",
                     f"masih ada render lain berjalan ({e.elapsed_seconds:.0f} detik lalu).")
+    except DrafError as e:
+        return gagal(e.kode, str(e))
+    except BaseException:
+        if diklaim:      # hanya klaim MILIK run ini yang dilepas
+            draf_naskah.lepas(draf["draft_id"])
+        raise
 
     if status == "FAILED":
+        if diklaim:
+            draf_naskah.lepas(draf["draft_id"])      # gagal render: draf boleh dicoba lagi
         code, (label, output) = detail
         tail = ("\n" + "\n".join(output.splitlines()[-4:])) if output else ""
         return gagal("render_gagal", f"gagal di tahap {label}.{tail}")
+
+    if args.draft:
+        return _selesai_draf(run_id, chat_id, run_prefix, nama_bahan, args, media_paths)
 
     brief = read_json(brief_path_for_run(run_id), {}) or {}
     status = read_json(os.path.join(STATE_DIR, "render_status.json"), {}) or {}
@@ -304,6 +439,9 @@ def main(argv=None):
         "musik": status.get("music"),
         "musik_suasana": (mood or {}).get("mood"),
         "musik_tempo_bpm": (mood or {}).get("tempo_bpm") if (mood or {}).get("tempo_yakin") else None,
+        "draf": brief.get("draf"),
+        "catatan_naskah": ((brief.get("naskah_status") or {}).get("catatan") or None)
+        if (brief.get("draf") or {}).get("diedit") else None,
     }
     print(json.dumps(hasil, ensure_ascii=False))
     log_event("delivered", run_id, chat_id=chat_id)

@@ -552,7 +552,15 @@ def susun_pesan_pertanyaan(pertanyaan, ringk=None):
             baris.append(f"   {o['huruf']}. {tanda}{o['label']}")
         if p.get("catatan"):
             baris.append(f"   ({p['catatan']})")
+    baris += ["", PESAN_NASKAH]
     return "\n".join(baris)
+
+
+# Konteks paling berharga untuk naskah yang tidak hambar: tujuan, penonton, ajakan. Sekaligus
+# memberi tahu user bahwa naskah dikirim dulu untuk dipilih (hermes_render.py --draft).
+PESAN_NASKAH = ("Supaya naskahnya pas, ceritakan juga untuk siapa videonya dan ajakan di akhirnya "
+                "(mis. \"anak muda, ajak daftar donor lewat link di bio\"). Setelah itu saya kirim "
+                "2 pilihan naskah dulu untuk kamu pilih, baru videonya dibuat.")
 
 
 # -------------------------------------------------------------------- teks

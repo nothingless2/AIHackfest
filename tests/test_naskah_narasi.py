@@ -158,3 +158,11 @@ def test_tanpa_waktu_kata_teks_lama_tetap_dipakai(render_ai, monkeypatch):
     out = tmp_path / "o2.mp4"
     ar.render_from_agent_script(str(skrip), "", str(out))
     assert out.exists()
+
+
+def test_huruf_asing_dari_model_ditandai():
+    """Terukur 24 Sep: model gratis menyisipkan '确认' di naskah Indonesia."""
+    m = nk.periksa("Daftar lewat link di bio, lalu确认 datang bareng.")
+    assert any("确认" in x for x in m)
+    assert nk.periksa("Yuk daftar! Café, naïve, 100% seru 🎉") == [], "Latin beraksen & emoji bukan huruf asing"
+    assert nk.periksa("Привет всем") and nk.periksa("안녕 teman")

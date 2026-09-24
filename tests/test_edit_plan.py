@@ -505,7 +505,7 @@ def brief_siap(monkeypatch, tmp_path):
     monkeypatch.setattr(brief, "resolve_assets", lambda n: paths)
     monkeypatch.setattr(brief, "notify", lambda *a, **k: True)
     monkeypatch.setattr(brief, "OPENAI_API_KEY", "kunci-palsu")
-    monkeypatch.setattr(brief, "build_image_parts", lambda p: [])
+    monkeypatch.setattr(brief, "build_image_parts", lambda p, **k: [])
     monkeypatch.setattr(brief, "read_json", lambda *a, **k: {})
     monkeypatch.setattr(brief, "write_json", lambda path, data: disimpan.__setitem__(path, data))
     monkeypatch.setattr(ep, "EDIT_MIN_SECONDS", 1.0)
