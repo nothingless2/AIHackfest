@@ -417,11 +417,15 @@ def susun_pertanyaan(ringk, tahu):
                 "tanya": "Audionya bagaimana? (Videonya berisi suara suasana, bukan ucapan.)",
                 "opsi": _opsi("Suara suasana + musik latar ringan",
                               "Suara suasana saja, tanpa musik",
-                              "Tambahkan voice-over AI (suara suasana tetap ada)", rekomendasi=0),
-                "catatan": "",
+                              "Narasi voice-over AI + musik latar (suara suasana diganti narasi)",
+                              rekomendasi=0),
+                # Label lama "suara suasana tetap ada" SALAH: mode ai mengganti audio asli
+                # (terbukti di hasil nyata 24 Sep). Musik disebut eksplisit supaya agen tidak
+                # menebak -- ia sempat menambah --music off sendiri.
+                "catatan": "Punya lagu sendiri? Kirim berkas audionya (mp3/m4a) di chat ini.",
                 "param": {"A": {"audioMode": "original", "music": "on"},
                           "B": {"audioMode": "original", "music": "off"},
-                          "C": {"audioMode": "ai"}},
+                          "C": {"audioMode": "ai", "music": "on"}},
                 "default": "suara suasana dipertahankan + musik latar ringan (bila tersedia)",
                 "alasan": "ada suara tapi bukan ucapan",
             })

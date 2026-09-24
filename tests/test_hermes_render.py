@@ -97,3 +97,55 @@ def test_label_chat_non_numerik_tidak_ditolak_allowlist(monkeypatch, capsys):
     hasil = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert rc == 1
     assert hasil["kode"] == "lampiran_invalid"
+
+
+def _main_tanpa_render(monkeypatch, capsys, argv, tmp_path):
+    import json
+    root = tmp_path / "cache"
+    root.mkdir(exist_ok=True)
+    monkeypatch.setattr(hr, "MEDIA_ROOTS", [str(root)])
+    for n in ("install_signal_handlers", "sweep_old_run_files", "ensure_dirs", "log_event"):
+        monkeypatch.setattr(hr, n, lambda *a, **k: None)
+    tangkap = {}
+
+    def palsu(*a, **k):
+        import os
+        tangkap.update(music_file=os.environ.get("CONTENT_FACTORY_MUSIC_FILE"),
+                       assets=os.environ.get("CONTENT_FACTORY_ASSETS"),
+                       visual=os.environ.get("VISUAL_CUT"), music=os.environ.get("CONTENT_FACTORY_MUSIC"))
+        raise RuntimeError("berhenti di sini")
+
+    monkeypatch.setattr(hr, "run_core_stages_locked", palsu)
+    monkeypatch.setattr(hr, "pick_track", lambda *a, **k: None)
+    monkeypatch.setattr(hr, "_stage_assets", lambda paths, pre: [f"{pre}_x.mp4" for _ in paths])
+    try:
+        hr.main(argv)
+    except RuntimeError:
+        pass
+    return tangkap
+
+
+def test_musik_lewat_media_path_dipindah_ke_music_file(monkeypatch, capsys, tmp_path):
+    root = tmp_path / "cache"
+    root.mkdir(exist_ok=True)
+    v, m = root / "v.mp4", root / "lagu.mp3"
+    v.write_bytes(b"x")
+    m.write_bytes(b"x")
+    t = _main_tanpa_render(monkeypatch, capsys, ["--media-path", str(v), "--media-path", str(m),
+                                                 "--no-require-inspect", "--visual-cut", "off"], tmp_path)
+    assert t["music_file"].endswith("lagu.mp3")
+    assert t["assets"].count(",") == 0, "hanya video yang jadi bahan visual"
+    assert t["music"] == "on" and t["visual"] == "0"
+
+
+def test_dua_berkas_musik_ditolak(monkeypatch, capsys, tmp_path):
+    import json
+    root = tmp_path / "cache"
+    root.mkdir(exist_ok=True)
+    for n in ("v.mp4", "a.mp3", "b.mp3"):
+        (root / n).write_bytes(b"x")
+    _main_tanpa_render(monkeypatch, capsys, ["--media-path", str(root / "v.mp4"), "--media-path",
+                                             str(root / "a.mp3"), "--media-path", str(root / "b.mp3"),
+                                             "--no-require-inspect"], tmp_path)
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert out["kode"] == "musik_ganda"

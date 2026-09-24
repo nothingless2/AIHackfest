@@ -53,6 +53,9 @@ os.environ["PEXELS_API_KEY"] = ""
 # Teks animasi (Remotion) membuka Chromium: lambat dan tidak dibutuhkan test drawtext.
 # Test Remotion menyalakannya sendiri (tests/test_overlay_remotion.py).
 os.environ["TEXT_ANIMATION"] = "none"
+# Pemotongan bagian goyang menganalisis tiap video; test lama memakai sumber sintetis dan
+# tidak menguji ini. Test-nya sendiri menyalakan (tests/test_visual_quality.py).
+os.environ["VISUAL_CUT"] = "0"
 
 
 @pytest.fixture(autouse=True)

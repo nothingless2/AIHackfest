@@ -117,12 +117,17 @@ Pemetaan nama parameter di `pemetaan` (langkah 1) ke flag `hermes_render.py`:
 | `staticText` (true) | `--static-text` |
 | `music` / `musicMood` | `--music` / `--music-mood` |
 | `durationSeconds` | `--duration-seconds` |
+| potong bagian goyang (bawaan nyala; user minta jangan) | `--visual-cut off` |
 | `broll` (true) / `brollQuery` | `--broll` / `--broll-query` (WAJIB bersama `--audio-mode ai`) |
 
 Teks tulisan di layar kini BERANIMASI (Remotion) dan emoji tampil berwarna. Kalau hasil berisi
 `teks_animasi.dipakai: false`, animasi gagal dan video memakai teks statis: sampaikan
 `teks_animasi.gagal` ke user dalam satu kalimat. Animasi hanya untuk teks tulisan; subtitle
 dari ucapan tetap karaoke.
+
+Kalau hasil berisi `potongan_visual.dipotong`, sebutkan singkat bagian yang dibuang karena
+goyang/oleng (mis. "2 detik terakhir video ke-3 dibuang karena kamera oleng"). Kalau ada
+`dipertahankan_ucapan`, beri tahu bahwa bagian goyang itu dipertahankan karena berisi ucapan.
 
 Kalau hasil berisi `catatan_teks` (emoji dihapus dari teks di layar karena font tidak mendukung), sampaikan
 ke user dalam satu kalimat.
@@ -137,6 +142,15 @@ santai"), pakai HANYA nilai dari daftar di atas — jangan menyebut nama font la
 
 Kalau langkah 1 tidak menghasilkan pertanyaan (tidak ada gerbang untuk dilewati),
 boleh tambahkan `--no-require-inspect` dan hilangkan `--inspect-id`/`--user-answered`.
+
+**JANGAN menambah flag yang tidak berasal dari `pemetaan` atau dari kata-kata user.**
+(24 Sep: agen menambah `--music off` sendiri; user memilih narasi AI, bukan tanpa musik.)
+
+Musik dari user: lagu yang dikirim tersimpan di `~/.hermes/cache/audio/` (atau
+`cache/documents/` kalau dikirim sebagai file). Berikan path-nya lewat `--music-file`
+(kalau terlanjur lewat `--media-path`, skrip memindahkannya otomatis). Lagu boleh dikirim
+di pesan berikutnya -- kumpulkan path-nya seperti lampiran video. Sertakan juga path lagu
+itu di `paths` langkah 1 supaya suasananya ikut dianalisis.
 
 Isi flag lain HANYA yang benar-benar diminta/tersirat dari user — jangan menebak
 nilai yang tidak disebutkan; defaultnya sudah dirancang baik (subtitle karaoke,

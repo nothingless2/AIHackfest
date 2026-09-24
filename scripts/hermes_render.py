@@ -67,6 +67,9 @@ MEDIA_ROOTS = [
 ]
 
 
+AUDIO_EXT = {".mp3", ".m4a", ".aac", ".wav", ".ogg", ".opus", ".flac"}
+
+
 class MediaPathError(ValueError):
     """Path lampiran di luar root yang diizinkan, atau tidak ada di disk."""
 
@@ -129,6 +132,8 @@ def _parse_args(argv):
     p.add_argument("--broll", action="store_true", help="Sisipkan B-roll stok Pexels (hanya --audio-mode ai; butuh PEXELS_API_KEY).")
     p.add_argument("--broll-query", default=None, help="Kata kunci B-roll, dipisah koma.")
     p.add_argument("--broll-count", type=int, default=None)
+    p.add_argument("--visual-cut", choices=["on", "off"], default=None,
+                   help="Buang bagian goyang/oleng/buram (bawaan: on).")
     p.add_argument("--text-animation", default=None, help="pop|loncat|geser|fade|none (teks tulisan di layar).")
     p.add_argument("--text-position", default=None, help="atas|tengah|bawah (teks on-screen, bukan subtitle ucapan).")
     p.add_argument("--text-font", default=None, help="standar|tegas|modern|elegan|santai|bersih.")
@@ -148,6 +153,7 @@ def _apply_env(args):
         "COLOR_FILTER": args.color_filter,
         "BROLL_QUERY": args.broll_query,
         "TEXT_ANIMATION": args.text_animation,
+        "VISUAL_CUT": {"on": "1", "off": "0", None: None}[args.visual_cut],
         "TEXT_POSITION": args.text_position,
         "TEXT_FONT": args.text_font,
         "CONTENT_FACTORY_USER_CONTEXT": args.user_context or None,
@@ -196,6 +202,16 @@ def main(argv=None):
     # asli Stringless ditolak). Kontrol akses jalur ini adalah pairing Hermes:
     # hanya user yang di-approve admin yang bisa memanggil terminal.
 
+    # Berkas AUDIO yang terkirim sebagai --media-path adalah musik user, bukan bahan visual
+    # (setara pisahMusik di plugin OpenClaw). Dipindah ke --music-file, bukan ditolak.
+    audio = [p for p in args.media_paths if os.path.splitext(p)[1].lower() in AUDIO_EXT]
+    if audio:
+        if len(audio) > 1 or args.music_file:
+            return gagal("musik_ganda", "Kirim satu berkas musik saja untuk satu video.")
+        args.music_file = audio[0]
+        args.media_paths = [p for p in args.media_paths if p not in audio]
+        if args.music is None:
+            args.music = "on"
     try:
         media_paths = _validate_media_paths(args.media_paths)
     except MediaPathError as e:
@@ -278,6 +294,7 @@ def main(argv=None):
         "catatan_teks": ("Emoji " + " ".join(status["emoji_dihapus"]) + " dihapus dari teks di layar "
                          "(font tidak mendukung emoji); tetap ada di caption.") if status.get("emoji_dihapus") else None,
         "teks_animasi": status.get("teks_animasi"),
+        "potongan_visual": status.get("potong_visual"),
         "broll": status.get("broll"),
         "broll_kredit": [d["kredit"] for d in ((status.get("broll") or {}).get("dipakai") or [])],
         "musik": status.get("music"),

@@ -37,6 +37,9 @@ MUSIC_ENABLED = (os.getenv("MUSIC_ENABLED") or "1").strip().lower() not in (
 # ~15 dB saat ada yang bicara. Itulah pembagian kerja yang benar: level dasar
 # mengurus "terdengar", ducking mengurus "tidak mengganggu".
 MUSIC_BELOW_SPEECH_DB = float(os.getenv("MUSIC_BELOW_SPEECH_DB", "10"))
+# Bahan TANPA ucapan (suara suasana/keramaian): musik adalah pengisi utama, jadi lebih dekat
+# ke level suasana dan tanpa ducking. 4 dB: suasana tetap terdengar, musik jelas hadir.
+MUSIC_BELOW_AMBIENT_DB = float(os.getenv("MUSIC_BELOW_AMBIENT_DB", "4"))
 # Dipakai hanya kalau loudness tidak bisa diukur (video tanpa audio, ffmpeg
 # tanpa ebur128). Bukan default yang diharapkan, melainkan jaring pengaman.
 MUSIC_VOLUME = float(os.getenv("MUSIC_VOLUME", "0.15"))

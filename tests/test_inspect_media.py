@@ -717,3 +717,12 @@ def test_pesan_pertanyaan_menyebut_bahan_yang_diterima():
     assert pesan.startswith(f"Bahan yang saya terima: {ringk['n_video']} video")
     assert "kirim ulang" in pesan
     assert not im.susun_pesan_pertanyaan(q).startswith("Bahan yang saya terima")   # tanpa ringk: perilaku lama
+
+
+def test_opsi_narasi_ai_tidak_menjanjikan_suara_suasana_dan_menyalakan_musik():
+    """Regresi 24 Sep: label 'suara suasana tetap ada' salah (mode ai menggantinya), dan
+    tanpa `music` di pemetaan agen menebak --music off sendiri."""
+    q = next(x for x in im.susun_pertanyaan(_ringk(), _tahu("edit ya")) if x["kode"] == "audio")
+    c = next(o for o in q["opsi"] if o["huruf"] == "C")
+    assert "tetap ada" not in c["label"]
+    assert q["param"]["C"] == {"audioMode": "ai", "music": "on"}

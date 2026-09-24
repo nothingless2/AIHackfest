@@ -36,10 +36,12 @@ from duration import (  # noqa: E402
 )
 import broll as _broll  # noqa: E402
 import overlay_remotion as _ovr  # noqa: E402
+import visual_quality as _vq  # noqa: E402
 from broll import BrollError  # noqa: E402
 from edit_plan import MERGE_GAP  # noqa: E402
 from retry import with_retry_async  # noqa: E402
 from music import (  # noqa: E402
+    MUSIC_BELOW_AMBIENT_DB,
     MusicError, auto_volume, build_filter as music_filter, has_audio_stream,
     music_wanted, pick_track, requested_mood, solo_volume,
 )
@@ -527,6 +529,92 @@ def rencana_dari_plan(plan, existing_assets):
     return [i for i in item_list if i["durasi"] > 0]
 
 
+POTONG_VISUAL = {}
+
+
+def _catat_visual(kunci, isi):
+    POTONG_VISUAL.setdefault(kunci, []).append(isi)
+
+
+def _buruk_visual(path):
+    """Rentang tak layak satu video, atau None bila tidak terukur (dicatat, TIDAK dianggap
+    bersih -- aturan #7)."""
+    if os.path.splitext(path)[1].lower() not in VIDEO_EXTENSIONS:
+        return []
+    try:
+        return _vq.analisis(path)["buruk"]
+    except Exception as e:
+        _catat_visual("gagal_ukur", {"file": os.path.basename(path), "alasan": f"{type(e).__name__}: {e}"[:160]})
+        return None
+
+
+def terapkan_potong_visual(rencana, data):
+    """Buang bagian goyang/oleng/buram dari tiap item rencana (mode audio asli/mute).
+
+    Bagian yang berisi UCAPAN tidak dibuang (memotongnya menghilangkan kata-kata); ia
+    dicatat sebagai dipertahankan. Sambungan yang tercipta karena potongan visual diberi
+    fade (`fade_setelah`) -- permintaan user: "dipotong dan diberikan transisi"."""
+    if not _vq.aktif():
+        return rencana
+    kata_per = data.get("transcript_words") or {}
+    hasil = []
+    for item in rencana:
+        buruk = _buruk_visual(item["path"])
+        if not buruk:
+            hasil.append(item)
+            continue
+        nama = os.path.basename(item["path"])
+        kata = kata_per.get(nama) or []
+        dipotong = []
+        for a, b, alasan in buruk:
+            if any(float(w.get("start", 0)) < b and float(w.get("end", 0)) > a for w in kata):
+                _catat_visual("dipertahankan_ucapan", {"file": nama, "dari": round(a, 2),
+                                                       "sampai": round(b, 2), "alasan": alasan})
+            else:
+                dipotong.append((a, b, alasan))
+        if not dipotong:
+            hasil.append(item)
+            continue
+        ranges = _vq.kurangi(item["ranges"], dipotong, min_keep=MIN_KEEP_DURATION)
+        for a, b, alasan in dipotong:
+            _catat_visual("dipotong", {"file": nama, "dari": round(a, 2), "sampai": round(b, 2),
+                                       "alasan": alasan})
+        if not ranges:
+            _catat_visual("klip_dibuang", {"file": nama})
+            continue
+        fade_setelah = {j for j in range(len(ranges) - 1)
+                        if any(ranges[j][1] <= a < ranges[j + 1][0] for a, _, _ in dipotong)}
+        hasil.append({**item, "ranges": ranges, "durasi": total_kept(ranges),
+                      "fade_setelah": fade_setelah})
+    if not hasil:          # SEMUA klip tak layak: lebih baik tampil apa adanya daripada kosong
+        _catat_visual("dikembalikan", {"alasan": "semua klip tak layak; dipakai apa adanya"})
+        return rencana
+    return hasil
+
+
+def rentang_layak_ai(path):
+    """(a, b) rentang layak TERPANJANG untuk mode voice-over AI, atau None bila tidak
+    perlu dipotong / tidak terukur."""
+    if not _vq.aktif():
+        return None
+    buruk = _buruk_visual(path)
+    if not buruk:
+        return None
+    try:
+        dur = media_duration(path)
+    except Exception:
+        return None
+    layak = _vq.kurangi([(0.0, dur)], buruk, min_keep=MIN_CLIP_DURATION)
+    nama = os.path.basename(path)
+    for a, b, alasan in buruk:
+        _catat_visual("dipotong", {"file": nama, "dari": round(a, 2), "sampai": round(b, 2),
+                                   "alasan": alasan})
+    if not layak:
+        _catat_visual("dikembalikan", {"file": nama, "alasan": "tidak ada bagian layak yang cukup panjang"})
+        return None
+    return max(layak, key=lambda r: r[1] - r[0])
+
+
 def fade_flags(batas, jumlah):
     """[(fade_in, fade_out)] per segmen dari keputusan per SAMBUNGAN.
 
@@ -565,7 +653,8 @@ def sambungan_audio_asli(rencana):
         for j in range(len(ranges)):
             terakhir_di_klip = j == len(ranges) - 1
             if not terakhir_di_klip:
-                batas.append(False)          # potongan internal -> hard cut
+                # potongan internal -> hard cut, KECUALI bagian goyang yang dibuang di situ
+                batas.append(j in item.get("fade_setelah", ()))
                 continue
             if i == len(rencana) - 1:
                 continue                      # tidak ada sambungan sesudahnya
@@ -589,7 +678,7 @@ def sambungan_plan(rencana):
     batas = []
     for i, item in enumerate(rencana):
         n = len(item["ranges"])
-        batas.extend([False] * (n - 1))
+        batas.extend(j in item.get("fade_setelah", ()) for j in range(n - 1))
         if i < len(rencana) - 1:
             batas.append(bool(rencana[i + 1].get("fade_masuk")))
     return batas
@@ -692,10 +781,22 @@ def build_segment(asset_path, duration, segment_path, *, keep_audio=False,
             # = diulang lebih sering lewat -stream_loop). Slot di timeline gabungan
             # tidak pernah berubah, jadi ini aman untuk scene/subtitle di sekitarnya.
             vf_speed = vf if speed_factor == 1.0 else f"{vf},setpts=PTS/{speed_factor}"
-            args = ["-stream_loop", "-1", "-i", asset_path,
+            sumber = asset_path
+            if potong:
+                # Rentang layak saja (bagian goyang dibuang), lalu di-loop bila lebih pendek
+                # dari slot. Dipotong ke berkas sementara: -stream_loop tidak menghormati -ss.
+                sumber = os.path.splitext(segment_path)[0] + "_layak.mp4"
+                run_ffmpeg(["-ss", f"{potong[0]:.3f}", "-to", f"{potong[1]:.3f}", "-i", asset_path,
+                            "-an", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "16", sumber],
+                           f"rentang layak {os.path.basename(asset_path)}")
+            args = ["-stream_loop", "-1", "-i", sumber,
                     "-t", f"{actual_duration:.3f}", "-vf", vf_speed, "-an",
                     "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "fast"]
-        run_ffmpeg(args + [segment_path], f"video {os.path.basename(asset_path)}")
+        try:
+            run_ffmpeg(args + [segment_path], f"video {os.path.basename(asset_path)}")
+        finally:
+            if not keep_audio and potong and sumber != asset_path and os.path.exists(sumber):
+                os.remove(sumber)
 
     else:
         raise ValueError(f"Ekstensi tidak didukung untuk '{asset_path}': {ext}")
@@ -1446,7 +1547,7 @@ def perbaiki_durasi(data, aktual, target):
 
 
 
-def tambah_musik(video_path, track, out_path, durasi):
+def tambah_musik(video_path, track, out_path, durasi, ada_ucapan=True):
     """Campur musik latar ke audio video, dengan ducking otomatis.
 
     Musik di-loop kalau lebih pendek dari video, dan `-shortest` memastikan
@@ -1460,10 +1561,20 @@ def tambah_musik(video_path, track, out_path, durasi):
     # Video TANPA audio (dibisukan): musik adalah satu-satunya suara, jadi dibawa ke
     # target kenyaringan solo -- bukan MUSIC_VOLUME 0,15 yang dirancang sebagai latar
     # dan akan nyaris tak terdengar.
-    vol = auto_volume(video_path, track) if punya else solo_volume(track)
+    #
+    # Ducking HANYA bila ada UCAPAN. Terukur 24 Sep pada video food court user: suara
+    # keramaian yang terus-menerus memicu sidechain sepanjang video, sehingga nada uji
+    # di trek musik hilang TOTAL (-22,7 dB = identik dengan kontrol tanpa musik); tanpa
+    # ducking +34,4 dB. User: "saya tidak dapat mendengar audio musik yang diberikan".
+    # Tanpa ucapan, musik juga diletakkan lebih dekat ke suasana (MUSIC_BELOW_AMBIENT_DB).
+    if not punya:
+        vol = solo_volume(track)
+    else:
+        vol = auto_volume(video_path, track,
+                          below_db=None if ada_ucapan else MUSIC_BELOW_AMBIENT_DB)
     run_ffmpeg(
         ["-i", video_path, "-stream_loop", "-1", "-i", track,
-         "-filter_complex", music_filter(durasi, punya_ucapan=punya, volume=vol),
+         "-filter_complex", music_filter(durasi, punya_ucapan=punya and ada_ucapan, volume=vol),
          "-map", "0:v", "-map", "[aout]",
          "-c:v", "copy", "-c:a", "aac", "-ar", AUDIO_RATE, "-ac", AUDIO_CHANNELS,
          "-shortest", out_path],
@@ -1483,6 +1594,7 @@ def render_from_agent_script(
     with open(json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
+    POTONG_VISUAL.clear()
     audio_mode = (data.get("audio_mode") or "ai").strip().lower()
     bisu = audio_mode == "mute"
     # `pakai_audio_asli` = jalur berbasis durasi klip + transkrip (seleksi, subtitle kata).
@@ -1515,6 +1627,7 @@ def render_from_agent_script(
         raise ValueError("Tidak ada bahan mentah (media_assets) untuk dirender.")
 
     broll_info, broll_tmp = None, []
+    ada_ucapan = True          # voice-over AI = ucapan; cabang audio asli menghitungnya sendiri
     if pakai_audio_asli and _broll.aktif():
         # Diberi tahu, bukan diabaikan diam-diam: user memintanya.
         broll_info = {"dipakai": [], "gagal": "B-roll hanya untuk mode voice-over AI; mode audio asli/mute "
@@ -1539,12 +1652,20 @@ def render_from_agent_script(
                       "memakai semua bahan.")
         if not rencana:
             rencana, dibuang = rencana_semua_klip(existing_assets)
+        rencana = terapkan_potong_visual(rencana, data)
+        if POTONG_VISUAL.get("dipotong"):
+            print(f"🎥 {len(POTONG_VISUAL['dipotong'])} bagian goyang/oleng dibuang: "
+                  + ", ".join(f"{d['file']} {d['dari']}-{d['sampai']} dtk ({d['alasan']})"
+                              for d in POTONG_VISUAL["dipotong"]))
 
         durasi_klip = [r["durasi"] for r in rencana]
         total_duration = sum(durasi_klip)
         if dibuang > 0.05:
             print(f"✂️ {dibuang:.1f} detik jeda dipotong dari {len(rencana)} bahan.")
         scenes = subtitle_scenes(data, rencana, TARGET_W, TARGET_H) or scenes
+        # Ada ucapan = ada subtitle dari timestamp kata. Tanpa itu, audio asli hanyalah
+        # suasana/keramaian dan TIDAK boleh menekan musik (lihat tambah_musik).
+        ada_ucapan = any(s.get("words") for s in scenes)
         print(f"⏱️ Durasi total dari {len(existing_assets)} bahan: {total_duration:.1f} detik")
     else:
         # Yang DIBACAKAN adalah voice_over_spoken (ejaan fonetis), yang DITULIS
@@ -1640,9 +1761,10 @@ def render_from_agent_script(
         bendera = fade_flags(sambungan_scene(durasi_klip, scenes), len(existing_assets))
         for i, asset_path in enumerate(existing_assets):
             seg_path = os.path.join(output_dir, f"_segment_{i}.mp4")
+            layak = rentang_layak_ai(asset_path) if asset_path not in broll_tmp else None
             build_segment(asset_path, durasi_klip[i], seg_path, keep_audio=False,
                           fade_in=bendera[i][0], fade_out=bendera[i][1],
-                          speed_factor=faktor_kecepatan)
+                          speed_factor=faktor_kecepatan, potong=layak)
             segment_paths.append(seg_path)
 
     fade_dipakai = sum(1 for f_in, _ in bendera if f_in)
@@ -1683,7 +1805,7 @@ def render_from_agent_script(
             sementara = os.path.join(output_dir, "_with_music.mp4")
             solo = not has_audio_stream(output_video)      # dibisukan: musik satu-satunya suara
             try:
-                tambah_musik(output_video, track, sementara, total_duration)
+                tambah_musik(output_video, track, sementara, total_duration, ada_ucapan=ada_ucapan)
                 os.replace(sementara, output_video)
                 musik_dipakai = os.path.basename(track)
                 try:
@@ -1694,7 +1816,8 @@ def render_from_agent_script(
                     print(f"[warn] analisis suasana musik dilewati ({type(e).__name__}: {e})")
                 print(f"🎵 Musik: {musik_dipakai} (satu-satunya suara, level ke ±16 LUFS)" if solo
                       else f"🎵 Musik latar: {musik_dipakai} "
-                           f"(level menyesuaikan suara video + auto-ducking)")
+                           + ("(level menyesuaikan suara video + auto-ducking)" if ada_ucapan
+                              else "(di atas suara suasana, tanpa ducking)"))
             except Exception as e:
                 # Musik itu hiasan: video yang sudah jadi jauh lebih berharga.
                 print(f"[warn] gagal menambahkan musik ({e}); video tetap dipakai tanpa musik.")
@@ -1735,6 +1858,7 @@ def render_from_agent_script(
         broll=broll_info,
         emoji_dihapus=sorted(set(EMOJI_DIHAPUS)) or None,
         teks_animasi=dict(TEKS_ANIMASI) or None,
+        potong_visual={k: v for k, v in POTONG_VISUAL.items()} or None,
         audio_mode=audio_mode,
         judul=data.get("judul"),
         scene_count=len(scenes),

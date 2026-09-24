@@ -413,3 +413,21 @@ melewati batas 450 dtk). Key Pexels di `.env` (ter-ignore git).
 - PENGHALANG: kuota harian model gratis OpenRouter (50 permintaan/hari) habis 24 Sep ~10:30; Hermes
   dan pipeline memakai key yang sama, dan satu giliran Hermes memakan ~10 permintaan. Reset 25 Sep
   07:00 WIB. Tambah kredit $10 di OpenRouter -> 1000/hari (menurut pesan error OpenRouter sendiri).
+
+## 24 Sept (siang) — potong bagian goyang, musik terdengar, perbaikan pilihan audio
+
+- `scripts/visual_quality.py`: gerak global (phase correlation), kecocokan antar-frame, ketajaman
+  (variansi Laplacian) pada 10 fps/160 px -> rentang goyang/oleng/buram. Klip nyata user: stabil
+  <= 20 %lebar/dtk; video ke-3 kamera mengayun ke lantai 170-317 %lebar/dtk (terdeteksi 1,75-3,6 dtk,
+  diverifikasi visual). Ambang 45. Gelap TIDAK dihitung cacat (video malam sah).
+- Mode audio asli/mute: bagian buruk dibuang dari rencana, sambungannya diberi fade; bagian buruk
+  yang berisi UCAPAN dipertahankan dan dilaporkan. Mode voice-over AI: dipakai rentang layak
+  terpanjang (diloop bila perlu). Gagal ukur dicatat, tidak dianggap bersih. `--visual-cut off`.
+- MUSIK TIDAK TERDENGAR (keluhan user) -- penyebab terukur: ducking terpicu terus oleh keramaian;
+  nada uji di trek musik -22,7 dB = identik kontrol tanpa musik. Kini ducking hanya bila ada
+  ucapan (scene ber-`words`), dan musik 4 dB di bawah suasana (MUSIC_BELOW_AMBIENT_DB).
+- Opsi audio 5C berlabel "suara suasana tetap ada" padahal mode ai menggantinya -- diperbaiki,
+  dan kini membawa `music: on` (agen sempat menebak `--music off` sendiri). Skill: dilarang
+  menambah flag di luar pemetaan. Berkas audio di `--media-path` otomatis jadi `--music-file`.
+- TTS: TTS_PROVIDER tidak diset -> tiap render mencoba RelayRouter (kuota habis) lalu jatuh ke
+  edge-tts (gratis). Suara id-ID tersedia: Gadis (P), Ardi (L).
