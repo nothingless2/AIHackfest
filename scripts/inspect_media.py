@@ -422,7 +422,8 @@ def susun_pertanyaan(ringk, tahu):
                 # Label lama "suara suasana tetap ada" SALAH: mode ai mengganti audio asli
                 # (terbukti di hasil nyata 24 Sep). Musik disebut eksplisit supaya agen tidak
                 # menebak -- ia sempat menambah --music off sendiri.
-                "catatan": "Punya lagu sendiri? Kirim berkas audionya (mp3/m4a) di chat ini.",
+                "catatan": "Kalau narasi AI: suara wanita (bawaan) atau pria? Gaya ramah atau energik? "
+                           "Punya lagu sendiri? Kirim berkas audionya (mp3/m4a) di chat ini.",
                 "param": {"A": {"audioMode": "original", "music": "on"},
                           "B": {"audioMode": "original", "music": "off"},
                           "C": {"audioMode": "ai", "music": "on"}},

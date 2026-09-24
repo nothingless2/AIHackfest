@@ -117,6 +117,8 @@ Pemetaan nama parameter di `pemetaan` (langkah 1) ke flag `hermes_render.py`:
 | `staticText` (true) | `--static-text` |
 | `music` / `musicMood` | `--music` / `--music-mood` |
 | `durationSeconds` | `--duration-seconds` |
+| suara narasi pria/wanita (dari jawaban user) | `--voice pria` / `--voice wanita` |
+| gaya suara (ramah/energik/profesional/tenang/bercerita) | `--voice-persona` |
 | potong bagian goyang (bawaan nyala; user minta jangan) | `--visual-cut off` |
 | `broll` (true) / `brollQuery` | `--broll` / `--broll-query` (WAJIB bersama `--audio-mode ai`) |
 
@@ -124,6 +126,9 @@ Teks tulisan di layar kini BERANIMASI (Remotion) dan emoji tampil berwarna. Kala
 `teks_animasi.dipakai: false`, animasi gagal dan video memakai teks statis: sampaikan
 `teks_animasi.gagal` ke user dalam satu kalimat. Animasi hanya untuk teks tulisan; subtitle
 dari ucapan tetap karaoke.
+
+Kalau `suara.cadangan` true, narasi memakai suara cadangan gratis (edge-tts) karena ElevenLabs
+gagal/kuota habis -- sebutkan `suara.alasan` singkat ke user.
 
 Kalau hasil berisi `potongan_visual.dipotong`, sebutkan singkat bagian yang dibuang karena
 goyang/oleng (mis. "2 detik terakhir video ke-3 dibuang karena kamera oleng"). Kalau ada

@@ -235,7 +235,35 @@ def voice_persona():
 
 
 TTS_VOICE, TTS_INSTRUCTIONS = voice_persona()
-EDGE_VOICE = os.getenv("EDGE_TTS_VOICE", "id-ID-GadisNeural")
+# Jenis suara narasi yang diminta user: "wanita" (bawaan) atau "pria". Berlaku untuk
+# ElevenLabs DAN cadangan edge-tts, supaya kegagalan tidak diam-diam mengganti jenis suara.
+TTS_VOICE_GENDER = (os.getenv("TTS_VOICE_GENDER") or "wanita").strip().lower()
+EDGE_VOICES = {"wanita": "id-ID-GadisNeural", "pria": "id-ID-ArdiNeural"}
+EDGE_VOICE = os.getenv("EDGE_TTS_VOICE") or EDGE_VOICES.get(TTS_VOICE_GENDER, "id-ID-GadisNeural")
+
+# --- ElevenLabs ------------------------------------------------------------
+# Suara BAWAAN (premade) saja: paket gratis menolak suara pustaka lewat API (HTTP 402,
+# terukur 24 Sep untuk suara narator Indonesia di akun user). Dipilih dengan MENGUKUR:
+# kalimat Indonesia yang sama disintesis tiap suara lalu ditranskrip Whisper lokal --
+# semua di bawah 0% salah kata. Brian/Daniel/Eric (14%, "laksa mana") dan Sarah (7%) tidak dipakai.
+ELEVENLABS_MODEL = os.getenv("ELEVENLABS_MODEL", "eleven_multilingual_v2")
+ELEVENLABS_SUARA = {
+    ("wanita", "energik"): ("XrExE9yKIg1WjnnlVkGX", "Matilda"),
+    ("wanita", None): ("hpp4J3VqNfWAUOO0d1Us", "Bella"),
+    ("pria", "energik"): ("TX3LPaxmHKxFdv7VOQHJ", "Liam"),
+    ("pria", "ramah"): ("iP95p4xoKVk53GoZ742B", "Chris"),
+    ("pria", None): ("JBFqnCBsd6RMkjVDRZzb", "George"),
+}
+TTS_CATATAN = {}
+
+
+def suara_elevenlabs():
+    """(voice_id, nama) dari TTS_VOICE_GENDER + TTS_PERSONA; ELEVENLABS_VOICE_ID menimpa."""
+    paksa = (os.getenv("ELEVENLABS_VOICE_ID") or "").strip()
+    if paksa:
+        return paksa, paksa
+    g = TTS_VOICE_GENDER if TTS_VOICE_GENDER in ("pria", "wanita") else "wanita"
+    return ELEVENLABS_SUARA.get((g, TTS_PERSONA)) or ELEVENLABS_SUARA[(g, None)]
 EDGE_RATE = os.getenv("EDGE_TTS_RATE", "+5%")
 
 
@@ -287,6 +315,61 @@ async def _voice_openai(text, output_audio):
     )
 
 
+class TtsTidakTersedia(RuntimeError):
+    """Kegagalan permanen (key salah, kuota habis, butuh paket berbayar): jangan diulang."""
+
+
+def _elevenlabs_http(url, *, data=None):
+    import urllib.request
+    kunci = (os.getenv("ELEVENLABS_API_KEY") or "").strip()
+    req = urllib.request.Request(url, data=data, headers={
+        "xi-api-key": kunci, "Content-Type": "application/json", "User-Agent": "content-factory/1.0"})
+    return urllib.request.urlopen(req, timeout=TTS_ATTEMPT_TIMEOUT)
+
+
+def _sisa_kuota_elevenlabs():
+    """Karakter tersisa, atau None bila tidak bisa dicek (tidak menghalangi)."""
+    try:
+        with _elevenlabs_http("https://api.elevenlabs.io/v1/user/subscription") as r:
+            s = json.load(r)
+        return int(s["character_limit"]) - int(s["character_count"])
+    except Exception:
+        return None
+
+
+async def _voice_elevenlabs(text, output_audio):
+    import urllib.error
+    from retry import with_retry
+
+    if not (os.getenv("ELEVENLABS_API_KEY") or "").strip():
+        raise TtsTidakTersedia("ELEVENLABS_API_KEY belum diisi")
+    sisa = _sisa_kuota_elevenlabs()
+    # Penghitung ElevenLabs tertunda (terukur: 0 setelah ~900 karakter) -- ini pengaman
+    # kasar, bukan jaminan; penolakan kuota di tengah jalan tetap jatuh ke edge-tts.
+    if sisa is not None and sisa < len(text):
+        raise TtsTidakTersedia(f"kuota ElevenLabs tersisa {sisa} karakter, naskah {len(text)}")
+    vid, _ = suara_elevenlabs()
+    badan = json.dumps({"text": text, "model_id": ELEVENLABS_MODEL, "language_code": "id"}).encode()
+
+    def sekali():
+        try:
+            with _elevenlabs_http(f"https://api.elevenlabs.io/v1/text-to-speech/{vid}"
+                                  "?output_format=mp3_44100_128", data=badan) as r:
+                isi = r.read()
+        except urllib.error.HTTPError as e:
+            pesan = e.read()[:200].decode(errors="replace")
+            if e.code in (401, 402, 403, 422) or "quota" in pesan.lower():
+                raise TtsTidakTersedia(f"ElevenLabs HTTP {e.code}: {pesan}")
+            raise
+        if not isi:
+            raise RuntimeError("ElevenLabs mengembalikan audio kosong")
+        with open(output_audio, "wb") as f:
+            f.write(isi)
+
+    with_retry(sekali, is_retriable=lambda e: not isinstance(e, TtsTidakTersedia),
+               label="voice-over ElevenLabs")
+
+
 async def generate_voice(text, output_audio):
     """Voice-over dgn penyedia yang bisa dipilih.
 
@@ -294,6 +377,20 @@ async def generate_voice(text, output_audio):
     atau relay bermasalah tidak boleh membuat video gagal total kalau masih ada
     jalur gratis yang bekerja.
     """
+    TTS_CATATAN.clear()
+    if TTS_PROVIDER == "elevenlabs":
+        vid, nama = suara_elevenlabs()
+        try:
+            print(f"🎙️ Voice-over ElevenLabs {ELEVENLABS_MODEL} (suara: {nama})")
+            await _voice_elevenlabs(text, output_audio)
+            _catat_pemakaian_tts(text, mesin="elevenlabs")
+            TTS_CATATAN.update(mesin="elevenlabs", suara=nama)
+            return
+        except Exception as e:
+            alasan = f"{type(e).__name__}: {str(e)[:120]}"
+            print(f"[warn] ElevenLabs gagal ({alasan}); jatuh ke edge-tts.")
+            TTS_CATATAN.update(cadangan=True, alasan=alasan)
+
     if TTS_PROVIDER == "openai":
         try:
             print(f"🎙️ Voice-over {TTS_MODEL} (suara: {TTS_VOICE})")
@@ -307,6 +404,7 @@ async def generate_voice(text, output_audio):
     print(f"🎙️ Voice-over edge-tts (suara: {EDGE_VOICE})")
     await _voice_edge(text, output_audio)
     _catat_pemakaian_tts(text, mesin="edge-tts")
+    TTS_CATATAN.update(mesin="edge-tts", suara=EDGE_VOICE)
 
 
 def _catat_pemakaian_tts(text, mesin="edge-tts"):
@@ -1859,6 +1957,7 @@ def render_from_agent_script(
         emoji_dihapus=sorted(set(EMOJI_DIHAPUS)) or None,
         teks_animasi=dict(TEKS_ANIMASI) or None,
         potong_visual={k: v for k, v in POTONG_VISUAL.items()} or None,
+        suara=dict(TTS_CATATAN) if audio_mode == "ai" else None,
         audio_mode=audio_mode,
         judul=data.get("judul"),
         scene_count=len(scenes),

@@ -56,6 +56,11 @@ os.environ["TEXT_ANIMATION"] = "none"
 # Pemotongan bagian goyang menganalisis tiap video; test lama memakai sumber sintetis dan
 # tidak menguji ini. Test-nya sendiri menyalakan (tests/test_visual_quality.py).
 os.environ["VISUAL_CUT"] = "0"
+# TTS & key ElevenLabs asli di .env tidak boleh mengubah test (dan tidak boleh memakai
+# kuota): test TTS menyetelnya sendiri.
+os.environ["TTS_PROVIDER"] = ""
+os.environ["ELEVENLABS_API_KEY"] = ""
+os.environ["TTS_VOICE_GENDER"] = ""
 
 
 @pytest.fixture(autouse=True)

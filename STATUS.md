@@ -431,3 +431,16 @@ melewati batas 450 dtk). Key Pexels di `.env` (ter-ignore git).
   menambah flag di luar pemetaan. Berkas audio di `--media-path` otomatis jadi `--music-file`.
 - TTS: TTS_PROVIDER tidak diset -> tiap render mencoba RelayRouter (kuota habis) lalu jatuh ke
   edge-tts (gratis). Suara id-ID tersedia: Gadis (P), Ardi (L).
+
+## 24 Sept (malam) — voice-over ElevenLabs
+
+- `TTS_PROVIDER=elevenlabs` (paket gratis 10.000 karakter/bln), cadangan otomatis edge-tts dengan
+  jenis suara yang sama; kegagalan permanen (401/402/403, kuota) tidak diulang dan DILAPORKAN
+  (`render_status.suara`). Suara pustaka ditolak API di paket gratis (HTTP 402) -> hanya suara
+  bawaan, dipilih dengan mengukur WER Whisper pada kalimat Indonesia: Bella/Matilda (wanita),
+  Liam/Chris/George (pria). `--voice pria|wanita` + `--voice-persona`.
+- Penghitung kuota ElevenLabs tertunda (0 setelah ~900 karakter) -> cek kuota hanya pengaman kasar.
+- Uji nyata (3 video user, Liam energik, B-roll, musik, teks animasi, potong goyang): sukses, 19 dtk.
+  Whisper mendengar naskah utuh; hanya "Laksamana" terdengar "laksa mana".
+- Gangguan jaringan VPS 13:40-15:28 WIB (Telegram + OpenRouter putus, server sehat). Temuan:
+  3.698 login SSH gagal/12 jam, root+password diizinkan, tanpa firewall/fail2ban -- belum diubah.

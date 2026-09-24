@@ -33,6 +33,10 @@
       "per_1k_chars": 0.03,
       "sumber": "https://openai.com/api/pricing/",
       "catatan": "tts-1-hd ditagih $30 per 1 juta karakter."
+    },
+    "elevenlabs": {
+      "per_1k_chars": 0.0,
+      "catatan": "Paket GRATIS ElevenLabs: 10.000 karakter/bulan, non-komersial + atribusi (cek syarat di elevenlabs.io). Dicatat 0 supaya jumlah karakter terlacak; paket berbayar -> isi harga per 1k karakter di sini."
     }
   },
   "transcribe": {

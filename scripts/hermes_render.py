@@ -132,6 +132,8 @@ def _parse_args(argv):
     p.add_argument("--broll", action="store_true", help="Sisipkan B-roll stok Pexels (hanya --audio-mode ai; butuh PEXELS_API_KEY).")
     p.add_argument("--broll-query", default=None, help="Kata kunci B-roll, dipisah koma.")
     p.add_argument("--broll-count", type=int, default=None)
+    p.add_argument("--voice", choices=["pria", "wanita"], default=None,
+                   help="Jenis suara narasi voice-over AI (bawaan: wanita).")
     p.add_argument("--visual-cut", choices=["on", "off"], default=None,
                    help="Buang bagian goyang/oleng/buram (bawaan: on).")
     p.add_argument("--text-animation", default=None, help="pop|loncat|geser|fade|none (teks tulisan di layar).")
@@ -144,6 +146,7 @@ def _apply_env(args):
     mapping = {
         "CONTENT_FACTORY_AUDIO_MODE": args.audio_mode,
         "TTS_PERSONA": args.voice_persona,
+        "TTS_VOICE_GENDER": args.voice,
         "VIDEO_ASPECT": args.aspect_ratio,
         "FIT_MODE": args.fit_mode,
         "CONTENT_FACTORY_EDIT": args.edit_mode,
@@ -295,6 +298,7 @@ def main(argv=None):
                          "(font tidak mendukung emoji); tetap ada di caption.") if status.get("emoji_dihapus") else None,
         "teks_animasi": status.get("teks_animasi"),
         "potongan_visual": status.get("potong_visual"),
+        "suara": status.get("suara"),
         "broll": status.get("broll"),
         "broll_kredit": [d["kredit"] for d in ((status.get("broll") or {}).get("dipakai") or [])],
         "musik": status.get("music"),
