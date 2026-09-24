@@ -11,3 +11,5 @@ openclaw-plugin/dist/
 
 # venv Whisper lokal (dibuat scripts/setup_local_whisper.sh) — besar, tidak untuk di-commit
 .venv-whisper/
+remotion/node_modules/
+remotion/.bundle-cache/

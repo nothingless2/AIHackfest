@@ -15,6 +15,7 @@ daripada operasi per-frame moviepy di Python).
 import asyncio
 import json
 import re
+import shutil
 import os
 import subprocess
 import sys
@@ -34,6 +35,7 @@ from duration import (  # noqa: E402
     DURATION_TOLERANCE, off_target, word_target,
 )
 import broll as _broll  # noqa: E402
+import overlay_remotion as _ovr  # noqa: E402
 from broll import BrollError  # noqa: E402
 from edit_plan import MERGE_GAP  # noqa: E402
 from retry import with_retry_async  # noqa: E402
@@ -1103,11 +1105,48 @@ def build_drawtext_chain(scenes, video_height, video_width=None):
     return filters
 
 
+TEKS_ANIMASI = {}
+
+
 def apply_text_overlay(input_path, scenes, output_path):
+    """Teks TULISAN (scene tanpa `words`) -> lapisan animasi Remotion bila TEXT_ANIMATION aktif;
+    subtitle UCAPAN (scene ber-`words`) tetap drawtext karaoke. Remotion gagal -> SEMUA teks
+    jatuh ke drawtext statis dan kegagalannya dicatat di TEKS_ANIMASI (dilaporkan ke user)."""
     EMOJI_DIHAPUS.clear()
+    TEKS_ANIMASI.clear()
+    animasi = _ovr.animasi_diminta()
+    tulisan = [s for s in scenes if s.get("text") and not s.get("words")
+               and s.get("end") is not None and float(s["end"]) > float(s.get("start", 0))]
+    if animasi and tulisan:
+        ucapan = [s for s in scenes if s.get("words")]
+        tengah = input_path
+        if ucapan:
+            tengah = os.path.splitext(output_path)[0] + "_subtitle.mp4"
+            _drawtext_saja(input_path, ucapan, tengah, pindahkan=False)
+        try:
+            info = _ovr.tempel_teks_animasi(
+                tengah, [{"text": s["text"], "mulai": float(s.get("start", 0)),
+                          "selesai": float(s["end"])} for s in tulisan],
+                output_path, lebar=TARGET_W, tinggi=TARGET_H, fps=FPS,
+                durasi=max(float(s["end"]) for s in tulisan),
+                posisi=resolve_text_position(), font=resolve_text_font()[0], animasi=animasi)
+            TEKS_ANIMASI.update(dipakai=True, gagal=None, **info)
+            print(f"✨ Teks animasi ({animasi}): {info['item']} teks, {info['frame_chromium']} frame dirender Chromium.")
+            return
+        except _ovr.OverlayError as e:
+            TEKS_ANIMASI.update(animasi=animasi, dipakai=False, gagal=str(e))
+            print(f"[warn] animasi teks gagal ({e}) — memakai teks statis.")
+        finally:
+            if tengah != input_path and os.path.exists(tengah):
+                os.remove(tengah)
+    _drawtext_saja(input_path, scenes, output_path)
+
+
+def _drawtext_saja(input_path, scenes, output_path, pindahkan=True):
     filters = build_drawtext_chain(scenes, TARGET_H, TARGET_W)
     if not filters:
-        os.replace(input_path, output_path)
+        # pindahkan=False: masukan masih dibutuhkan (cadangan teks statis bila Remotion gagal).
+        (os.replace if pindahkan else shutil.copyfile)(input_path, output_path)
         return
     # Rantai filter lewat BERKAS, bukan argumen -vf: satu argumen di Linux dibatasi
     # 128 KB (MAX_ARG_STRLEN). Video 68 detik dengan ~200 kata memakai puluhan
@@ -1695,6 +1734,7 @@ def render_from_agent_script(
         music_mood=musik_mood,
         broll=broll_info,
         emoji_dihapus=sorted(set(EMOJI_DIHAPUS)) or None,
+        teks_animasi=dict(TEKS_ANIMASI) or None,
         audio_mode=audio_mode,
         judul=data.get("judul"),
         scene_count=len(scenes),

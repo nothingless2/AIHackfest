@@ -50,6 +50,9 @@ os.environ["TRANSCRIBE_PROVIDER"] = "api"
 # Key Pexels asli (dimuat dari .env) tidak boleh mengubah hasil test: ia menentukan apakah
 # tawaran B-roll muncul di inspect_media. Test yang butuh key mengisinya sendiri.
 os.environ["PEXELS_API_KEY"] = ""
+# Teks animasi (Remotion) membuka Chromium: lambat dan tidak dibutuhkan test drawtext.
+# Test Remotion menyalakannya sendiri (tests/test_overlay_remotion.py).
+os.environ["TEXT_ANIMATION"] = "none"
 
 
 @pytest.fixture(autouse=True)

@@ -19,6 +19,7 @@ berjalan maupun percobaan ulang.
 """
 
 import glob
+import shutil
 import os
 import time
 
@@ -64,6 +65,12 @@ def clear_render_workspace():
     for p in pola:
         for path in glob.glob(os.path.join(DRAFTS_DIR, p)):
             jumlah += _hapus(path, "file kerja")
+
+    # Folder kerja animasi teks (Remotion) dari render yang mati di tengah jalan.
+    for d in glob.glob(os.path.join(DRAFTS_DIR, "_overlay_*")):
+        if os.path.isdir(d):
+            shutil.rmtree(d, ignore_errors=True)
+            jumlah += 1
 
     if _hapus(DRAFT_VIDEO_PATH, "draft lama"):
         jumlah += 1

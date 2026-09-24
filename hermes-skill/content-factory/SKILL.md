@@ -109,6 +109,7 @@ Pemetaan nama parameter di `pemetaan` (langkah 1) ke flag `hermes_render.py`:
 |---|---|
 | `textPosition` (atas/tengah/bawah) | `--text-position` |
 | `textFont` (standar/tegas/modern/elegan/santai/bersih) | `--text-font` |
+| animasi teks (pop/loncat/geser/fade/none) | `--text-animation` (bawaan: pop) |
 | `subtitleStyle` | `--subtitle-style` |
 | `colorFilter` | `--color-filter` |
 | `audioMode` | `--audio-mode` |
@@ -117,6 +118,11 @@ Pemetaan nama parameter di `pemetaan` (langkah 1) ke flag `hermes_render.py`:
 | `music` / `musicMood` | `--music` / `--music-mood` |
 | `durationSeconds` | `--duration-seconds` |
 | `broll` (true) / `brollQuery` | `--broll` / `--broll-query` (WAJIB bersama `--audio-mode ai`) |
+
+Teks tulisan di layar kini BERANIMASI (Remotion) dan emoji tampil berwarna. Kalau hasil berisi
+`teks_animasi.dipakai: false`, animasi gagal dan video memakai teks statis: sampaikan
+`teks_animasi.gagal` ke user dalam satu kalimat. Animasi hanya untuk teks tulisan; subtitle
+dari ucapan tetap karaoke.
 
 Kalau hasil berisi `catatan_teks` (emoji dihapus dari teks di layar karena font tidak mendukung), sampaikan
 ke user dalam satu kalimat.

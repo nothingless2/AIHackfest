@@ -30,6 +30,7 @@ import sys
 
 from broll import BrollError, resolve_broll
 from canvas import CanvasError, resolve_canvas
+from overlay_remotion import animasi_diminta
 from common import (
     brief_path_for_run,
     draft_thumb_path_for_run,
@@ -128,6 +129,7 @@ def _parse_args(argv):
     p.add_argument("--broll", action="store_true", help="Sisipkan B-roll stok Pexels (hanya --audio-mode ai; butuh PEXELS_API_KEY).")
     p.add_argument("--broll-query", default=None, help="Kata kunci B-roll, dipisah koma.")
     p.add_argument("--broll-count", type=int, default=None)
+    p.add_argument("--text-animation", default=None, help="pop|loncat|geser|fade|none (teks tulisan di layar).")
     p.add_argument("--text-position", default=None, help="atas|tengah|bawah (teks on-screen, bukan subtitle ucapan).")
     p.add_argument("--text-font", default=None, help="standar|tegas|modern|elegan|santai|bersih.")
     return p.parse_args(argv)
@@ -145,6 +147,7 @@ def _apply_env(args):
         "CONTENT_FACTORY_MUSIC_MOOD": args.music_mood,
         "COLOR_FILTER": args.color_filter,
         "BROLL_QUERY": args.broll_query,
+        "TEXT_ANIMATION": args.text_animation,
         "TEXT_POSITION": args.text_position,
         "TEXT_FONT": args.text_font,
         "CONTENT_FACTORY_USER_CONTEXT": args.user_context or None,
@@ -237,6 +240,7 @@ def main(argv=None):
         resolve_speed_factor()
         resolve_text_position()
         resolve_text_font()
+        animasi_diminta()
     except StyleError as e:
         return gagal("gaya_invalid", str(e))
 
@@ -273,6 +277,7 @@ def main(argv=None):
         "catatan_durasi": pesan_durasi or None,
         "catatan_teks": ("Emoji " + " ".join(status["emoji_dihapus"]) + " dihapus dari teks di layar "
                          "(font tidak mendukung emoji); tetap ada di caption.") if status.get("emoji_dihapus") else None,
+        "teks_animasi": status.get("teks_animasi"),
         "broll": status.get("broll"),
         "broll_kredit": [d["kredit"] for d in ((status.get("broll") or {}).get("dipakai") or [])],
         "musik": status.get("music"),

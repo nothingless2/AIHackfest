@@ -343,7 +343,8 @@ def susun_pertanyaan(ringk, tahu):
                           "Tengah, font santai (tulisan tangan)",
                           "Atas, font modern (ramping, huruf kapital)", rekomendasi=0),
             "catatan": "Posisi: atas, tengah, bawah. Font: standar, tegas, modern, elegan, santai, "
-                       "bersih. Mau kombinasi lain? Tulis saja, mis. \"tengah, font santai\".",
+                       "bersih. Teks muncul beranimasi (pop); mau gaya lain? loncat, geser, fade, "
+                       "atau tanpa animasi. Emoji boleh. Tulis saja, mis. \"tengah, font santai, geser\".",
             "param": {"A": {"textPosition": "bawah", "textFont": "standar"},
                       "B": {"textPosition": "tengah", "textFont": "tegas"},
                       "C": {"textPosition": "tengah", "textFont": "elegan"},

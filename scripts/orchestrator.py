@@ -53,9 +53,12 @@ CORE_STAGES = [
     #   TTS kedua (naskah hasil koreksi)                   =  93
     #   render terberat yang diukur (16:9 blur)            =  67
     #   cover 2 panggilan ffmpeg                           =   3
+    #   teks animasi Remotion (batas KERAS, lalu cadangan)  = 120
     #   -------------------------------------------------------
-    #                                                        281  -> margin ~28%
-    ("agent3_render.py", "ContentMakers", True, 360),
+    #                                                        401  -> margin ~20%
+    # (480 naik dari 360, 24 Sep: Remotion. Terukur 13 dtk untuk satu judul 9 dtk;
+    #  120 adalah batas TEXT_ANIMATION_TIMEOUT, bukan perkiraan.)
+    ("agent3_render.py", "ContentMakers", True, 480),
 ]
 
 _active_proc = None  # ditulis run_stage() tepat setelah Popen; dibaca signal handler

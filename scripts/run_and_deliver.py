@@ -25,6 +25,7 @@ import sys
 from canvas import CanvasError, resolve_canvas
 from duration import requested_duration
 from music import MusicError, music_wanted, pick_track, requested_mood
+from overlay_remotion import animasi_diminta
 from style import StyleError, resolve_color_filter, resolve_speed_factor
 from common import (
     brief_path_for_run,
@@ -188,6 +189,7 @@ def main():
         if nama_filter:
             print(f"[info] filter warna: {nama_filter}")
         faktor_kecepatan = resolve_speed_factor()
+        animasi_diminta()
         if faktor_kecepatan != 1.0:
             print(f"[info] speed ramp: {faktor_kecepatan}x (hanya berlaku di mode voice-over AI)")
     except StyleError as e:
