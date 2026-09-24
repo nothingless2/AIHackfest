@@ -401,3 +401,15 @@ run dan dibuang; host unduhan wajib pexels.com; jumlah dibatasi supaya bahan use
 Uji nyata: Pexels asli (13 kandidat), render end-to-end -- slot 1 bahan user, slot 2-3 klip barista.
 `LLM_MODEL` di .env -> `nex-agi/nex-n2.5-mini:free` (varian pro timeout 59 dtk/balasan kosong; brief
 melewati batas 450 dtk). Key Pexels di `.env` (ter-ignore git).
+
+## 24 Sept (sore) — teks animasi Remotion
+
+- `remotion/` (React, Chromium headless Playwright) merender teks TULISAN sebagai lapisan transparan
+  ProRes 4444; `scripts/overlay_remotion.py` merencanakan frame dan menempelkannya dengan ffmpeg.
+  Subtitle ucapan tetap drawtext karaoke. Gagal -> teks statis + `render_status.teks_animasi.gagal`.
+- Terukur: judul 9 dtk = 42 frame Chromium (~13 dtk) berkat gambar diam untuk bagian tak bergerak
+  (render penuh 216 frame = 46 dtk). Demo 3 video asli user (15,5 dtk, tanpa LLM): render total 82 dtk,
+  ketiga video tampil, emoji berwarna, animasi masuk per kata dan pudar di akhir.
+- PENGHALANG: kuota harian model gratis OpenRouter (50 permintaan/hari) habis 24 Sep ~10:30; Hermes
+  dan pipeline memakai key yang sama, dan satu giliran Hermes memakan ~10 permintaan. Reset 25 Sep
+  07:00 WIB. Tambah kredit $10 di OpenRouter -> 1000/hari (menurut pesan error OpenRouter sendiri).
