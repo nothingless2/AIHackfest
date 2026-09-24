@@ -59,7 +59,7 @@ dengan JSON di stdin:
 ```json
 {"paths": ["<path lokal video/foto dari cache Hermes>", "..."],
  "konteks": "<pesan/permintaan user apa adanya>",
- "chat_id": "<id chat Telegram ini>"}
+ "chat_id": "<label chat, mis. DM with Stringless>"}
 ```
 
 Hasilnya JSON berisi fakta terukur (durasi, ada/tidaknya ucapan, dst), `inspectId`,
@@ -84,7 +84,7 @@ BELAKANG dengan `notify_on_complete=true`:
 ```
 python3 /root/AIHackfest/scripts/hermes_render.py \
   --media-path "<path 1>" [--media-path "<path 2>" ...] \
-  --chat-id "<id chat Telegram ini>" \
+  --chat-id "<label chat yang SAMA PERSIS dengan di langkah 1>" \
   --inspect-id "<inspectId dari langkah 1>" \
   --user-answered \
   --user-context "<pesan/permintaan user apa adanya>" \
@@ -110,8 +110,7 @@ Baca output JSON (satu baris) dari proses latar belakang itu.
   `deskripsi` + `hashtags`. Sebutkan `catatan_durasi` kalau ada isinya (artinya
   durasi diminta user dijepit ke batas yang berbeda).
 - **`ok: false`**: sampaikan `alasan` apa adanya ke user dalam kalimat biasa.
-  Jangan mencoba lagi otomatis kalau alasannya `render_sibuk` atau
-  `chat_tidak_diizinkan`.
+  Jangan mencoba lagi otomatis kalau alasannya `render_sibuk`.
 
 Jangan pernah menjanjikan hasil atau merinci pengaturan sebelum langkah ini
 selesai dan filenya benar-benar ada.

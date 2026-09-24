@@ -81,3 +81,19 @@ def test_parse_args_default():
 def test_parse_args_no_require_inspect():
     args = hr._parse_args(["--media-path", "/a.mp4", "--no-require-inspect"])
     assert args.require_inspect is False
+
+
+def test_label_chat_non_numerik_tidak_ditolak_allowlist(monkeypatch, capsys):
+    """Regresi run nyata 24 Sep: agent mengirim --chat-id 'DM with Stringless'
+    (label dari Hermes), dan dulu ditolak 'chat_tidak_diizinkan'. Sekarang lolos
+    gerbang chat; kegagalan berikutnya harus soal lampiran, bukan chat."""
+    import json
+    monkeypatch.setenv("ALLOWED_CHAT_IDS", "")
+    monkeypatch.setattr(hr, "install_signal_handlers", lambda: None)
+    monkeypatch.setattr(hr, "sweep_old_run_files", lambda: None)
+    monkeypatch.setattr(hr, "ensure_dirs", lambda: None)
+    monkeypatch.setattr(hr, "log_event", lambda *a, **k: None)
+    rc = hr.main(["--media-path", "/etc/passwd", "--chat-id", "DM with Stringless"])
+    hasil = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert rc == 1
+    assert hasil["kode"] == "lampiran_invalid"

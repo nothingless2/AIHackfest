@@ -18,8 +18,8 @@ HERMES.md di repo ini untuk detail penelusurannya:
   sama tempat permintaan itu berasal -- itu levelnya Hermes sendiri yang
   menjamin, sama seperti kemampuan bawaannya mengirim pesan/gambar biasa.
 
-`--chat-id` di sini HANYA dipakai untuk allowlist + pencatatan log, BUKAN untuk
-memutuskan ke mana video dikirim (skrip ini tidak mengirim apa pun).
+`--chat-id` di sini HANYA label untuk log dan pemeriksaan kepemilikan inspectId (harus
+SAMA persis dengan yang dipakai saat inspect). Bukan gerbang akses, bukan tujuan kirim.
 """
 
 import argparse
@@ -31,7 +31,6 @@ import sys
 from canvas import CanvasError, resolve_canvas
 from common import (
     brief_path_for_run,
-    chat_allowed,
     draft_thumb_path_for_run,
     draft_video_path_for_run,
     ensure_dirs,
@@ -101,7 +100,7 @@ def _parse_args(argv):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--media-path", action="append", default=[], dest="media_paths",
                    help="Path lampiran (boleh diulang). Wajib di dalam ~/.hermes/cache/.")
-    p.add_argument("--chat-id", default="", help="Hanya untuk allowlist + log, bukan routing.")
+    p.add_argument("--chat-id", default="", help="Label chat: samakan persis dengan yang dipakai saat inspect. Bukan gerbang akses.")
     p.add_argument("--user-context", default="")
     p.add_argument("--inspect-id", default="", help="Hasil dari inspect_media.py inspect.")
     p.add_argument("--user-answered", action="store_true")
@@ -171,8 +170,11 @@ def main(argv=None):
         log_event("run_rejected", run_id, chat_id=chat_id, reason=kode)
         return 1
 
-    if chat_id and not chat_allowed(chat_id):
-        return gagal("chat_tidak_diizinkan", f"chat {chat_id} tidak ada di ALLOWED_CHAT_IDS.")
+    # Tidak ada cek ALLOWED_CHAT_IDS di jalur ini, sengaja: Hermes menyodorkan ke
+    # agent LABEL chat ("DM with Stringless"), bukan id numerik, dan nilainya diisi
+    # model sehingga bisa dipalsukan -- gerbang itu keamanan semu (terbukti: run
+    # asli Stringless ditolak). Kontrol akses jalur ini adalah pairing Hermes:
+    # hanya user yang di-approve admin yang bisa memanggil terminal.
 
     try:
         media_paths = _validate_media_paths(args.media_paths)
