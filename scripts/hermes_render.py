@@ -47,7 +47,10 @@ from orchestrator import install_signal_handlers, run_core_stages_locked
 from retention import sweep_old_run_files
 from run_lock import FileLockBusyError, generate_run_id, sanitize_run_id
 from run_log import log_event
-from style import StyleError, resolve_color_filter, resolve_speed_factor
+from style import (
+    StyleError, resolve_color_filter, resolve_speed_factor, resolve_text_font,
+    resolve_text_position,
+)
 
 # Root folder tempat Hermes benar-benar menyimpan lampiran yang diunduh dari
 # Telegram (dilihat langsung di server: ~/.hermes/cache/{videos,images,...}).
@@ -120,6 +123,8 @@ def _parse_args(argv):
     p.add_argument("--color-filter", default=None)
     p.add_argument("--speed-factor", type=float, default=None)
     p.add_argument("--auto-zoom", action="store_true")
+    p.add_argument("--text-position", default=None, help="atas|tengah|bawah (teks on-screen, bukan subtitle ucapan).")
+    p.add_argument("--text-font", default=None, help="standar|tegas|modern|elegan|santai|bersih.")
     return p.parse_args(argv)
 
 
@@ -134,6 +139,8 @@ def _apply_env(args):
         "CONTENT_FACTORY_MUSIC": args.music,
         "CONTENT_FACTORY_MUSIC_MOOD": args.music_mood,
         "COLOR_FILTER": args.color_filter,
+        "TEXT_POSITION": args.text_position,
+        "TEXT_FONT": args.text_font,
         "CONTENT_FACTORY_USER_CONTEXT": args.user_context or None,
     }
     for key, value in mapping.items():
@@ -207,6 +214,8 @@ def main(argv=None):
     try:
         resolve_color_filter()
         resolve_speed_factor()
+        resolve_text_position()
+        resolve_text_font()
     except StyleError as e:
         return gagal("gaya_invalid", str(e))
 

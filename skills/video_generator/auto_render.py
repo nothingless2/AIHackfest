@@ -41,8 +41,9 @@ from music import (  # noqa: E402
 from spoken import prompt_rule, spoken_text  # noqa: E402
 from style import (  # noqa: E402
     auto_zoom_enabled, resolve_color_filter, resolve_speed_factor,
+    resolve_text_font, resolve_text_position,
 )
-from subtitle_layout import layout_group  # noqa: E402
+from subtitle_layout import layout_group, text_width  # noqa: E402
 from thumbnail import (  # noqa: E402
     THUMBNAIL_ENABLED, extract_thumbnail, thumbnail_time,
 )
@@ -68,7 +69,7 @@ def resolve_font(nama=None, berat=None):
     tidak terpasang tidak menggagalkan render -- tapi hasilnya bisa bukan yang
     diminta. Karena itu diperingatkan kalau keluarga yang kembali berbeda.
     """
-    if os.getenv("SUBTITLE_STYLE", "karaoke") == "capcut":
+    if nama is None and os.getenv("SUBTITLE_STYLE", "karaoke") == "capcut":
         local_font = os.path.join(os.path.dirname(__file__), "..", "..", "assets", "fonts", "Montserrat-ExtraBold.ttf")
         if os.path.exists(local_font):
             return os.path.abspath(local_font)
@@ -858,10 +859,54 @@ def wrap_text(teks, fontsize, video_width, *, max_lines=MAX_SUBTITLE_LINES):
     return "\n".join(baris)
 
 
-def _drawtext(teks, fs, y, gaya, enable, alpha=None):
+ASSETS_FONTS = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__)))), "assets", "fonts")
+ZONA_ATAS_RATIO = 0.16   # ~300px di kanvas 1920, sama dengan zona aman atas platform
+
+
+def text_font_path():
+    """Path font untuk teks on-screen, dari TEXT_FONT. Berkas bundel yang hilang
+    MENGGAGALKAN render (bukan diam-diam ganti font): user memilih font itu."""
+    nama, spec = resolve_text_font()
+    if spec.get("file"):
+        p = os.path.join(ASSETS_FONTS, spec["file"])
+        if not os.path.exists(p):
+            raise FileNotFoundError(f"Font '{nama}' dipilih tapi berkasnya tidak ada: {p}")
+        return p
+    if spec.get("family"):
+        return resolve_font(spec["family"], "bold")
+    return FONT_PATH
+
+
+def text_y(video_height, y_bawah):
+    """Ekspresi y drawtext untuk TEXT_POSITION. `bawah` = perilaku lama (y_bawah)."""
+    posisi = resolve_text_position()
+    if posisi == "tengah":
+        return "(h-text_h)/2"
+    if posisi == "atas":
+        return str(round(video_height * ZONA_ATAS_RATIO))
+    return y_bawah
+
+
+def _muat_lebar(teks, fs, video_width, font_path, *, batas=0.9):
+    """Ukuran font terbesar <= fs yang membuat SETIAP baris hasil wrap_text muat di
+    `batas` x lebar kanvas, DIUKUR dengan berkas font yang dipakai. CHAR_WIDTH_RATIO
+    hanyalah perkiraan satu font; font lebar (Montserrat ExtraBold, Pacifico) melewati
+    tepi dan terpotong -- terukur di render nyata saat judul tengah dibesarkan."""
+    lebar_maks = video_width * batas
+    f, minimum = fs, max(16, int(fs * 0.5))
+    while f > minimum:
+        baris = wrap_text(teks, f, video_width, max_lines=SUBTITLE_MAX_LINES).split("\n")
+        if all(text_width(font_path, f, b) <= lebar_maks for b in baris):
+            return f
+        f -= 4
+    return max(minimum, f)
+
+
+def _drawtext(teks, fs, y, gaya, enable, alpha=None, font_path=None):
     bagian = [
         "drawtext=",
-        f"fontfile={FONT_PATH}:text='{teks}':fontsize={fs}:",
+        f"fontfile={font_path or FONT_PATH}:text='{teks}':fontsize={fs}:",
         f"fontcolor={gaya['color']}:line_spacing=8:x=(w-text_w)/2:y={y}",
     ]
     if gaya.get("box"):
@@ -970,6 +1015,8 @@ def build_drawtext_chain(scenes, video_height, video_width=None):
     W = video_width or TARGET_W
     fs, y = subtitle_geometry(W, video_height)
     gaya = subtitle_style()
+    y_teks = text_y(video_height, y)       # hanya untuk teks on-screen, bukan subtitle ucapan
+    font_teks = text_font_path()
 
     filters = []
     for sc in scenes:
@@ -1004,7 +1051,10 @@ def build_drawtext_chain(scenes, video_height, video_width=None):
                 # Teks STATIS harus tetap SATU tampilan sepanjang video: font dikecilkan
                 # sampai muat, bukan dipecah jadi beberapa tampilan yang berganti.
                 fs_tampil = max(16, int(fs * 0.5))
-                for f2 in range(fs, int(fs * 0.5) - 1, -4):
+                # Judul di tengah/atas dibesarkan (bukan ukuran subtitle bawah), lalu
+                # tetap mengecil otomatis sampai muat.
+                fs_maks = fs if resolve_text_position() == "bawah" else int(fs * 1.4)
+                for f2 in range(fs_maks, int(fs * 0.5) - 1, -4):
                     if len(split_for_subtitle(text, f2, W, max_lines=SUBTITLE_MAX_LINES)) <= 1:
                         fs_tampil = f2
                         break
@@ -1012,12 +1062,14 @@ def build_drawtext_chain(scenes, video_height, video_width=None):
             total_kata = sum(len(b.split()) for b in bagian) or 1
             jalan, rentang = float(start), float(end) - float(start)
             for b in bagian:
+                fs_b = _muat_lebar(b, fs_tampil, W, font_teks)
                 porsi = rentang * (len(b.split()) / total_kata)
                 # Fade masuk 0,25 detik; dijepit ke 1 supaya tetap penuh setelahnya.
                 alpha = f"min(1,(t-{jalan:.3f})/0.25)"
                 filters.append(_drawtext(
-                    escape_drawtext(wrap_text(b, fs_tampil, W, max_lines=SUBTITLE_MAX_LINES)),
-                    fs_tampil, y, gaya, f"between(t,{jalan:.3f},{jalan + porsi:.3f})", alpha=alpha,
+                    escape_drawtext(wrap_text(b, fs_b, W, max_lines=SUBTITLE_MAX_LINES)),
+                    fs_b, y_teks, gaya, f"between(t,{jalan:.3f},{jalan + porsi:.3f})",
+                    alpha=alpha, font_path=font_teks,
                 ))
                 jalan += porsi
     return filters

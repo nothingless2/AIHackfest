@@ -365,3 +365,19 @@ cache tiruan -- sukses, JSON hasil benar (video_path, judul, deskripsi, biaya).
 BELUM DIUJI: giliran nyata lewat Telegram sungguhan lewat Hermes (perlu pesan
 nyata dari user); apakah `notify_on_complete` benar-benar mengembalikan stdout
 proses ke agent seperti yang diasumsikan skill-nya.
+
+## 24 Sept — posisi/font teks + pertanyaan proaktif (jalur Hermes)
+
+- `TEXT_POSITION` (atas/tengah/bawah) dan `TEXT_FONT` (standar/tegas/modern/elegan/santai/bersih);
+  flag `--text-position/--text-font` di `hermes_render.py`. Hanya untuk teks TULISAN di layar;
+  subtitle ucapan tidak ikut. Daftar font kecil yang diuji + 3 font OFL baru di `assets/fonts/`.
+- Bug yang ditangkap tes: judul tengah dibesarkan 1,4x terpotong di kedua tepi pada font lebar,
+  karena lebar dihitung dengan satu rasio karakter. Kini `_muat_lebar()` mengukur dengan berkas font
+  yang dipakai; tes regresi untuk semua font x teks pendek/panjang.
+- `inspect_media.py`: pertanyaan `gaya_teks` (posisi+font, bahan tanpa ucapan) dan tawaran proaktif
+  `gaya` (CapCut / filter warna) yang HANYA menumpang bila sudah ada pertanyaan lain -- permintaan
+  yang sudah lengkap tidak dipaksa ditanyai. MAKS_PERTANYAAN 5 -> 6.
+- TEMUAN: budget koboiLLM habis untuk pipeline juga (`.env` AIHackfest, 429 Budget exceeded). Uji
+  lewat override env dengan `nex-agi/nex-n2.5-pro:free` (OpenRouter; gambar+JSON) sukses end-to-end.
+  `.env` AIHackfest BELUM diubah -- keputusan user.
+- Belum dikerjakan: analisis mood musik, B-roll (butuh key Pexels).

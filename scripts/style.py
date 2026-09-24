@@ -78,3 +78,38 @@ def auto_zoom_enabled(nilai=None):
     """
     raw = nilai if nilai is not None else os.getenv("AUTO_ZOOM", "")
     return str(raw).strip().lower() in ("1", "true", "on", "ya", "yes")
+
+
+# Posisi & font TEKS ON-SCREEN (teks tulisan/statis). Subtitle dari ucapan (karaoke)
+# TIDAK ikut: ia tetap di sepertiga bawah dengan gayanya sendiri (subtitleStyle).
+# Font dipilih dari daftar KECIL yang sudah diuji, dengan nama Indonesia -- bukan nama
+# font bebas dari model, yang bisa jatuh diam-diam ke font lain (fc-match selalu
+# mengembalikan sesuatu).
+TEXT_POSITIONS = ("atas", "tengah", "bawah")
+TEXT_FONTS = {
+    "standar": {},                                   # DejaVu Sans Bold (bawaan renderer)
+    "tegas": {"file": "Montserrat-ExtraBold.ttf"},
+    "modern": {"file": "BebasNeue-Regular.ttf"},
+    "elegan": {"file": "PlayfairDisplay-Variable.ttf"},
+    "santai": {"file": "Pacifico-Regular.ttf"},
+    "bersih": {"family": "Inter"},
+}
+
+
+def resolve_text_position(nilai=None):
+    n = (nilai if nilai is not None else os.getenv("TEXT_POSITION", "")).strip().lower()
+    if not n:
+        return "bawah"
+    if n not in TEXT_POSITIONS:
+        raise StyleError(f"Posisi teks {n!r} tidak dikenal. Pilihan: {', '.join(TEXT_POSITIONS)}.")
+    return n
+
+
+def resolve_text_font(nilai=None):
+    """(nama, spesifikasi). Kosong -> ("standar", {})."""
+    n = (nilai if nilai is not None else os.getenv("TEXT_FONT", "")).strip().lower()
+    if not n:
+        return "standar", TEXT_FONTS["standar"]
+    if n not in TEXT_FONTS:
+        raise StyleError(f"Font teks {n!r} tidak dikenal. Pilihan: {', '.join(TEXT_FONTS)}.")
+    return n, TEXT_FONTS[n]

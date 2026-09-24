@@ -45,7 +45,7 @@ INSPECT_TTL_HOURS = float(os.getenv("INSPECT_TTL_HOURS", "24"))
 # Gerbang di jalur `run`. "0" mematikannya (mis. untuk skrip/tes).
 REQUIRE_INSPECT = (os.getenv("CONTENT_FACTORY_REQUIRE_INSPECT") or "1").strip().lower() not in (
     "0", "false", "no", "off")
-MAKS_PERTANYAAN = 5
+MAKS_PERTANYAAN = 6
 VAD_TIMEOUT = 40
 
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
@@ -234,6 +234,11 @@ _AUDIO = re.compile(r"(suara\s*ai|voice\s*-?\s*over|voiceover|narasi|dubbing|sua
                     r"matikan\s*suara|hilangkan\s*suara)", re.I)
 _FIT = re.compile(r"\b(blur|buram|crop|potong tengah|letterbox|hitam|penuh layar|isi penuh)\b", re.I)
 _STATIS = re.compile(r"\b(statis|satu teks|teks tetap|tidak berubah|sepanjang video)\b", re.I)
+_POSISI_TEKS = re.compile(r"(teks|tulisan|judul)[^.\n]{0,40}\b(tengah|atas|bawah)\b|"
+                         r"\b(tengah|atas|bawah)\b[^.\n]{0,30}(teks|tulisan|judul)", re.I)
+_FONT_TEKS = re.compile(r"\b(font|huruf|tipografi)\b", re.I)
+_GAYA = re.compile(r"\b(capcut|filter|warna|vivid|sinematik|cinematic|hitam\s*putih|grayscale|"
+                   r"hangat|sejuk)\b", re.I)
 _MUSIK = re.compile(r"\b(musik|lagu|backsound|bgm|music|soundtrack)\b", re.I)
 _POTONG = re.compile(r"\b(buang|potong|pilih|semua|utuh|apa adanya|jangan dibuang|singkat|"
                      r"padat)\b", re.I)
@@ -254,6 +259,9 @@ def dari_konteks(konteks):
         "audio": bool(_AUDIO.search(k)),
         "musik": bool(_MUSIK.search(k)),
         "potong": bool(_POTONG.search(k)),
+        "posisi_teks": bool(_POSISI_TEKS.search(k)),
+        "font_teks": bool(_FONT_TEKS.search(k)),
+        "gaya": bool(_GAYA.search(k)),
     }
 
 
@@ -315,6 +323,27 @@ def susun_pertanyaan(ringk, tahu):
             "param": {"B": {"staticText": True}},
             "default": "teks berganti mengikuti tiap klip",
             "alasan": "bahan tanpa ucapan: satu-satunya teks di layar adalah yang ditulis untuk video ini",
+        })
+
+    if tanpa_ucapan and not (tahu.get("posisi_teks") and tahu.get("font_teks")):
+        q.append({
+            "kode": "gaya_teks",
+            "tanya": "Posisi dan font teks di layar?",
+            "opsi": _opsi("Bawah, font standar",
+                          "Tengah, font tegas (tebal)",
+                          "Tengah, font elegan (serif)",
+                          "Tengah, font santai (tulisan tangan)",
+                          "Atas, font modern (ramping, huruf kapital)", rekomendasi=0),
+            "catatan": "Posisi: atas, tengah, bawah. Font: standar, tegas, modern, elegan, santai, "
+                       "bersih. Mau kombinasi lain? Tulis saja, mis. \"tengah, font santai\".",
+            "param": {"A": {"textPosition": "bawah", "textFont": "standar"},
+                      "B": {"textPosition": "tengah", "textFont": "tegas"},
+                      "C": {"textPosition": "tengah", "textFont": "elegan"},
+                      "D": {"textPosition": "tengah", "textFont": "santai"},
+                      "E": {"textPosition": "atas", "textFont": "modern"}},
+            "default": "teks di bawah, font standar",
+            "alasan": "posisi dan font teks belum disebut; bahan tanpa ucapan hanya punya teks "
+                      "tulisan di layar",
         })
 
     if not (tahu["platform"] or tahu["rasio"]) and tahu["durasi"] is None:
@@ -412,6 +441,37 @@ def susun_pertanyaan(ringk, tahu):
             "alasan": f"{ringk['n_berucap']} video berucapan; pemilihan otomatis bisa membuang "
                       "bagian yang penting bagimu",
         })
+    if q and not tahu.get("gaya"):
+        # Tawaran proaktif: fitur gaya yang memang ada tapi tidak akan ditemukan user
+        # kalau tidak ditawarkan. HANYA menumpang pada pertanyaan lain yang memang perlu
+        # (`q` tidak kosong): permintaan yang sudah lengkap tidak boleh dipaksa melewati
+        # pertanyaan hanya demi tawaran. Paling akhir supaya tidak menggeser yang penting.
+        if ringk["n_berucap"] > 0:
+            q.append({
+                "kode": "gaya",
+                "tanya": "Mau gaya tampilan tertentu?",
+                "opsi": _opsi("Standar (subtitle karaoke, warna asli)",
+                              "Gaya CapCut (subtitle huruf besar tebal, kata aktif menyala hijau)",
+                              "Warna lebih hidup (filter vivid)",
+                              "Gaya CapCut + warna lebih hidup", rekomendasi=0),
+                "catatan": "",
+                "param": {"B": {"subtitleStyle": "capcut"}, "C": {"colorFilter": "vivid"},
+                          "D": {"subtitleStyle": "capcut", "colorFilter": "vivid"}},
+                "default": "standar, subtitle karaoke dan warna asli",
+                "alasan": "ada beberapa gaya subtitle dan filter warna; belum disebut pilihanmu",
+            })
+        else:
+            q.append({
+                "kode": "gaya",
+                "tanya": "Mau filter warna?",
+                "opsi": _opsi("Tanpa filter, warna asli", "Warna lebih hidup (vivid)",
+                              "Warna hangat", "Hitam putih", rekomendasi=0),
+                "catatan": "",
+                "param": {"B": {"colorFilter": "vivid"}, "C": {"colorFilter": "warm"},
+                          "D": {"colorFilter": "bw"}},
+                "default": "tanpa filter, warna asli",
+                "alasan": "filter warna tersedia tapi belum disebut pilihanmu",
+            })
     return q[:MAKS_PERTANYAAN]
 
 

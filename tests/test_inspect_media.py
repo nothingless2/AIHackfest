@@ -73,7 +73,8 @@ def test_permintaan_lengkap_atas_talking_head_tidak_ditanyai_apa_apa():
 
 def test_talking_head_dengan_permintaan_singkat_ditanya_tujuan_dan_platform():
     q = im.susun_pertanyaan(_ringk(n_berucap=3, n_tanpa_ucapan=0, n_suasana=0), _tahu("edit ya"))
-    assert _kode(q) == ["tujuan", "platform_durasi"]
+    # "gaya" = tawaran proaktif yang menumpang pada pertanyaan yang memang perlu
+    assert _kode(q) == ["tujuan", "platform_durasi", "gaya"]
 
 
 def test_platform_yang_sudah_disebut_tidak_ditanyakan_lagi():
@@ -645,3 +646,62 @@ def test_menyebut_musik_saja_tidak_menjawab_nasib_suara_asli():
 def test_pemetaan_musik_masuk_teks_agent():
     q = im.susun_pertanyaan(_ringk(n_musik=1), _tahu("edit tiktok"))
     assert 'audioMode="mute"' in "\n".join(im.susun_pemetaan(q))
+
+
+# ---------------------------------------------------------------- gaya teks & tawaran proaktif
+
+def test_bahan_tanpa_ucapan_ditanya_posisi_dan_font_teks():
+    q = im.susun_pertanyaan(_ringk(), _tahu("edit ya"))
+    g = next(x for x in q if x["kode"] == "gaya_teks")
+    assert g["param"]["B"] == {"textPosition": "tengah", "textFont": "tegas"}
+    assert "font" in g["catatan"] and "tengah" in g["catatan"]
+
+
+def test_posisi_dan_font_yang_sudah_disebut_tidak_ditanyakan_lagi():
+    konteks = "buat tulisan di tengah konten dengan font yang estetik"
+    q = im.susun_pertanyaan(_ringk(), _tahu(konteks))
+    assert "gaya_teks" not in _kode(q)
+
+
+def test_hanya_posisi_disebut_font_tetap_ditanyakan():
+    q = im.susun_pertanyaan(_ringk(), _tahu("teks di tengah ya"))
+    assert "gaya_teks" in _kode(q)
+
+
+def test_tawaran_gaya_menumpang_bukan_memaksa():
+    """Permintaan lengkap tetap tidak ditanyai apa pun; tawaran gaya hanya muncul
+    bila sudah ada pertanyaan lain yang memang perlu."""
+    ringk = _ringk(n_berucap=3, n_tanpa_ucapan=0, n_suasana=0)
+    lengkap = ("Edit jadi konten TikTok 30 detik tentang sistem listing properti untuk developer, "
+               "tanpa suara AI, tambahkan musik lo-fi, ajakan di akhir: hubungi Steven")
+    assert im.susun_pertanyaan(ringk, _tahu(lengkap)) == []
+    q = im.susun_pertanyaan(ringk, _tahu("edit ya"))
+    g = next(x for x in q if x["kode"] == "gaya")
+    assert g["param"]["B"] == {"subtitleStyle": "capcut"}
+
+
+def test_gaya_yang_sudah_disebut_tidak_ditawarkan():
+    q = im.susun_pertanyaan(_ringk(n_berucap=3, n_tanpa_ucapan=0, n_suasana=0),
+                            _tahu("edit ya, pakai subtitle gaya capcut"))
+    assert "gaya" not in _kode(q)
+
+
+def test_bahan_tanpa_ucapan_ditawari_filter_warna_bukan_subtitle():
+    q = im.susun_pertanyaan(_ringk(), _tahu("edit ya"))
+    g = next(x for x in q if x["kode"] == "gaya")
+    assert all("colorFilter" in v and "subtitleStyle" not in v for v in g["param"].values())
+
+
+def test_nilai_parameter_di_semua_pertanyaan_valid_menurut_style():
+    """Konsistensi lintas-modul: opsi yang KITA tawarkan tidak boleh berisi nilai yang
+    ditolak validator (StyleError) -- user memilih huruf, lalu render gagal."""
+    import style as st
+    for ringk in (_ringk(), _ringk(n_berucap=3, n_tanpa_ucapan=0, n_suasana=0)):
+        for q in im.susun_pertanyaan(ringk, _tahu("edit ya")):
+            for param in (q.get("param") or {}).values():
+                if "textPosition" in param:
+                    st.resolve_text_position(param["textPosition"])
+                if "textFont" in param:
+                    st.resolve_text_font(param["textFont"])
+                if "colorFilter" in param:
+                    st.resolve_color_filter(param["colorFilter"])

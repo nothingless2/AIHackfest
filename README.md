@@ -46,6 +46,8 @@ jatuh ke default):
 | `MUSIC_SOLO_TARGET_LUFS` | `-16` | kenyaringan musik bila ia satu-satunya suara (mode `mute`). Musik latar di bawah ucapan memakai `MUSIC_BELOW_SPEECH_DB` |
 | `COLOR_FILTER` | (kosong) | filter warna: `natural`, `vivid`, `warm`, `cool`, `bw`. Berlaku untuk semua mode audio dan jenis bahan (chain `eq`/`hue`/`colorbalance` ffmpeg) |
 | `SPEED_FACTOR` | `1.0` | kelipatan kecepatan klip (0.5-2.0). **Hanya aktif di `AUDIO_MODE=ai`** — mode audio asli/mute tidak menyentuhnya sama sekali, supaya subtitle (dipatok ke transkrip asli) tidak lepas dari gerak bibir orang di video |
+| `TEXT_POSITION` | `bawah` | posisi teks TULISAN di layar: `atas`, `tengah`, `bawah`. Subtitle dari ucapan tidak ikut |
+| `TEXT_FONT` | `standar` | font teks tulisan: `standar` (DejaVu), `tegas` (Montserrat ExtraBold), `modern` (Bebas Neue), `elegan` (Playfair Display), `santai` (Pacifico), `bersih` (Inter). Font bundel di `assets/fonts/` (OFL, lihat FONTS.md) |
 | `AUTO_ZOOM` | `0` | efek Ken Burns (zoom perlahan) pada bahan GAMBAR saja; video tidak disentuh |
 | `TTS_PERSONA` | `ramah` | persona suara AI, dipakai kalau `AUDIO_MODE=ai` |
 | `SUBTITLE_STYLE` | `karaoke` | `karaoke` (frasa diam, kata aktif menyala kuning, kotak gelap), `karaoke-tebal` (tanpa kotak), `karaoke-kapital` (huruf besar); gaya lama `putih-kotak`, `kuning-kotak`, `putih-tebal`, `kuning` (teks menumpuk kata demi kata, seluruhnya di-center ulang tiap kata baru) |

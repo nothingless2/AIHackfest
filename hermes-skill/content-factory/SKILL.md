@@ -91,8 +91,27 @@ python3 /root/AIHackfest/scripts/hermes_render.py \
   [--audio-mode ai|original|mute] [--subtitle-style ...] [--aspect-ratio ...] \
   [--fit-mode ...] [--edit-mode auto|full] [--music on|off] [--music-mood ...] \
   [--music-file "<path musik user, kalau ada>"] [--duration-seconds N] \
-  [--color-filter natural|vivid|warm|cool|bw] [--speed-factor 0.5-2.0] [--auto-zoom]
+  [--color-filter natural|vivid|warm|cool|bw] [--speed-factor 0.5-2.0] [--auto-zoom] \
+  [--text-position atas|tengah|bawah] [--text-font standar|tegas|modern|elegan|santai|bersih]
 ```
+
+Pemetaan nama parameter di `pemetaan` (langkah 1) ke flag `hermes_render.py`:
+
+| parameter | flag |
+|---|---|
+| `textPosition` (atas/tengah/bawah) | `--text-position` |
+| `textFont` (standar/tegas/modern/elegan/santai/bersih) | `--text-font` |
+| `subtitleStyle` | `--subtitle-style` |
+| `colorFilter` | `--color-filter` |
+| `audioMode` | `--audio-mode` |
+| `aspectRatio` / `fitMode` / `editMode` | `--aspect-ratio` / `--fit-mode` / `--edit-mode` |
+| `staticText` (true) | `--static-text` |
+| `music` / `musicMood` | `--music` / `--music-mood` |
+| `durationSeconds` | `--duration-seconds` |
+
+Posisi/font hanya berlaku untuk teks tulisan di layar; subtitle dari ucapan tetap di
+bawah dengan gayanya sendiri. Kalau user menulis jawaban bebas (mis. "tengah, font
+santai"), pakai HANYA nilai dari daftar di atas — jangan menyebut nama font lain.
 
 Kalau langkah 1 tidak menghasilkan pertanyaan (tidak ada gerbang untuk dilewati),
 boleh tambahkan `--no-require-inspect` dan hilangkan `--inspect-id`/`--user-answered`.
