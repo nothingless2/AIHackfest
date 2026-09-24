@@ -379,7 +379,7 @@ def _render_statis(tmp_path, monkeypatch, data_tambahan, scenes, words_per_klip=
                     "-c:a", "aac", "-shortest", str(v)], check=True, capture_output=True)
     diambil = {}
     asli = ar.apply_text_overlay
-    ar.apply_text_overlay = lambda i, sc, o: (diambil.setdefault("scenes", sc), asli(i, sc, o))[1]
+    ar.apply_text_overlay = lambda i, sc, o, **k: (diambil.setdefault("scenes", sc), asli(i, sc, o, **k))[1]
     try:
         data = {"judul": "Judul Uji", "audio_mode": "original", "full_voice_over": "x",
                 "media_assets": [str(v)], "scenes": scenes, **data_tambahan}

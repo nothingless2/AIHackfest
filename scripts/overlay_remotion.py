@@ -57,6 +57,24 @@ def masuk_frames(teks, animasi):
     return JEDA_KATA * max(0, jumlah_kata(teks) - 1) + SETTLE
 
 
+def _kerja_item(dari, dur, e, k):
+    """Pekerjaan render satu item: masuk (klip) + tahan (SATU gambar diam) + keluar (klip).
+    Item terlalu pendek untuk dipecah dirender utuh."""
+    if dur <= e + k + 2:
+        return [{"jenis": "klip", "dari": dari, "sampai": dari + dur - 1, "mulai": dari}]
+    return [
+        {"jenis": "klip", "dari": dari, "sampai": dari + e - 1, "mulai": dari},
+        {"jenis": "diam", "frame": dari + e, "tahan": dur - e - k, "mulai": dari + e},
+        {"jenis": "klip", "dari": dari + dur - k, "sampai": dari + dur - 1, "mulai": dari + dur - k},
+    ]
+
+
+def _frame(it, fps):
+    dari = int(round(float(it["mulai"]) * fps))
+    dur = max(2, int(round((float(it["selesai"]) - float(it["mulai"])) * fps)))
+    return dari, dur
+
+
 def rencana(items, fps, animasi):
     """Item -> (items_untuk_props, pekerjaan_render).
 
@@ -65,19 +83,43 @@ def rencana(items, fps, animasi):
     (frame global tempat ia ditempel)."""
     props_items, kerja = [], []
     for it in items:
-        dari = int(round(float(it["mulai"]) * fps))
-        dur = max(2, int(round((float(it["selesai"]) - float(it["mulai"])) * fps)))
+        dari, dur = _frame(it, fps)
         e = masuk_frames(it["text"], animasi)
         props_items.append({"text": it["text"], "mulai": dari / fps, "selesai": (dari + dur) / fps,
                             "masukFrames": e, "keluarFrames": KELUAR})
-        if dur <= e + KELUAR + 2:
+        kerja += _kerja_item(dari, dur, e, KELUAR)
+    return props_items, kerja
+
+
+# Motion graphic (MotionOverlay.jsx): frame masuk/keluar HARUS sama dengan di komponen, yang
+# menerimanya lewat props (masukFrames/keluarFrames) -- satu sumber angka, di sini.
+MOTION_MASUK = 12        # 0,5 dtk pada 24 fps; 16 terukur +0,3 dtk Chromium per frame
+MOTION_KELUAR = 8
+MOTION_AKSEN = "#8B5CF6"
+
+
+def rencana_motion(items, fps):
+    """Seperti rencana(), untuk elemen motion graphic -- tapi animasi KELUAR tidak dirender
+    Chromium: ia hanya pudar (opasitas), jadi dibuat ffmpeg dari gambar diam ("pudar").
+    Terukur: 150 -> 102 frame Chromium, 18 -> 12 masukan komposit untuk 6 elemen.
+
+    Item WAJIB tidak tumpang tindih (dijamin motion_plan.jadwal): tiap potongan dirender dari
+    seluruh komposisi pada frame-nya, jadi item yang bertumpuk akan tertempel dua kali."""
+    props_items, kerja = [], []
+    batas = -1
+    for it in sorted(items, key=lambda x: float(x["mulai"])):
+        dari, dur = _frame(it, fps)
+        if dari <= batas:
+            raise OverlayError(f"elemen motion bertumpuk pada frame {dari}")
+        batas = dari + dur - 1
+        props_items.append({**it, "mulai": dari / fps, "selesai": (dari + dur) / fps,
+                            "masukFrames": MOTION_MASUK, "keluarFrames": MOTION_KELUAR})
+        if dur <= MOTION_MASUK + 2:
             kerja.append({"jenis": "klip", "dari": dari, "sampai": dari + dur - 1, "mulai": dari})
             continue
-        kerja.append({"jenis": "klip", "dari": dari, "sampai": dari + e - 1, "mulai": dari})
-        tahan = dur - e - KELUAR
-        kerja.append({"jenis": "diam", "frame": dari + e, "tahan": tahan, "mulai": dari + e})
-        kerja.append({"jenis": "klip", "dari": dari + dur - KELUAR, "sampai": dari + dur - 1,
-                      "mulai": dari + dur - KELUAR})
+        kerja.append({"jenis": "klip", "dari": dari, "sampai": dari + MOTION_MASUK - 1, "mulai": dari})
+        kerja.append({"jenis": "diam", "frame": dari + MOTION_MASUK, "tahan": dur - MOTION_MASUK,
+                      "pudar": min(MOTION_KELUAR, dur - MOTION_MASUK), "mulai": dari + MOTION_MASUK})
     return props_items, kerja
 
 
@@ -85,7 +127,7 @@ def total_frame_chromium(kerja):
     return sum((k["sampai"] - k["dari"] + 1) if k["jenis"] == "klip" else 1 for k in kerja)
 
 
-def _jalankan_node(props, kerja, folder):
+def _jalankan_node(props, kerja, folder, komposisi="TextOverlay"):
     if not shutil.which("node"):
         raise OverlayError("node tidak terpasang")
     if not os.path.isdir(os.path.join(REMOTION_DIR, "node_modules")):
@@ -96,7 +138,8 @@ def _jalankan_node(props, kerja, folder):
         pekerjaan.append({**k, "out": out})
     masukan = os.path.join(folder, "_overlay_props.json")
     with open(masukan, "w", encoding="utf-8") as f:
-        json.dump({"props": props, "pekerjaan": pekerjaan}, f, ensure_ascii=False)
+        json.dump({"props": props, "pekerjaan": pekerjaan, "komposisi": komposisi}, f,
+                  ensure_ascii=False)
     proc = subprocess.Popen(["node", os.path.join(REMOTION_DIR, "render.mjs"), masukan],
                             cwd=REMOTION_DIR, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             text=True, start_new_session=True)
@@ -114,8 +157,12 @@ def _jalankan_node(props, kerja, folder):
     return pekerjaan
 
 
-def komposit(video_masuk, pekerjaan, fps, video_keluar):
-    """Tempel tiap potongan pada waktunya. Potongan diam di-loop ffmpeg sepanjang `tahan`."""
+def komposit(video_masuk, pekerjaan, fps, video_keluar, filter_akhir=None):
+    """Tempel tiap potongan pada waktunya. Potongan diam di-loop ffmpeg sepanjang `tahan`.
+
+    filter_akhir: rantai filter video (mis. drawtext teks narasi) yang dijalankan SETELAH
+    semua tempelan, dalam encode yang SAMA -- satu encode 1080x1920 terukur 18 dtk untuk video
+    14 dtk, jadi motion graphic tidak boleh menambah encode sendiri."""
     args = ["ffmpeg", "-y", "-v", "error", "-i", video_masuk]
     for p in pekerjaan:
         if p["jenis"] == "diam":
@@ -125,9 +172,17 @@ def komposit(video_masuk, pekerjaan, fps, video_keluar):
     rantai, label = [], "0:v"
     for i, p in enumerate(pekerjaan, 1):
         t = p["mulai"] / fps
-        rantai.append(f"[{i}:v]format=yuva420p,setpts=PTS-STARTPTS+{t:.4f}/TB[o{i}]")
+        pudar = ""
+        if p.get("pudar"):
+            # Animasi keluar = pudar alpha di ujung gambar diam (lihat rencana_motion).
+            pudar = (f",fade=t=out:st={(p['tahan'] - p['pudar']) / fps:.4f}"
+                     f":d={p['pudar'] / fps:.4f}:alpha=1")
+        rantai.append(f"[{i}:v]format=yuva420p{pudar},setpts=PTS-STARTPTS+{t:.4f}/TB[o{i}]")
         rantai.append(f"[{label}][o{i}]overlay=eof_action=pass:format=yuv420[v{i}]")
         label = f"v{i}"
+    if filter_akhir:
+        rantai.append(f"[{label}]" + ",".join(filter_akhir) + "[vakhir]")
+        label = "vakhir"
     skrip = video_keluar + ".filter.txt"
     with open(skrip, "w", encoding="utf-8") as f:
         f.write(";".join(rantai))
@@ -143,15 +198,43 @@ def komposit(video_masuk, pekerjaan, fps, video_keluar):
 
 
 def tempel_teks_animasi(video_masuk, items, video_keluar, *, lebar, tinggi, fps, durasi,
-                        posisi, font, animasi):
-    """Render + tempel. Melempar OverlayError; berkas kerja selalu dibersihkan."""
+                        posisi, font, animasi, tambahan=None):
+    """Render + tempel. Melempar OverlayError; berkas kerja selalu dibersihkan.
+    tambahan: pekerjaan motion graphic yang sudah dirender, ditempel DI BAWAH teks dalam
+    komposit yang sama."""
     props_items, kerja = rencana(items, fps, animasi)
     props = {"lebar": lebar, "tinggi": tinggi, "fps": fps, "durasi": durasi, "posisi": posisi,
              "font": font, "animasi": animasi, "items": props_items}
     folder = tempfile.mkdtemp(prefix="_overlay_", dir=os.path.dirname(os.path.abspath(video_keluar)))
     try:
         pekerjaan = _jalankan_node(props, kerja, folder)
-        komposit(video_masuk, pekerjaan, fps, video_keluar)
+        komposit(video_masuk, list(tambahan or []) + pekerjaan, fps, video_keluar)
     finally:
         shutil.rmtree(folder, ignore_errors=True)
     return {"animasi": animasi, "frame_chromium": total_frame_chromium(kerja), "item": len(items)}
+
+
+def render_motion(items, folder, *, lebar, tinggi, fps, durasi, aksen=MOTION_AKSEN):
+    """Render potongan motion graphic ke `folder` (belum ditempel). Return (pekerjaan, info).
+    Penempelan dilakukan komposit() -- bersama encode teks supaya tidak ada encode tambahan."""
+    props_items, kerja = rencana_motion(items, fps)
+    if not kerja:
+        raise OverlayError("tidak ada elemen motion")
+    props = {"lebar": lebar, "tinggi": tinggi, "fps": fps, "durasi": durasi, "aksen": aksen,
+             "items": props_items}
+    pekerjaan = _jalankan_node(props, kerja, folder, komposisi="MotionOverlay")
+    return pekerjaan, {"frame_chromium": total_frame_chromium(kerja), "item": len(items)}
+
+
+def tempel_motion(video_masuk, items, video_keluar, *, lebar, tinggi, fps, durasi,
+                  aksen=MOTION_AKSEN, filter_akhir=None):
+    """Render + tempel motion graphic dalam satu langkah. Melempar OverlayError; berkas kerja
+    selalu dibersihkan. Audio video masukan (bila ada) disalin apa adanya."""
+    folder = tempfile.mkdtemp(prefix="_overlay_", dir=os.path.dirname(os.path.abspath(video_keluar)))
+    try:
+        pekerjaan, info = render_motion(items, folder, lebar=lebar, tinggi=tinggi, fps=fps,
+                                        durasi=durasi, aksen=aksen)
+        komposit(video_masuk, pekerjaan, fps, video_keluar, filter_akhir=filter_akhir)
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+    return info

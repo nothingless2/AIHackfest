@@ -130,6 +130,33 @@ tool `content_factory_run`.
 > `~/.openclaw/extensions/`, jadi path relatif terhadap lokasi plugin akan salah arah.
 > Plugin akan menolak jalan dengan pesan jelas kalau `projectRoot` kosong/salah.
 
+### C. Lewat Hermes (jalur aktif): draf naskah dulu, baru render
+
+Instruksi agent: `hermes-skill/content-factory/SKILL.md` (salin ke `~/.hermes/skills/`).
+
+1. `scripts/inspect_media.py inspect` memeriksa bahan dan menyusun pertanyaan berpilihan
+   (termasuk penonton & ajakan).
+2. `scripts/hermes_render.py --draft ...` (±1-2 menit, tanpa render). BrainIdea melihat
+   **lembar kontak 4 momen per klip** (bagian goyang dilewati) plus fakta per klip (durasi,
+   ucapan, bagian yang dibuang), lalu menulis **2 varian naskah** dengan gaya berbeda. Tiap
+   varian diperiksa kode (frasa deskriptif, kalimat panjang, huruf non-Latin) dan boleh ditulis
+   ulang sekali. Pesan draf menampilkan pemahaman per klip, naskah A/B, dan rencana grafik yang
+   lolos pemeriksaan.
+3. User membalas `A`/`B`, atau mengirim naskah ubahannya.
+4. `scripts/hermes_render.py --draft-id X --varian A [--naskah "..."]` merender **tanpa
+   membuat brief ulang**. Naskah ubahan user dibacakan apa adanya. Draf ditolak bila milik chat
+   lain, lebih dari 24 jam, bahannya berbeda, atau sudah dirender (klaim sekali pakai
+   `O_EXCL`; dilepas lagi bila render gagal).
+
+**Motion graphic** (bawaan `sedang`, matikan dengan `--motion mati`) dirender Remotion
+(`remotion/src/MotionOverlay.jsx`):
+- Jenisnya: kartu pembuka, sorot kata kunci, ikon, langkah "1/3", label, kartu ajakan.
+- LLM hanya mengusulkan. `scripts/motion_plan.py` menegakkan katalog, menolak angka yang tidak
+  ada di permintaan user, dan memasang tiap elemen tepat saat kata jangkarnya **diucapkan**
+  narasi TTS.
+- Penempelan menumpang encode teks, jadi tidak ada encode tambahan.
+- Gagal berarti video tanpa grafik, dan alasannya dilaporkan.
+
 ## ⚠️ Jangan jalankan kedua jalur bersamaan
 
 Gateway OpenClaw dan `agent4_approval.py` memakai **bot token yang sama**, sedangkan

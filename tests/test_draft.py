@@ -328,3 +328,31 @@ def test_pesan_draf_menyebut_masalah_yang_tersisa():
                     {**VARIAN[1], "naskah_status": {"masalah": ["x"], "ditulis_ulang": True, "sisa": []}}]}
     pesan = dn.susun_pesan(d)
     assert pesan.count("Catatan pemeriksa") == 1 and "确认" in pesan
+
+
+def test_pesan_draf_menampilkan_rencana_grafik():
+    plan = {"hook": "Ayo donor!", "cta": "Daftar sekarang",
+            "elemen": [{"jenis": "sorot", "teks": "Minggu depan", "saat_kata": "antrean"},
+                       {"jenis": "sorot", "teks": "90% hadir", "saat_kata": "ikut"},       # angka karangan
+                       {"jenis": "sorot", "teks": "Gratis", "saat_kata": "gratis"}]}     # tidak di naskah
+    d = {"draft_id": "0123456789ab", "bahan": ["a"], "brief": {"audio_mode": "ai", "konteks_user": "donor"},
+         "varian": [{**VARIAN[0], "motion_plan": plan}, VARIAN[1]]}
+    pesan = dn.susun_pesan(d)
+    assert 'Grafik: kartu pembuka "Ayo donor!" · sorot "Minggu depan" · kartu ajakan "Daftar sekarang"' in pesan
+    assert "90%" not in pesan and "Gratis" not in pesan, "yang tidak lolos pemeriksaan tidak dijanjikan"
+    assert pesan.count("Grafik:") == 1, "varian tanpa rencana tidak diberi baris grafik"
+
+
+def test_motion_tidak_dikenal_ditolak_sebelum_lock(env, capsys):
+    args = ["--draft", "--chat-id", CHAT, "--no-require-inspect", "--music", "off", "--motion", "heboh"]
+    for b in env["bahan"]:
+        args += ["--media-path", b]
+    kode, out = jalan(capsys, *args)
+    assert kode == 1 and out["kode"] == "gaya_invalid" and env["calls"] == []
+
+
+def test_motion_mati_tersimpan_di_draf_dan_dipakai_saat_render(env, capsys, monkeypatch):
+    d = buat_draf(env, capsys, "--motion", "mati")
+    monkeypatch.setenv("MOTION_GRAPHIC", "sedang")      # proses render = proses baru
+    jalan(capsys, "--chat-id", CHAT, "--draft-id", d["draft_id"], "--varian", "A")
+    assert os.environ.get("MOTION_GRAPHIC") == "mati"

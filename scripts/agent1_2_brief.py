@@ -245,6 +245,22 @@ def contoh_gaya(maks=2, maks_karakter=900):
             + "\n---\n".join(potongan))
 
 
+MOTION_NOTE = """
+MOTION GRAPHIC (elemen penjelas di layar, gaya kartu gelap berpendar) di "motion_plan":
+- "hook" = kartu pembuka di 2 detik pertama: inti hook naskah, maks 6 kata.
+- "elemen" = 2-4 elemen yang MEMPERJELAS isi naskah; tiap elemen muncul saat kata "saat_kata"
+  DIUCAPKAN narasi. Jenis: "sorot" = kata kunci penting; "ikon" = benda/aksi + emoji;
+  "langkah" = tahap/cara berurutan (mis. "Daftar online"); "label" = nama acara/tempat/brand
+  PERSIS dari permintaan user. Sebar kata jangkar dari tengah sampai akhir naskah, jangan
+  di kalimat pertama (kartu pembuka sedang tampil).
+- "cta" = kartu ajakan di 2 detik terakhir, sejalan dengan ajakan penutup naskah.
+- DILARANG angka, harga, tanggal, atau statistik yang tidak ada di permintaan user."""
+
+MOTION_NOTE_TANPA_NARASI = """
+MOTION GRAPHIC di "motion_plan": hanya "hook" (kartu pembuka, maks 6 kata) dan "cta" (kartu
+ajakan penutup, maks 6 kata); "elemen" dibiarkan []. DILARANG angka, harga, tanggal, atau
+statistik yang tidak ada di permintaan user."""
+
 DRAF_NOTE = """
 MODE DRAF -- user akan MEMILIH salah satu dari DUA varian sebelum video dibuat:
 - Buat tepat 2 varian untuk bahan dan permintaan yang SAMA, dengan GAYA yang jelas berbeda
@@ -312,7 +328,8 @@ def build_teks_statis_note():
 
 def build_prompt(asset_names, performance, *, jumlah_gambar, pool=None, konteks="",
                  transkrip=None, target_duration=None, durasi_bahan=None, teks_statis=False,
-                 audio_bisu=False, klip_fakta="", gaya_contoh="", kontak=False, draf=False):
+                 audio_bisu=False, klip_fakta="", gaya_contoh="", kontak=False, draf=False,
+                 mode_audio="ai"):
     # Durasi & aturan lafal disuntikkan, bukan hardcode: tanpa permintaan user,
     # duration_text() mengembalikan kalimat lama kata per kata sehingga brief
     # untuk run yang tidak meminta durasi tidak berubah sama sekali.
@@ -352,6 +369,12 @@ def build_prompt(asset_names, performance, *, jumlah_gambar, pool=None, konteks=
         "tempat, merek, atau aktivitas spesifik apa pun."
     )
 
+    elemen_skema = (
+        '\n        {{"jenis": "sorot|ikon|langkah|label", "teks": "maks 4 kata", '
+        '"sub": "keterangan kecil maks 5 kata, boleh kosong", "emoji": "satu emoji (wajib untuk ikon)", '
+        '"saat_kata": "SATU kata yang PERSIS ada di full_voice_over"}}\n      '
+        if mode_audio == "ai" else "")
+    motion_note = MOTION_NOTE if mode_audio == "ai" else MOTION_NOTE_TANPA_NARASI
     isi_brief = f"""{{{{
     "judul": "string",
     "deskripsi": "deskripsi konten MAKSIMAL 30 kata untuk kolom caption platform. Harus singkat dan padat.",
@@ -360,7 +383,16 @@ def build_prompt(asset_names, performance, *, jumlah_gambar, pool=None, konteks=
 {baris_spoken}    "scenes": [
       {{{{"start": 0, "end": 4, "text": "teks on-screen singkat"}}}}
     ],
-    "hashtags": ["#contoh"]
+    "hashtags": ["#contoh"],
+    "motion_plan": {{{{
+      "hook": "teks kartu pembuka, maks 6 kata",
+      "hook_sorot": "SATU kata dari hook yang diberi warna",
+      "hook_emoji": "satu emoji atau kosong",
+      "elemen": [{elemen_skema}],
+      "cta": "teks kartu ajakan, maks 6 kata",
+      "cta_sub": "keterangan kecil, boleh kosong",
+      "cta_emoji": "satu emoji atau kosong"
+    }}}}
   }}}}"""
     if draf:
         bagian_brief = (
@@ -422,6 +454,7 @@ Aturan keras:
   bukan ringkasan internal. Jangan mengulang judul apa adanya.
 - "scenes" adalah teks on-screen singkat (maksimal 6 kata per scene), bukan salinan
   penuh voice-over. Waktu mulai/selesai tiap scene harus berurutan dan tidak tumpang tindih.
+{motion_note}
 {draf_note}
 
 Balas HANYA JSON murni dengan struktur persis berikut:
@@ -503,7 +536,7 @@ def run():
         konteks=konteks, transkrip=transkrip, target_duration=target_durasi,
         durasi_bahan=durasi_bahan, teks_statis=teks_statis, audio_bisu=(mode_audio == "mute"),
         klip_fakta=klip_fakta, gaya_contoh=contoh_gaya() if mode_audio == "ai" else "",
-        kontak=True, draf=mode_draf(),
+        kontak=True, draf=mode_draf(), mode_audio=mode_audio,
     )
     result = chat_json(
         [{"role": "user",

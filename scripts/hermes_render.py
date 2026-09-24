@@ -30,6 +30,7 @@ import sys
 
 from broll import BrollError, resolve_broll
 from canvas import CanvasError, resolve_canvas
+from motion_plan import tingkat as motion_tingkat
 from overlay_remotion import animasi_diminta
 from common import (
     BRIEF_PATH,
@@ -145,6 +146,8 @@ def _parser():
     p.add_argument("--text-animation", default=None, help="pop|loncat|geser|fade|none (teks tulisan di layar).")
     p.add_argument("--text-position", default=None, help="atas|tengah|bawah (teks on-screen, bukan subtitle ucapan).")
     p.add_argument("--text-font", default=None, help="standar|tegas|modern|elegan|santai|bersih.")
+    p.add_argument("--motion", default=None,
+                   help="Motion graphic penjelas: sedang (bawaan) | mati.")
     p.add_argument("--draft", action="store_true",
                    help="Hanya buat DRAF naskah (2 varian) untuk dipilih user; belum merender.")
     p.add_argument("--draft-id", default=None, help="Render dari draf yang dipilih user.")
@@ -209,6 +212,7 @@ def _apply_env(args):
         "VISUAL_CUT": {"on": "1", "off": "0", None: None}[args.visual_cut],
         "TEXT_POSITION": args.text_position,
         "TEXT_FONT": args.text_font,
+        "MOTION_GRAPHIC": args.motion,
         "CONTENT_FACTORY_USER_CONTEXT": args.user_context or None,
     }
     for key, value in mapping.items():
@@ -371,6 +375,7 @@ def main(argv=None):
         resolve_text_position()
         resolve_text_font()
         animasi_diminta()
+        motion_tingkat()
     except StyleError as e:
         return gagal("gaya_invalid", str(e))
 
@@ -432,6 +437,7 @@ def main(argv=None):
         "catatan_teks": ("Emoji " + " ".join(status["emoji_dihapus"]) + " dihapus dari teks di layar "
                          "(font tidak mendukung emoji); tetap ada di caption.") if status.get("emoji_dihapus") else None,
         "teks_animasi": status.get("teks_animasi"),
+        "motion": status.get("motion"),
         "potongan_visual": status.get("potong_visual"),
         "suara": status.get("suara"),
         "broll": status.get("broll"),

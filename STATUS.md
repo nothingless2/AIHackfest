@@ -457,3 +457,40 @@ melewati batas 450 dtk). Key Pexels di `.env` (ter-ignore git).
   statis tetap. `petakan_kata` memetakan ejaan tulisan ke waktu naskah lafal.
 - Uji nyata: kata berganti mengikuti narasi Liam; naskah menyapa ("Kalian, ini bukan sekadar
   datang dan duduk...") dan lolos pemeriksa tanpa tulis ulang.
+
+## 24 Sept (malam) — BrainIdea menonton klip, draf 2 naskah sebelum render, motion graphic
+
+Permintaan user: BrainIdea membaca video, memahami konteksnya, dan memberi saran naskah
+SEBELUM render; lalu motion graphic penjelas seperti video referensi (dibuat Claude dengan Remotion).
+Keputusan user: 2 alternatif (pilih lalu boleh edit), tingkat grafik "sedang", model tetap gratis.
+
+- **Penyebab naskah hambar yang terukur**: vision hanya mengirim SATU frame (detik ke-1) per video.
+  Sekarang lembar kontak 2x2 = 4 momen berurutan per klip, bagian goyang dilewati (analisis goyang
+  di-cache, dipakai bersama renderer). Prompt juga memuat fakta per klip (durasi, cuplikan ucapan
+  atau "tanpa ucapan", bagian yang dibuang) dan contoh ritme kreator dari transkrip video referensi
+  (`config/gaya_naskah/`). Model mengembalikan `pemahaman_bahan` (1 kalimat per klip) yang
+  ditampilkan ke user supaya salah tafsir terkoreksi sebelum render.
+- **Draf**: `hermes_render.py --draft` (ContentInsight + brief, tanpa render) menghasilkan 2 varian
+  gaya berbeda, masing-masing diperiksa `naskah.periksa`. Render: `--draft-id X --varian A
+  [--naskah ...]`, dan brief TIDAK dibuat ulang. Mode audio/durasi/teks statis/konteks dikunci di
+  draf; flag gaya boleh diganti. Draf ditolak bila milik chat lain, lebih dari 24 jam, bahannya
+  berbeda, atau sudah dirender (O_EXCL; dilepas bila render gagal).
+- **Temuan nyata**: model gratis menyisipkan huruf Mandarin ("lalu确认 datang bareng") di naskah
+  Indonesia. Kini ditandai pemeriksa (huruf non-Latin) dan memicu tulis ulang; kalau tersisa,
+  disebut di pesan draf.
+- **Motion graphic** (`remotion/src/MotionOverlay.jsx`, `scripts/motion_plan.py`): kartu pembuka,
+  sorot, ikon, langkah "n/N", label, kartu ajakan; gaya kartu kaca gelap bercahaya ungu seperti
+  referensi.
+  - LLM mengusulkan jenis/teks/kata jangkar. Kode menegakkan katalog dan batas panjang, menolak angka
+    yang tidak ada di permintaan user atau ucapan asli, memasang waktu dari kata yang DIUCAPKAN
+    narasi TTS, dan menjaga tingkat sedang (maksimal 4 elemen, tanpa tumpang tindih, berjarak
+    minimal 1,2 dtk). Zona teks narasi (58-74% tinggi) tidak ditutup.
+  - Mode suara asli: hanya kartu pembuka & ajakan.
+- **Waktu (terukur, 1080x1920, VPS 4 core tanpa GPU)**:
+  - Chromium sekitar 0,3-0,5 dtk/frame, dan sekitar 11 dtk overhead per `renderMedia`.
+  - Dua optimasi: animasi keluar dibuat sebagai pudar alpha oleh ffmpeg pada gambar diam, dan frame
+    masuk dikurangi 16 -> 12. Hasilnya, 6 elemen turun dari 150 ke 78 frame Chromium.
+  - Encode ulang 14 dtk video = 18,5 dtk, jadi penempelan grafik menumpang encode teks (satu
+    komposit: overlay grafik lalu drawtext narasi), tanpa encode tambahan. Dites: tidak ada
+    `run_ffmpeg` tambahan.
+  - Timeout tahap render naik 480 -> 630 (satu render Remotion lagi dengan batas keras 120 dtk).

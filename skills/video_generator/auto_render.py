@@ -19,6 +19,7 @@ import shutil
 import os
 import subprocess
 import sys
+import tempfile
 import traceback
 from datetime import datetime, timezone
 
@@ -35,6 +36,7 @@ from duration import (  # noqa: E402
     DURATION_TOLERANCE, off_target, word_target,
 )
 import broll as _broll  # noqa: E402
+import motion_plan as _mp  # noqa: E402
 import overlay_remotion as _ovr  # noqa: E402
 import visual_quality as _vq  # noqa: E402
 from broll import BrollError  # noqa: E402
@@ -1405,12 +1407,67 @@ def build_drawtext_chain(scenes, video_height, video_width=None):
 
 
 TEKS_ANIMASI = {}
+MOTION = {}
 
 
-def apply_text_overlay(input_path, scenes, output_path):
+def _sumber_fakta(data):
+    """Teks yang boleh menjadi asal angka di motion graphic: permintaan user + ucapan asli."""
+    ucapan = [str(seg.get("text") or "") for segs in (data.get("transcript_segments") or {}).values()
+              for seg in (segs or []) if isinstance(seg, dict)]
+    return " ".join([data.get("konteks_user") or ""] + ucapan)
+
+
+def siapkan_motion(data, durasi, kata_waktu, ada_teks_statis, folder):
+    """Rencana motion graphic dari brief -> divalidasi & dijadwalkan kode (motion_plan) ->
+    potongan dirender Remotion ke `folder`. Return pekerjaan (ditempel bersama encode teks)
+    atau None; alasannya SELALU dicatat di MOTION (dilaporkan ke user)."""
+    MOTION.clear()
+    try:
+        tingkat = _mp.tingkat()
+    except Exception as e:
+        MOTION.update(dipakai=False, alasan=str(e))
+        return None
+    if not tingkat:
+        MOTION.update(dipakai=False, alasan="dimatikan")
+        return None
+    plan = data.get("motion_plan")
+    if not plan:
+        MOTION.update(dipakai=False, alasan="brief tanpa rencana grafik")
+        return None
+    bersih, c1 = _mp.bersihkan(plan, naskah=data.get("full_voice_over"),
+                               sumber_fakta=_sumber_fakta(data), pakai_jangkar=bool(kata_waktu))
+    items, c2 = _mp.jadwal(bersih, kata_waktu, durasi, ada_teks_statis=ada_teks_statis)
+    catatan = c1 + c2
+    if not items:
+        MOTION.update(dipakai=False, alasan="tidak ada elemen yang lolos pemeriksaan", catatan=catatan)
+        return None
+    try:
+        pekerjaan, info = _ovr.render_motion(items, folder, lebar=TARGET_W, tinggi=TARGET_H,
+                                             fps=FPS, durasi=durasi)
+    except _ovr.OverlayError as e:
+        MOTION.update(dipakai=False, gagal=str(e), catatan=catatan)
+        print(f"[warn] motion graphic gagal dirender ({e}) — video tanpa grafik.")
+        return None
+    MOTION.update(dipakai=True, gagal=None, tingkat=tingkat, catatan=catatan,
+                  elemen=[{"jenis": i["jenis"], "teks": i["teks"], "mulai": i["mulai"]} for i in items],
+                  **info)
+    print(f"🎬 Motion graphic: {len(items)} elemen ({', '.join(i['jenis'] for i in items)}), "
+          f"{info['frame_chromium']} frame Chromium" + (f"; {len(catatan)} dibuang" if catatan else ""))
+    return pekerjaan
+
+
+def _motion_gagal(e):
+    MOTION.update(dipakai=False, gagal=f"penempelan: {e}")
+    print(f"[warn] motion graphic gagal ditempel ({e}) — video tanpa grafik.")
+
+
+def apply_text_overlay(input_path, scenes, output_path, motion=None):
     """Teks TULISAN (scene tanpa `words`) -> lapisan animasi Remotion bila TEXT_ANIMATION aktif;
     subtitle UCAPAN (scene ber-`words`) tetap drawtext karaoke. Remotion gagal -> SEMUA teks
-    jatuh ke drawtext statis dan kegagalannya dicatat di TEKS_ANIMASI (dilaporkan ke user)."""
+    jatuh ke drawtext statis dan kegagalannya dicatat di TEKS_ANIMASI (dilaporkan ke user).
+
+    motion: potongan motion graphic yang sudah dirender (siapkan_motion); ditempel dalam encode
+    yang SAMA dengan teks. Gagal menempel -> video tanpa grafik, dicatat di MOTION."""
     EMOJI_DIHAPUS.clear()
     TEKS_ANIMASI.clear()
     animasi = _ovr.animasi_diminta()
@@ -1428,7 +1485,8 @@ def apply_text_overlay(input_path, scenes, output_path):
                           "selesai": float(s["end"])} for s in tulisan],
                 output_path, lebar=TARGET_W, tinggi=TARGET_H, fps=FPS,
                 durasi=max(float(s["end"]) for s in tulisan),
-                posisi=resolve_text_position(), font=resolve_text_font()[0], animasi=animasi)
+                posisi=resolve_text_position(), font=resolve_text_font()[0], animasi=animasi,
+                tambahan=motion)
             TEKS_ANIMASI.update(dipakai=True, gagal=None, **info)
             print(f"✨ Teks animasi ({animasi}): {info['item']} teks, {info['frame_chromium']} frame dirender Chromium.")
             return
@@ -1438,11 +1496,18 @@ def apply_text_overlay(input_path, scenes, output_path):
         finally:
             if tengah != input_path and os.path.exists(tengah):
                 os.remove(tengah)
-    _drawtext_saja(input_path, scenes, output_path)
+    _drawtext_saja(input_path, scenes, output_path, motion=motion)
 
 
-def _drawtext_saja(input_path, scenes, output_path, pindahkan=True):
+def _drawtext_saja(input_path, scenes, output_path, pindahkan=True, motion=None):
     filters = build_drawtext_chain(scenes, TARGET_H, TARGET_W)
+    if motion:
+        # Motion graphic + teks drawtext dalam SATU encode (teks di atas grafik).
+        try:
+            _ovr.komposit(input_path, motion, FPS, output_path, filter_akhir=filters or None)
+            return
+        except _ovr.OverlayError as e:
+            _motion_gagal(e)
     if not filters:
         # pindahkan=False: masukan masih dibutuhkan (cadangan teks statis bila Remotion gagal).
         (os.replace if pindahkan else shutil.copyfile)(input_path, output_path)
@@ -1986,17 +2051,26 @@ def render_from_agent_script(
     else:
         os.replace(segment_paths[0], silent_combined)
 
-    if pakai_audio_asli:
-        # Audio sudah menyatu di segmen; tidak ada yang perlu di-mux.
-        print("🎨 Menambahkan subtitle dari ucapan asli...")
-        apply_text_overlay(silent_combined, scenes, output_video)
-        with_text = None
-    else:
-        with_text = os.path.join(output_dir, "_combined_text.mp4")
-        print("🎨 Menambahkan teks per-scene...")
-        apply_text_overlay(silent_combined, scenes, with_text)
-        print("🚀 Menggabungkan voice-over...")
-        mux_audio(with_text, temp_audio, output_video)
+    # Motion graphic: dijangkarkan ke waktu kata NARASI (hanya mode voice-over AI; mode suara
+    # asli hanya kartu pembuka & ajakan). Dirender dulu, ditempel bersama encode teks.
+    kata_waktu = petakan_kata(full_vo, TTS_KATA) if (not pakai_audio_asli and TTS_KATA) else []
+    folder_motion = tempfile.mkdtemp(prefix="_overlay_motion_", dir=output_dir)
+    try:
+        motion = siapkan_motion(data, float(total_duration), kata_waktu,
+                                any(s.get("statis") for s in scenes), folder_motion)
+        if pakai_audio_asli:
+            # Audio sudah menyatu di segmen; tidak ada yang perlu di-mux.
+            print("🎨 Menambahkan subtitle dari ucapan asli...")
+            apply_text_overlay(silent_combined, scenes, output_video, motion=motion)
+            with_text = None
+        else:
+            with_text = os.path.join(output_dir, "_combined_text.mp4")
+            print("🎨 Menambahkan teks per-scene...")
+            apply_text_overlay(silent_combined, scenes, with_text, motion=motion)
+            print("🚀 Menggabungkan voice-over...")
+            mux_audio(with_text, temp_audio, output_video)
+    finally:
+        shutil.rmtree(folder_motion, ignore_errors=True)
 
     # Musik ditambahkan SETELAH audio final terbentuk (mode apa pun), dan
     # SEBELUM cover diambil supaya artefaknya berasal dari berkas yang sama
@@ -2067,6 +2141,7 @@ def render_from_agent_script(
         broll=broll_info,
         emoji_dihapus=sorted(set(EMOJI_DIHAPUS)) or None,
         teks_animasi=dict(TEKS_ANIMASI) or None,
+        motion=dict(MOTION) or None,
         potong_visual={k: v for k, v in POTONG_VISUAL.items()} or None,
         suara=dict(TTS_CATATAN) if audio_mode == "ai" else None,
         audio_mode=audio_mode,

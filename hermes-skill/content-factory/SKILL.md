@@ -125,6 +125,7 @@ Pemetaan nama parameter di `pemetaan` (langkah 1) ke flag `hermes_render.py`:
 | gaya suara (ramah/energik/profesional/tenang/bercerita) | `--voice-persona` |
 | potong bagian goyang (bawaan nyala; user minta jangan) | `--visual-cut off` |
 | `broll` (true) / `brollQuery` | `--broll` / `--broll-query` (WAJIB bersama `--audio-mode ai`) |
+| motion graphic (bawaan sedang; user minta tanpa grafik) | `--motion mati` |
 
 Teks tulisan di layar kini BERANIMASI (Remotion) dan emoji tampil berwarna. Kalau hasil berisi
 `teks_animasi.dipakai: false`, animasi gagal dan video memakai teks statis: sampaikan
@@ -135,6 +136,15 @@ Mode voice-over AI kini menampilkan teks NARASI satu kata per tampilan yang meng
 (gaya `kata`, seperti video kreator). Minta user menulis TUJUAN kontennya (mis. "ajak anak muda
 donor darah") dan teruskan ke `--user-context`; naskah ditulis sebagai kreator yang menyapa
 penonton, bukan deskripsi gambar.
+
+Motion graphic (kartu pembuka, sorot kata kunci, ikon, langkah "1/3", label, kartu ajakan) kini
+BAWAAN, gaya kartu gelap berpendar seperti video referensi. BrainIdea mengusulkannya di draf
+(baris "Grafik:"); kode memeriksa dan memasangnya tepat saat kata jangkarnya diucapkan narasi.
+Elemen penjelas (sorot/ikon/langkah/label) hanya di mode voice-over AI; mode suara asli hanya
+kartu pembuka & ajakan. Di hasil render: kalau `motion.dipakai` false, sampaikan
+`motion.gagal` atau `motion.alasan` singkat (video tetap jadi, tanpa grafik); kalau
+`motion.catatan` berisi elemen yang dibuang (mis. angka yang tidak ada di permintaan user),
+sebutkan satu kalimat.
 
 Kalau `suara.cadangan` true, narasi memakai suara cadangan gratis (edge-tts) karena ElevenLabs
 gagal/kuota habis -- sebutkan `suara.alasan` singkat ke user.

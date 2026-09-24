@@ -1,6 +1,7 @@
 // Eksekutor render lapisan teks TRANSPARAN. RENCANA (frame mana yang dirender) dibuat Python
 // (scripts/overlay_remotion.py); di sini hanya dijalankan, dengan SATU browser untuk semua.
-//   node render.mjs <masukan.json>   masukan = {props, pekerjaan:[{jenis, dari, sampai|frame, out}]}
+//   node render.mjs <masukan.json>   masukan = {props, komposisi?, pekerjaan:[{jenis, dari, sampai|frame, out}]}
+// komposisi: 'TextOverlay' (bawaan, teks tulisan) atau 'MotionOverlay' (motion graphic).
 // Klip -> ProRes 4444 (.mov, alpha). VP8/WebM+alpha DICOBA lebih dulu dan ditolak: dekoder
 // libvpx di ffmpeg 4.4 mesin ini gagal ("Bitstream not supported"); dekoder bawaan membuang alpha.
 import {bundle} from '@remotion/bundler';
@@ -15,7 +16,7 @@ if (!masukan) {
   console.error('pakai: node render.mjs <masukan.json>');
   process.exit(2);
 }
-const {props, pekerjaan} = JSON.parse(fs.readFileSync(masukan, 'utf8'));
+const {props, pekerjaan, komposisi = 'TextOverlay'} = JSON.parse(fs.readFileSync(masukan, 'utf8'));
 const chromium = process.env.REMOTION_CHROMIUM
   || '/root/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell';
 
@@ -35,7 +36,7 @@ const t0 = Date.now();
 const browser = await openBrowser('chrome', {browserExecutable: chromium,
   chromiumOptions: {gl: 'swangle'}});
 try {
-  const composition = await selectComposition({serveUrl: cacheDir, id: 'TextOverlay',
+  const composition = await selectComposition({serveUrl: cacheDir, id: komposisi,
     inputProps: props, puppeteerInstance: browser});
   const umum = {composition, serveUrl: cacheDir, inputProps: props, puppeteerInstance: browser,
     logLevel: 'error'};

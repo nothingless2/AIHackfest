@@ -58,7 +58,10 @@ CORE_STAGES = [
     #                                                        401  -> margin ~20%
     # (480 naik dari 360, 24 Sep: Remotion. Terukur 13 dtk untuk satu judul 9 dtk;
     #  120 adalah batas TEXT_ANIMATION_TIMEOUT, bukan perkiraan.)
-    ("agent3_render.py", "ContentMakers", True, 480),
+    # (630 naik dari 480, 24 Sep: motion graphic -- satu render Remotion lagi dengan batas
+    #  KERAS yang sama (120) = 521 terburuk -> margin ~20%. Terukur: 6 elemen 1080x1920 =
+    #  ~35 dtk Chromium; penempelannya menumpang encode teks, tanpa encode tambahan.)
+    ("agent3_render.py", "ContentMakers", True, 630),
 ]
 
 # Draf naskah (scripts/draf_naskah.py): ContentInsight + brief saja, TANPA render. Brief draf

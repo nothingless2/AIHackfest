@@ -169,7 +169,7 @@ def susun_pesan(d):
         if ai and sisa:
             # Pemeriksa gaya tidak berhasil membereskannya: user yang memutuskan.
             baris.append("Catatan pemeriksa: " + "; ".join(sisa[:2]))
-        grafik = ringkas_grafik(v.get("motion_plan"))
+        grafik = ringkas_grafik(v.get("motion_plan"), naskah=v.get("full_voice_over"), brief=brief)
         if grafik:
             baris.append(f"Grafik: {grafik}")
         baris.append("")
@@ -179,16 +179,22 @@ def susun_pesan(d):
     return "\n".join(baris).strip()
 
 
-def ringkas_grafik(plan):
-    """Ringkasan rencana motion graphic untuk pesan draf (diisi tahap motion; kosong = tidak ada)."""
+def ringkas_grafik(plan, *, naskah="", brief=None):
+    """Ringkasan rencana motion graphic untuk pesan draf -- HANYA yang lolos pemeriksaan kode
+    (katalog, angka, kata jangkar; motion_plan.bersihkan), supaya user tidak dijanjikan elemen
+    yang nanti dibuang. Waktunya ditentukan saat render dari suara narasi."""
     if not isinstance(plan, dict):
         return ""
+    import motion_plan as mp
+    brief = brief or {}
+    ucapan = [str(seg.get("text") or "") for segs in (brief.get("transcript_segments") or {}).values()
+              for seg in (segs or []) if isinstance(seg, dict)]
+    bersih, _ = mp.bersihkan(plan, naskah=naskah, sumber_fakta=" ".join([brief.get("konteks_user") or ""] + ucapan),
+                             pakai_jangkar=brief.get("audio_mode") == "ai")
     bagian = []
-    if plan.get("hook"):
-        bagian.append(f"kartu pembuka \"{plan['hook']}\"")
-    for el in plan.get("elemen") or []:
-        if isinstance(el, dict) and el.get("teks"):
-            bagian.append(f"{el.get('jenis', 'elemen')} \"{el['teks']}\"")
-    if plan.get("cta"):
-        bagian.append(f"kartu ajakan \"{plan['cta']}\"")
+    if bersih["hook"]:
+        bagian.append(f"kartu pembuka \"{bersih['hook']['teks']}\"")
+    bagian += [f"{el['jenis']} \"{el['teks']}\"" for el in bersih["elemen"]]
+    if bersih["cta"]:
+        bagian.append(f"kartu ajakan \"{bersih['cta']['teks']}\"")
     return " · ".join(bagian)
