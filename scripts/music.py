@@ -115,6 +115,11 @@ def pick_track(mood=None, folder=None, run_id=""):
         kata = str(mood).strip().lower()
         cocok = [t for t in tracks if kata in os.path.basename(t).lower()]
         if not cocok:
+            # Nama berkas tidak menyebut mood itu: cocokkan ke label hasil ANALISIS isi lagu
+            # (tenang/santai/upbeat/energik). Hanya untuk kosakata label itu -- "lofi" atau
+            # kata bebas lain tetap mensyaratkan nama berkas, dan tetap DITOLAK kalau tidak ada.
+            cocok = _cocok_lewat_analisis(tracks, kata)
+        if not cocok:
             raise MusicError(
                 f"Tidak ada musik bernuansa {mood!r} di {folder or MUSIC_DIR}. "
                 f"Tersedia: {', '.join(os.path.basename(t) for t in tracks[:8])}")
@@ -122,6 +127,23 @@ def pick_track(mood=None, folder=None, run_id=""):
     # Deterministik per run: run yang sama selalu memilih track yang sama
     # (bisa diulang kalau hasilnya perlu diperiksa), run berbeda bervariasi.
     return tracks[sum(ord(c) for c in str(run_id)) % len(tracks)]
+
+
+def _cocok_lewat_analisis(tracks, kata):
+    try:
+        from music_mood import MOODS, MoodError, analisis_cached
+    except ImportError:            # numpy tidak ada: perilaku lama (hanya nama berkas)
+        return []
+    if kata not in MOODS:
+        return []
+    hasil = []
+    for tr in tracks:
+        try:
+            if analisis_cached(tr)["mood"] == kata:
+                hasil.append(tr)
+        except (MoodError, OSError, subprocess.SubprocessError):
+            continue               # track yang tak bisa dianalisis tidak dianggap cocok
+    return hasil
 
 
 def has_audio_stream(path):

@@ -381,3 +381,23 @@ proses ke agent seperti yang diasumsikan skill-nya.
   lewat override env dengan `nex-agi/nex-n2.5-pro:free` (OpenRouter; gambar+JSON) sukses end-to-end.
   `.env` AIHackfest BELUM diubah -- keputusan user.
 - Belum dikerjakan: analisis mood musik, B-roll (butuh key Pexels).
+
+## 24 Sept (siang) — mood musik + B-roll Pexels
+
+**Mood musik** (`scripts/music_mood.py`, numpy saja): tempo (autokorelasi onset dengan skor harmonik),
+energi, kecerahan -> label tenang/santai/upbeat/energik. Diukur, bukan ditebak: kesalahan yang
+ditangkap pengukuran -- (1) tempo 120/140/160 terbaca setengahnya (salah oktaf) -> skor harmonik +
+pemecah seri; (2) nada steady dibaca "yakin 112 BPM" -> kriteria keyakinan `FLUX_REL_MIN`/`SKOR_MIN`
+dikalibrasi pada kasus terukur (metrik "kontras persentil" yang dicoba lebih dulu DIBUANG: nada steady
+4,19 mengalahkan beat berderau 1,4). Lagu lofi asli milik user terbaca 82 BPM/tenang (masuk akal).
+JUJUR: ambang LABEL adalah heuristik -- tidak ada kumpulan lagu berlabel untuk mengkalibrasinya.
+Dipakai untuk: laporan `inspect` musik user, pencocokan mood ke pustaka bila nama berkas tidak cocok
+(hanya kosakata label), `render_status.music_mood`, hasil `hermes_render`.
+
+**B-roll** (`scripts/broll.py`, Pexels): hanya `--audio-mode ai`; tanpa PEXELS_API_KEY ditolak sebelum
+render; kegagalan di tengah jalan tidak menggagalkan video tapi dilaporkan; klip diunduh ke folder kerja
+run dan dibuang; host unduhan wajib pexels.com; jumlah dibatasi supaya bahan user tidak terbuang
+(`bagi_durasi`); kredit kreator dikembalikan untuk caption. Ditawarkan di `inspect` HANYA bila key ada.
+Uji nyata: Pexels asli (13 kandidat), render end-to-end -- slot 1 bahan user, slot 2-3 klip barista.
+`LLM_MODEL` di .env -> `nex-agi/nex-n2.5-mini:free` (varian pro timeout 59 dtk/balasan kosong; brief
+melewati batas 450 dtk). Key Pexels di `.env` (ter-ignore git).

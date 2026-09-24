@@ -47,6 +47,10 @@ for _key in _TELEGRAM_ENV_KEYS:
 # menyentuh layanan nyata, melanggar aturan #6 CLAUDE.md.
 os.environ["TRANSCRIBE_PROVIDER"] = "api"
 
+# Key Pexels asli (dimuat dari .env) tidak boleh mengubah hasil test: ia menentukan apakah
+# tawaran B-roll muncul di inspect_media. Test yang butuh key mengisinya sendiri.
+os.environ["PEXELS_API_KEY"] = ""
+
 
 @pytest.fixture(autouse=True)
 def _tanpa_jaringan(monkeypatch):
@@ -102,3 +106,25 @@ def _telegram_selalu_mati(monkeypatch):
     assert common.resolve_chat_id() is None, "chat tujuan harus kosong selama test"
     assert not common.telegram_configured(), "Telegram harus mati selama test"
     yield
+
+
+@pytest.fixture(autouse=True)
+def _cache_mood_musik_di_tmp(monkeypatch, tmp_path):
+    """Cache analisis mood musik ditulis ke workspace/state/ -- di test harus ke tmp
+    (aturan #6): pick_track dengan label mood bisa memicu analisis + penulisan cache."""
+    import music_mood
+
+    monkeypatch.setattr(music_mood, "_cache_path", lambda: str(tmp_path / "music_mood_cache.json"))
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _lingkungan_dipulihkan():
+    """Titik masuk seperti hermes_render._apply_env menulis ke os.environ GLOBAL (wajar di
+    proses sekali-jalan). Di test itu bocor ke test berikutnya -- terukur: BROLL=1 tersisa
+    dan menggagalkan test_duration. Snapshot + pulihkan tiap test."""
+    import os as _os
+    sebelum = dict(_os.environ)
+    yield
+    _os.environ.clear()
+    _os.environ.update(sebelum)

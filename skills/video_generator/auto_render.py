@@ -32,6 +32,8 @@ from canvas import (  # noqa: E402
 from duration import (  # noqa: E402
     DURATION_TOLERANCE, off_target, word_target,
 )
+import broll as _broll  # noqa: E402
+from broll import BrollError  # noqa: E402
 from edit_plan import MERGE_GAP  # noqa: E402
 from retry import with_retry_async  # noqa: E402
 from music import (  # noqa: E402
@@ -1446,6 +1448,13 @@ def render_from_agent_script(
     if not existing_assets:
         raise ValueError("Tidak ada bahan mentah (media_assets) untuk dirender.")
 
+    broll_info, broll_tmp = None, []
+    if pakai_audio_asli and _broll.aktif():
+        # Diberi tahu, bukan diabaikan diam-diam: user memintanya.
+        broll_info = {"dipakai": [], "gagal": "B-roll hanya untuk mode voice-over AI; mode audio asli/mute "
+                      "menampilkan orang yang bicara sehingga klip sisipan menggeser subtitle."}
+        print(f"[warn] {broll_info['gagal']}")
+
     if pakai_audio_asli:
         # Durasi ditentukan bahan, bukan TTS: tiap klip main sepanjang aslinya
         # supaya ucapan user tidak terpotong di tengah kalimat.
@@ -1497,6 +1506,35 @@ def render_from_agent_script(
                 total_duration = AudioFileClip(temp_audio).duration
                 durasi_dikoreksi = True
                 print(f"⏱️ Durasi setelah koreksi: {total_duration:.1f} detik")
+
+        # B-roll stok (Pexels) disisipkan SETELAH durasi narasi diketahui: jumlahnya dibatasi
+        # supaya bagi_durasi tidak membuang bahan user (lihat broll.jatah).
+        try:
+            cfg_broll = _broll.resolve_broll()
+        except BrollError as e:
+            cfg_broll, broll_info = None, {"dipakai": [], "gagal": str(e)}
+            print(f"[warn] {e}")
+        if cfg_broll:
+            kuota = _broll.jatah(cfg_broll["jumlah"], len(existing_assets), total_duration,
+                                 MIN_CLIP_DURATION)
+            if kuota <= 0:
+                broll_info = {"dipakai": [], "gagal": "durasi terlalu pendek untuk menyisipkan "
+                              "B-roll tanpa membuang bahanmu"}
+                print(f"[warn] B-roll dilewati: {broll_info['gagal']}")
+            else:
+                klip, gagal = _broll.ambil(
+                    cfg_broll["queries"] or [data.get("judul") or "b-roll"], kuota,
+                    _broll.orientasi_untuk(TARGET_W, TARGET_H), output_dir,
+                    os.getenv("CONTENT_FACTORY_RUN_ID") or "")
+                broll_tmp = [k["path"] for k in klip]
+                broll_info = {"dipakai": [{"id": k["id"], "kredit": k["kredit"],
+                                           "halaman": k["halaman"]} for k in klip],
+                              "gagal": gagal}
+                if klip:
+                    existing_assets = _broll.susun_urutan(existing_assets, broll_tmp)
+                    print(f"🎞️ Menyisipkan {len(klip)} klip B-roll stok (Pexels).")
+                else:
+                    print(f"[warn] B-roll tidak tersedia: {gagal}")
 
         existing_assets, durasi_klip = bagi_durasi(existing_assets, total_duration)
         per = durasi_klip[0] if durasi_klip else 0.0
@@ -1567,6 +1605,7 @@ def render_from_agent_script(
     # SEBELUM cover diambil supaya artefaknya berasal dari berkas yang sama
     # dengan yang dikirim ke user.
     musik_dipakai = None
+    musik_mood = None
     if music_wanted():
         try:
             track = pick_track(requested_mood(),
@@ -1581,6 +1620,12 @@ def render_from_agent_script(
                 tambah_musik(output_video, track, sementara, total_duration)
                 os.replace(sementara, output_video)
                 musik_dipakai = os.path.basename(track)
+                try:
+                    from music_mood import analisis_cached, ringkas as ringkas_mood
+                    musik_mood = analisis_cached(track)
+                    print(f"🎼 Suasana musik: {ringkas_mood(musik_mood)}")
+                except Exception as e:      # label hanya informasi; tidak boleh menggagalkan
+                    print(f"[warn] analisis suasana musik dilewati ({type(e).__name__}: {e})")
                 print(f"🎵 Musik: {musik_dipakai} (satu-satunya suara, level ke ±16 LUFS)" if solo
                       else f"🎵 Musik latar: {musik_dipakai} "
                            f"(level menyesuaikan suara video + auto-ducking)")
@@ -1604,7 +1649,7 @@ def render_from_agent_script(
         if thumb_path:
             print(f"🖼️ Cover diambil dari detik {detik:.2f}: {thumb_path}")
 
-    for tmp in [*segment_paths, silent_combined, with_text, temp_audio]:
+    for tmp in [*segment_paths, silent_combined, with_text, temp_audio, *broll_tmp]:
         if tmp and os.path.exists(tmp):
             os.remove(tmp)
 
@@ -1620,6 +1665,8 @@ def render_from_agent_script(
         duration_adjusted=durasi_dikoreksi,
         edit_plan_applied=edit_dipakai,
         music=musik_dipakai,
+        music_mood=musik_mood,
+        broll=broll_info,
         audio_mode=audio_mode,
         judul=data.get("judul"),
         scene_count=len(scenes),

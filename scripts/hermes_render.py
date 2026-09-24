@@ -28,6 +28,7 @@ import os
 import shutil
 import sys
 
+from broll import BrollError, resolve_broll
 from canvas import CanvasError, resolve_canvas
 from common import (
     brief_path_for_run,
@@ -37,6 +38,7 @@ from common import (
     log_error,
     PROJECT_ROOT,
     RAW_DIR,
+    STATE_DIR,
     read_json,
 )
 from cost_estimate import ringkasan_biaya
@@ -123,6 +125,9 @@ def _parse_args(argv):
     p.add_argument("--color-filter", default=None)
     p.add_argument("--speed-factor", type=float, default=None)
     p.add_argument("--auto-zoom", action="store_true")
+    p.add_argument("--broll", action="store_true", help="Sisipkan B-roll stok Pexels (hanya --audio-mode ai; butuh PEXELS_API_KEY).")
+    p.add_argument("--broll-query", default=None, help="Kata kunci B-roll, dipisah koma.")
+    p.add_argument("--broll-count", type=int, default=None)
     p.add_argument("--text-position", default=None, help="atas|tengah|bawah (teks on-screen, bukan subtitle ucapan).")
     p.add_argument("--text-font", default=None, help="standar|tegas|modern|elegan|santai|bersih.")
     return p.parse_args(argv)
@@ -139,6 +144,7 @@ def _apply_env(args):
         "CONTENT_FACTORY_MUSIC": args.music,
         "CONTENT_FACTORY_MUSIC_MOOD": args.music_mood,
         "COLOR_FILTER": args.color_filter,
+        "BROLL_QUERY": args.broll_query,
         "TEXT_POSITION": args.text_position,
         "TEXT_FONT": args.text_font,
         "CONTENT_FACTORY_USER_CONTEXT": args.user_context or None,
@@ -154,6 +160,10 @@ def _apply_env(args):
         os.environ["SPEED_FACTOR"] = str(args.speed_factor)
     if args.auto_zoom:
         os.environ["AUTO_ZOOM"] = "1"
+    if args.broll:
+        os.environ["BROLL"] = "1"
+    if args.broll_count is not None:
+        os.environ["BROLL_COUNT"] = str(args.broll_count)
     if args.music_file:
         (validated,) = _validate_media_paths([args.music_file])
         os.environ["CONTENT_FACTORY_MUSIC_FILE"] = validated
@@ -211,6 +221,17 @@ def main(argv=None):
             pick_track(requested_mood(), run_id=run_id)
     except MusicError as e:
         return gagal("musik_invalid", str(e))
+    if args.broll:
+        # Ditolak SEBELUM lock dan LLM: tanpa key, atau di luar mode voice-over AI, B-roll
+        # tidak mungkin berhasil -- jangan render dulu lalu bilang "tanpa B-roll".
+        if args.audio_mode != "ai":
+            return gagal("broll_butuh_voiceover",
+                         "B-roll hanya untuk mode voice-over AI (--audio-mode ai): di mode audio "
+                         "asli/mute klip sisipan menggeser subtitle dari ucapan.")
+        try:
+            resolve_broll()
+        except BrollError as e:
+            return gagal("broll_tidak_siap", str(e))
     try:
         resolve_color_filter()
         resolve_speed_factor()
@@ -238,6 +259,8 @@ def main(argv=None):
         return gagal("render_gagal", f"gagal di tahap {label}.{tail}")
 
     brief = read_json(brief_path_for_run(run_id), {}) or {}
+    status = read_json(os.path.join(STATE_DIR, "render_status.json"), {}) or {}
+    mood = status.get("music_mood")
     hasil = {
         "ok": True,
         "run_id": run_id,
@@ -248,6 +271,11 @@ def main(argv=None):
         "hashtags": brief.get("hashtags"),
         "biaya": ringkasan_biaya(run_id),
         "catatan_durasi": pesan_durasi or None,
+        "broll": status.get("broll"),
+        "broll_kredit": [d["kredit"] for d in ((status.get("broll") or {}).get("dipakai") or [])],
+        "musik": status.get("music"),
+        "musik_suasana": (mood or {}).get("mood"),
+        "musik_tempo_bpm": (mood or {}).get("tempo_bpm") if (mood or {}).get("tempo_yakin") else None,
     }
     print(json.dumps(hasil, ensure_ascii=False))
     log_event("delivered", run_id, chat_id=chat_id)

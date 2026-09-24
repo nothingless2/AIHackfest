@@ -1,12 +1,22 @@
 {
   "_catatan": "Harga per 1 JUTA token, mata uang USD. PERIKSA ULANG di halaman resmi penyedia sebelum dipakai untuk keputusan biaya nyata -- harga berubah dan file ini tidak memperbarui dirinya sendiri. Model yang TIDAK ada di sini tidak akan ditebak: biayanya dilaporkan null, bukan dikarang.",
-  "updated_at": "2026-09-17",
+  "updated_at": "2026-09-24",
   "currency": "USD",
   "llm": {
     "gpt-4o": {
       "input_per_1m": 2.5,
       "output_per_1m": 10.0,
       "sumber": "https://openai.com/api/pricing/"
+    },
+    "nex-agi/nex-n2.5-pro:free": {
+      "input_per_1m": 0.0,
+      "output_per_1m": 0.0,
+      "sumber": "https://openrouter.ai/models (varian ':free' OpenRouter berharga $0 per definisi; dibatasi rate-limit, bukan biaya)"
+    },
+    "nex-agi/nex-n2.5-mini:free": {
+      "input_per_1m": 0.0,
+      "output_per_1m": 0.0,
+      "sumber": "https://openrouter.ai/models (varian ':free' OpenRouter berharga $0 per definisi; dibatasi rate-limit, bukan biaya)"
     }
   },
   "tts": {

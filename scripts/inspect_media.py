@@ -142,6 +142,12 @@ def probe_clip(path):
             info["error"] = "berkas ini tidak berisi audio yang bisa dibaca"
         else:
             info["volume_db"] = _volume_rata(path)
+            try:
+                from music_mood import analisis, ringkas
+                info["mood"] = analisis(path)
+                info["mood_ringkas"] = ringkas(info["mood"])
+            except Exception as e:      # informasi tambahan; tidak menggagalkan inspeksi
+                info["mood_error"] = f"{type(e).__name__}: {e}"
     elif info["jenis"] == "video":
         try:
             info["durasi"] = round(float(d.get("format", {}).get("duration")), 2)
@@ -239,6 +245,7 @@ _POSISI_TEKS = re.compile(r"(teks|tulisan|judul)[^.\n]{0,40}\b(tengah|atas|bawah
 _FONT_TEKS = re.compile(r"\b(font|huruf|tipografi)\b", re.I)
 _GAYA = re.compile(r"\b(capcut|filter|warna|vivid|sinematik|cinematic|hitam\s*putih|grayscale|"
                    r"hangat|sejuk)\b", re.I)
+_BROLL = re.compile(r"\b(b-?\s?roll|klip\s+stok|footage|video\s+stok)\b", re.I)
 _MUSIK = re.compile(r"\b(musik|lagu|backsound|bgm|music|soundtrack)\b", re.I)
 _POTONG = re.compile(r"\b(buang|potong|pilih|semua|utuh|apa adanya|jangan dibuang|singkat|"
                      r"padat)\b", re.I)
@@ -262,6 +269,7 @@ def dari_konteks(konteks):
         "posisi_teks": bool(_POSISI_TEKS.search(k)),
         "font_teks": bool(_FONT_TEKS.search(k)),
         "gaya": bool(_GAYA.search(k)),
+        "broll": bool(_BROLL.search(k)),
     }
 
 
@@ -441,6 +449,21 @@ def susun_pertanyaan(ringk, tahu):
             "alasan": f"{ringk['n_berucap']} video berucapan; pemilihan otomatis bisa membuang "
                       "bagian yang penting bagimu",
         })
+    if q and tanpa_ucapan and not tahu.get("broll"):
+        from broll import tersedia as broll_tersedia
+        if broll_tersedia():        # jangan menawarkan yang pasti gagal (tanpa key Pexels)
+            q.append({
+                "kode": "broll",
+                "tanya": "Mau disisipi B-roll (klip video stok gratis dari Pexels) di sela videomu?",
+                "opsi": _opsi("Tidak, hanya bahanku", "Ya, sisipkan B-roll (suara jadi voice-over AI)",
+                              rekomendasi=0),
+                "catatan": "B-roll hanya untuk mode voice-over AI, jadi menggantikan suara suasana. "
+                           "Tulis kata kunci klipnya, mis. \"makanan, restoran\" (kata kunci bahasa "
+                           "Inggris biasanya lebih banyak hasilnya).",
+                "param": {"B": {"broll": True, "audioMode": "ai"}},
+                "default": "tanpa B-roll",
+                "alasan": "bahan tanpa ucapan; klip stok bisa memperkaya tampilan",
+            })
     if q and not tahu.get("gaya"):
         # Tawaran proaktif: fitur gaya yang memang ada tapi tidak akan ditemukan user
         # kalau tidak ditawarkan. HANYA menumpang pada pertanyaan lain yang memang perlu
@@ -526,6 +549,8 @@ def _fmt_klip(i, f):
         rincian = [f"{f['durasi']:.1f} dtk" if f["durasi"] else "durasi ?"]
         if f["volume_db"] is not None:
             rincian.append(f"volume {f['volume_db']:.0f} dB")
+        if f.get("mood_ringkas"):
+            rincian.append(f["mood_ringkas"])
         return f"- Bahan {i}: MUSIK dari user ({', '.join(rincian)})" if not f["error"] else \
                f"- Bahan {i}: berkas audio TIDAK TERBACA ({f['error']})"
     bagian = [f"{f['durasi']:.1f} dtk" if f["durasi"] else "durasi ?", f["orientasi"] or "?"]

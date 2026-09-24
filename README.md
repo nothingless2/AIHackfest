@@ -48,6 +48,7 @@ jatuh ke default):
 | `SPEED_FACTOR` | `1.0` | kelipatan kecepatan klip (0.5-2.0). **Hanya aktif di `AUDIO_MODE=ai`** — mode audio asli/mute tidak menyentuhnya sama sekali, supaya subtitle (dipatok ke transkrip asli) tidak lepas dari gerak bibir orang di video |
 | `TEXT_POSITION` | `bawah` | posisi teks TULISAN di layar: `atas`, `tengah`, `bawah`. Subtitle dari ucapan tidak ikut |
 | `TEXT_FONT` | `standar` | font teks tulisan: `standar` (DejaVu), `tegas` (Montserrat ExtraBold), `modern` (Bebas Neue), `elegan` (Playfair Display), `santai` (Pacifico), `bersih` (Inter). Font bundel di `assets/fonts/` (OFL, lihat FONTS.md) |
+| `BROLL` / `BROLL_QUERY` / `BROLL_COUNT` | (mati) / (judul) / `3` | sisipkan klip video stok Pexels (1-6) di sela bahan user. **Hanya `AUDIO_MODE=ai`.** Butuh `PEXELS_API_KEY` (gratis, pexels.com/api); tanpa key diminta = DITOLAK sebelum render. Kegagalan di tengah jalan (kuota/jaringan) tidak menggagalkan video, tapi dilaporkan. Klip diunduh ke folder kerja run dan dibuang; kredit kreator dikembalikan untuk caption |
 | `AUTO_ZOOM` | `0` | efek Ken Burns (zoom perlahan) pada bahan GAMBAR saja; video tidak disentuh |
 | `TTS_PERSONA` | `ramah` | persona suara AI, dipakai kalau `AUDIO_MODE=ai` |
 | `SUBTITLE_STYLE` | `karaoke` | `karaoke` (frasa diam, kata aktif menyala kuning, kotak gelap), `karaoke-tebal` (tanpa kotak), `karaoke-kapital` (huruf besar); gaya lama `putih-kotak`, `kuning-kotak`, `putih-tebal`, `kuning` (teks menumpuk kata demi kata, seluruhnya di-center ulang tiap kata baru) |

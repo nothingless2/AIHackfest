@@ -108,6 +108,11 @@ Pemetaan nama parameter di `pemetaan` (langkah 1) ke flag `hermes_render.py`:
 | `staticText` (true) | `--static-text` |
 | `music` / `musicMood` | `--music` / `--music-mood` |
 | `durationSeconds` | `--duration-seconds` |
+| `broll` (true) / `brollQuery` | `--broll` / `--broll-query` (WAJIB bersama `--audio-mode ai`) |
+
+B-roll: kalau hasil render berisi `broll_kredit`, tambahkan barisnya ke caption (Pexels
+meminta kredit kreator). Kalau `broll.gagal` terisi, sampaikan alasannya ke user apa adanya:
+video tetap jadi, hanya tanpa klip stok.
 
 Posisi/font hanya berlaku untuk teks tulisan di layar; subtitle dari ucapan tetap di
 bawah dengan gayanya sendiri. Kalau user menulis jawaban bebas (mis. "tengah, font
