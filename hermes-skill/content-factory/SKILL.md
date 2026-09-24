@@ -52,6 +52,14 @@ lain (mis. "buatkan video animasi dari teks" — itu bukan tool ini).
 
 ## Langkah 1 — Periksa bahan (cepat, sinkron)
 
+**Album Telegram tiba sebagai BEBERAPA pesan terpisah.** Kumpulkan path dari SEMUA pesan
+lampiran user yang berurutan sejak permintaannya — termasuk pesan pertama yang mungkin
+dibalas "Your request was not processed" karena bertabrakan dengan pesan berikutnya
+(terjadi 24 Sep: 3 video dikirim, hanya 2 dipakai karena yang pertama, pembawa permintaan,
+terlewat). JANGAN memindai folder cache untuk "file terbaru" — folder itu bercampur dengan
+lampiran user lain. Pesan pertanyaan dari langkah 1 menyebut jumlah bahan yang diterima;
+kalau user membalas bahwa jumlahnya kurang, minta kirim ulang.
+
 ```
 python3 /root/AIHackfest/scripts/inspect_media.py inspect
 ```
@@ -109,6 +117,9 @@ Pemetaan nama parameter di `pemetaan` (langkah 1) ke flag `hermes_render.py`:
 | `music` / `musicMood` | `--music` / `--music-mood` |
 | `durationSeconds` | `--duration-seconds` |
 | `broll` (true) / `brollQuery` | `--broll` / `--broll-query` (WAJIB bersama `--audio-mode ai`) |
+
+Kalau hasil berisi `catatan_teks` (emoji dihapus dari teks di layar karena font tidak mendukung), sampaikan
+ke user dalam satu kalimat.
 
 B-roll: kalau hasil render berisi `broll_kredit`, tambahkan barisnya ke caption (Pexels
 meminta kredit kreator). Kalau `broll.gagal` terisi, sampaikan alasannya ke user apa adanya:

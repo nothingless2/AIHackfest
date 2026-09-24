@@ -115,3 +115,72 @@ def test_teks_tidak_terpotong_di_tepi_untuk_semua_font(render_teks, font, teks):
     lebar, karena lebar diperkirakan dengan satu rasio karakter."""
     x, _, w, _ = render_teks("tengah", font, teks)
     assert x >= 20 and x + w <= W - 20, f"{font}: x={x} w={w}"
+
+
+# ------------------------------------------------ regresi video nyata 24 Sep: "Muda 🩸" -> "Muda..."
+
+TEKS_USER = "Aksi Merah Laksamana Muda 🩸"
+
+
+@pytest.mark.parametrize("font", list(st.TEXT_FONTS))
+@pytest.mark.parametrize("posisi", ["atas", "tengah", "bawah"])
+def test_teks_statis_tidak_pernah_dipotong_jadi_titik_tiga(monkeypatch, font, posisi):
+    """Semua kata harus tampil. wrap_text memotong yang tidak muat jadi '...'; pengukur
+    lebar versi awal hanya memeriksa lebar baris sehingga potongan lolos."""
+    monkeypatch.setenv("TEXT_POSITION", posisi)
+    monkeypatch.setenv("TEXT_FONT", font)
+    rantai = " ".join(ar.build_drawtext_chain(
+        [{"start": 0, "end": 2, "text": TEKS_USER, "statis": True}], H, W))
+    assert "..." not in rantai
+    for kata in ("Aksi", "Merah", "Laksamana", "Muda"):
+        assert kata in rantai, f"{font}/{posisi}: kata {kata!r} hilang"
+
+
+def test_muat_lebar_mempertahankan_semua_kata():
+    import os as _os
+    for font in ("tegas", "santai", "modern", "elegan", "bersih", "standar"):
+        _os.environ["TEXT_FONT"] = font
+        fp = ar.text_font_path()
+        for teks in ("Aksi Merah Laksamana Muda", "Ratusan orang berkumpul"):
+            f = ar._muat_lebar(teks, 150, W, fp)
+            assert ar.wrap_text(teks, f, W, max_lines=ar.SUBTITLE_MAX_LINES).split() == teks.split()
+
+
+def test_kalimat_panjang_semua_kata_tampil_lewat_beberapa_tampilan(monkeypatch):
+    """Kalimat 7 kata dipecah renderer jadi beberapa tampilan berurutan; tak satu kata pun
+    boleh hilang atau jadi '...'."""
+    monkeypatch.setenv("TEXT_POSITION", "tengah")
+    monkeypatch.setenv("TEXT_FONT", "santai")
+    teks = "Ratusan orang berkumpul dalam diskusi aktif"
+    rantai = " ".join(ar.build_drawtext_chain([{"start": 0, "end": 6, "text": teks}], H, W))
+    assert "..." not in rantai
+    for kata in teks.split():
+        assert kata in rantai, kata
+
+
+@pytest.mark.parametrize("teks,harap", [
+    ("Aksi Merah 🩸", "Aksi Merah"),
+    ("🔥 Diskon besar 🔥", "Diskon besar"),
+    ("Tanpa emoji", "Tanpa emoji"),
+    ("Cinta ❤️ kopi ☕", "Cinta kopi"),
+    ("", ""),
+])
+def test_hapus_emoji(teks, harap):
+    ar.EMOJI_DIHAPUS.clear()
+    assert ar.hapus_emoji(teks) == harap
+
+
+def test_emoji_dicatat_bukan_hilang_diam_diam_dan_tidak_masuk_filter():
+    ar.EMOJI_DIHAPUS.clear()
+    rantai = " ".join(ar.build_drawtext_chain(
+        [{"start": 0, "end": 2, "text": TEKS_USER, "statis": True}], H, W))
+    assert "🩸" not in rantai
+    assert ar.EMOJI_DIHAPUS == ["🩸"]
+
+
+def test_subtitle_ucapan_tidak_disentuh_penghapus_emoji():
+    """Scene ber-`words` adalah ucapan user apa adanya; hanya teks tulisan yang dibersihkan."""
+    ar.EMOJI_DIHAPUS.clear()
+    kata = [{"word": "halo", "start": 0.2, "end": 0.6}, {"word": "🔥", "start": 0.6, "end": 1.0}]
+    ar.build_drawtext_chain([{"start": 0.2, "end": 1.2, "text": "halo 🔥", "words": kata}], H, W)
+    assert ar.EMOJI_DIHAPUS == []

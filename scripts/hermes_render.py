@@ -271,6 +271,8 @@ def main(argv=None):
         "hashtags": brief.get("hashtags"),
         "biaya": ringkasan_biaya(run_id),
         "catatan_durasi": pesan_durasi or None,
+        "catatan_teks": ("Emoji " + " ".join(status["emoji_dihapus"]) + " dihapus dari teks di layar "
+                         "(font tidak mendukung emoji); tetap ada di caption.") if status.get("emoji_dihapus") else None,
         "broll": status.get("broll"),
         "broll_kredit": [d["kredit"] for d in ((status.get("broll") or {}).get("dipakai") or [])],
         "musik": status.get("music"),

@@ -14,6 +14,7 @@ daripada operasi per-frame moviepy di Python).
 
 import asyncio
 import json
+import re
 import os
 import subprocess
 import sys
@@ -897,12 +898,33 @@ def _muat_lebar(teks, fs, video_width, font_path, *, batas=0.9):
     tepi dan terpotong -- terukur di render nyata saat judul tengah dibesarkan."""
     lebar_maks = video_width * batas
     f, minimum = fs, max(16, int(fs * 0.5))
+    kata = teks.split()
     while f > minimum:
-        baris = wrap_text(teks, f, video_width, max_lines=SUBTITLE_MAX_LINES).split("\n")
-        if all(text_width(font_path, f, b) <= lebar_maks for b in baris):
+        terbungkus = wrap_text(teks, f, video_width, max_lines=SUBTITLE_MAX_LINES)
+        baris = terbungkus.split("\n")
+        # SEMUA kata harus selamat: wrap_text memotong yang tidak muat menjadi "..." --
+        # versi awal fungsi ini hanya memeriksa lebar baris, sehingga "Aksi Merah Laksamana
+        # Muda 🩸" lolos sebagai "...Laksamana Muda..." (terlihat di video nyata).
+        if terbungkus.split() == kata and all(
+                text_width(font_path, f, b) <= lebar_maks for b in baris):
             return f
         f -= 4
     return max(minimum, f)
+
+
+_EMOJI = re.compile("[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200D\U0001F1E6-\U0001F1FF]+")
+EMOJI_DIHAPUS = []
+
+
+def hapus_emoji(teks):
+    """Font teks (semua yang ada) tidak punya glyph emoji, dan drawtext tidak bisa jatuh ke
+    font lain per karakter: emoji tampil kosong/kotak. Dihapus, DICATAT (EMOJI_DIHAPUS) dan
+    dilaporkan ke user -- bukan hilang diam-diam."""
+    ditemukan = _EMOJI.findall(teks or "")
+    if not ditemukan:
+        return teks
+    EMOJI_DIHAPUS.extend(ditemukan)
+    return re.sub(r"\s{2,}", " ", _EMOJI.sub("", teks)).strip()
 
 
 def _drawtext(teks, fs, y, gaya, enable, alpha=None, font_path=None):
@@ -1028,6 +1050,10 @@ def build_drawtext_chain(scenes, video_height, video_width=None):
             continue
 
         kata = sc.get("words") or []
+        if not kata:
+            text = hapus_emoji(text)      # teks tulisan saja; subtitle ucapan tetap apa adanya
+            if not text:
+                continue
         if kata and gaya.get("highlight"):
             filters.extend(filter_karaoke(kata, (float(start), float(end)), W, fs, y, gaya))
             continue
@@ -1078,6 +1104,7 @@ def build_drawtext_chain(scenes, video_height, video_width=None):
 
 
 def apply_text_overlay(input_path, scenes, output_path):
+    EMOJI_DIHAPUS.clear()
     filters = build_drawtext_chain(scenes, TARGET_H, TARGET_W)
     if not filters:
         os.replace(input_path, output_path)
@@ -1667,6 +1694,7 @@ def render_from_agent_script(
         music=musik_dipakai,
         music_mood=musik_mood,
         broll=broll_info,
+        emoji_dihapus=sorted(set(EMOJI_DIHAPUS)) or None,
         audio_mode=audio_mode,
         judul=data.get("judul"),
         scene_count=len(scenes),

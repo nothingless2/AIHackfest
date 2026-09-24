@@ -188,7 +188,8 @@ def test_bahan_berucap_tidak_ditanya_teks_layar():
 
 def test_inspeksi_mengembalikan_pesan_siap_kirim(tmp_path):
     paths, r = _inspeksi(tmp_path)
-    assert r["pesan"].startswith("Sebelum saya edit")
+    assert "Sebelum saya edit" in r["pesan"]
+    assert r["pesan"].startswith("Bahan yang saya terima:")
 
 
 def test_suasana_tanpa_ucapan_ditanya_audio():
@@ -705,3 +706,14 @@ def test_nilai_parameter_di_semua_pertanyaan_valid_menurut_style():
                     st.resolve_text_font(param["textFont"])
                 if "colorFilter" in param:
                     st.resolve_color_filter(param["colorFilter"])
+
+
+def test_pesan_pertanyaan_menyebut_bahan_yang_diterima():
+    """Regresi 24 Sep: user mengirim 3 video, hanya 2 yang sampai ke agen (album Telegram
+    terpotong) dan TIDAK ADA yang memberi tahu. Sekarang jumlahnya tertulis di pesan."""
+    ringk = _ringk()
+    q = im.susun_pertanyaan(ringk, _tahu("edit ya"))
+    pesan = im.susun_pesan_pertanyaan(q, ringk)
+    assert pesan.startswith(f"Bahan yang saya terima: {ringk['n_video']} video")
+    assert "kirim ulang" in pesan
+    assert not im.susun_pesan_pertanyaan(q).startswith("Bahan yang saya terima")   # tanpa ringk: perilaku lama

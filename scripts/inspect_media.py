@@ -511,7 +511,17 @@ def susun_pemetaan(pertanyaan):
     return baris
 
 
-def susun_pesan_pertanyaan(pertanyaan):
+def _bahan_diterima(ringk):
+    if not ringk:
+        return ""
+    bagian = [f"{ringk[k]} {nama}" for k, nama in
+              (("n_video", "video"), ("n_gambar", "foto"), ("n_musik", "berkas musik"))
+              if ringk.get(k)]
+    return ("Bahan yang saya terima: " + ", ".join(bagian) + ". Kalau kamu mengirim lebih banyak, "
+            "kirim ulang semuanya (album Telegram kadang terpotong).") if bagian else ""
+
+
+def susun_pesan_pertanyaan(pertanyaan, ringk=None):
     """Blok pesan yang dikirim agent ke user APA ADANYA.
 
     Semua pilihan ditulis di sini, oleh kode. Format teks biasa (tanpa markdown) supaya
@@ -523,7 +533,8 @@ def susun_pesan_pertanyaan(pertanyaan):
     """
     n = len(pertanyaan)
     contoh = " ".join(f"{i}{p['opsi'][0]['huruf']}" for i, p in enumerate(pertanyaan[:3], 1))
-    baris = [
+    diterima = _bahan_diterima(ringk)
+    baris = ([diterima, ""] if diterima else []) + [
         f"Sebelum saya edit, ada {n} hal yang perlu kamu pilih. Balas dengan huruf pilihanmu "
         f"(contoh: {contoh}) atau tulis jawabanmu sendiri. Ketik \"terserah\" untuk memakai "
         "semua pilihan bertanda ★.",
@@ -594,7 +605,7 @@ def susun_teks(fakta, pertanyaan, tahu, ringk, *, inspect_id, paths):
             "giliranmu. Pilihan di dalamnya dibuat oleh sistem; jangan mengubah, menambah, "
             "atau mengurangi.",
             "<<<PESAN",
-            susun_pesan_pertanyaan(pertanyaan),
+            susun_pesan_pertanyaan(pertanyaan, ringk),
             "PESAN>>>",
             "",
             "ATURAN LANJUTAN:",
@@ -691,7 +702,7 @@ def inspeksi(paths, konteks="", chat_id=""):
     teks = susun_teks(fakta, pertanyaan, tahu, ringk, inspect_id=inspect_id, paths=paths) \
         if not degraded else _teks_degraded(pertanyaan, inspect_id, paths)
     return {"ok": True, "inspect_id": inspect_id, "pertanyaan": pertanyaan,
-            "pesan": susun_pesan_pertanyaan(pertanyaan) if pertanyaan else "",
+            "pesan": susun_pesan_pertanyaan(pertanyaan, ringk) if pertanyaan else "",
             "ringkasan": ringk, "degraded": degraded, "teks": teks}
 
 
