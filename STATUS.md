@@ -500,5 +500,7 @@ Keputusan user: 2 alternatif (pilih lalu boleh edit), tingkat grafik "sedang", m
     tidak ada di detik 4,2 dan muncul setelah kata "donor". Langkah 1/2 dan 2/2 muncul saat
     "teman" dan "Daftarin". Teks narasi tetap utuh.
   - Render varian B ubahan (sebelum grafik): Whisper membaca persis naskah ubahan user.
-- Catatan biaya: ContentInsight (agent5) masih memakai `KEYWORD_MODEL=openai/gpt-4o-mini`
-  berbayar (±25 rb token prompt per run karena gambar), bukan model gratis.
+- Biaya: ContentInsight (agent5) dipindah dari `openai/gpt-4o-mini` berbayar (±25 rb token/run)
+  ke `LLM_MODEL` gratis (baris `KEYWORD_MODEL` di `.env` dijadikan komentar). Uji nyata: kata
+  kunci relevan, 5 dtk, $0. Yang masih berbayar: `EDIT_MODEL` (seleksi potongan ucapan, hanya
+  di mode suara asli).
