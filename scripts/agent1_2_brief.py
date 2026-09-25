@@ -9,7 +9,7 @@ import os
 import sys
 
 from audio_mode import bahan_punya_suara, mode_eksplisit, requested_mode, resolve_audio_mode
-from duration import duration_text, requested_duration
+from duration import duration_text, kata_untuk_bahan, requested_duration, target_dari_bahan
 from edit_plan import buat_rencana, ringkas as ringkas_edit
 from spoken import SPOKEN_REWRITE, prompt_rule
 from transcribe import media_duration, transcribe_assets_report
@@ -294,6 +294,22 @@ def validasi_varian(varian, maks=2):
     return hasil[:maks]
 
 
+FOTO_DETIK = 4.0     # satu foto dihitung sepanjang ini saat menakar bahan untuk naskah
+
+
+def hitung_bahan_layak(asset_paths, durasi, buruk):
+    """Total detik bahan yang LAYAK tampil: video tanpa bagian goyang (rentang yang sama
+    dengan yang dipakai renderer, visual_quality.rentang_layak) + FOTO_DETIK per foto."""
+    total = 0.0
+    for p in asset_paths:
+        if os.path.splitext(p)[1].lower() in IMAGE_EXTENSIONS:
+            total += FOTO_DETIK
+            continue
+        rentang, _ = _vq.rentang_layak(durasi.get(p) or 0.0, buruk.get(p) or [])
+        total += sum(z - a for a, z in rentang)
+    return round(total, 1)
+
+
 def build_durasi_note(durasi_bahan, bisu=False):
     """Durasi NYATA tiap bahan, supaya scene mengikuti batas antar klip.
 
@@ -329,11 +345,20 @@ def build_teks_statis_note():
 def build_prompt(asset_names, performance, *, jumlah_gambar, pool=None, konteks="",
                  transkrip=None, target_duration=None, durasi_bahan=None, teks_statis=False,
                  audio_bisu=False, klip_fakta="", gaya_contoh="", kontak=False, draf=False,
-                 mode_audio="ai"):
+                 mode_audio="ai", bahan_layak=None):
     # Durasi & aturan lafal disuntikkan, bukan hardcode: tanpa permintaan user,
     # duration_text() mengembalikan kalimat lama kata per kata sehingga brief
     # untuk run yang tidak meminta durasi tidak berubah sama sekali.
     durasi_note = duration_text(target_duration)
+    if bahan_layak and not target_duration and mode_audio == "ai":
+        # Naskah menyesuaikan bahan (keputusan user 24 Sep): narasi lebih panjang dari
+        # bahan layak = gambar terpaksa diperlambat/diulang.
+        target_bahan = target_dari_bahan(bahan_layak)
+        if target_bahan:
+            kmin, kmax = kata_untuk_bahan(target_bahan)
+            durasi_note = (f"sekitar {target_bahan} detik SAJA, karena bahan video yang layak "
+                           f"tampil hanya ±{bahan_layak:.0f} detik (kira-kira {kmin}-{kmax} kata; "
+                           "LEBIH PANJANG dari itu = gambar terpaksa diperlambat atau diulang)")
     lafal_note = prompt_rule()
     baris_spoken = (
         '    "voice_over_spoken": "naskah yang sama, ejaan fonetis untuk TTS",\n'
@@ -531,12 +556,14 @@ def run():
                     if os.path.splitext(p)[1].lower() not in IMAGE_EXTENSIONS}
     klip_fakta = build_klip_note(asset_names, asset_paths, transkrip, gagal_transkrip, buruk,
                                  durasi_semua)
+    bahan_layak = hitung_bahan_layak(asset_paths, durasi_semua, buruk)
+    klip_fakta += f"\nTOTAL BAHAN LAYAK TAMPIL: {bahan_layak:.1f} dtk."
     prompt_text = build_prompt(
         asset_names, performance, jumlah_gambar=len(image_parts), pool=pool,
         konteks=konteks, transkrip=transkrip, target_duration=target_durasi,
         durasi_bahan=durasi_bahan, teks_statis=teks_statis, audio_bisu=(mode_audio == "mute"),
         klip_fakta=klip_fakta, gaya_contoh=contoh_gaya() if mode_audio == "ai" else "",
-        kontak=True, draf=mode_draf(), mode_audio=mode_audio,
+        kontak=True, draf=mode_draf(), mode_audio=mode_audio, bahan_layak=bahan_layak,
     )
     result = chat_json(
         [{"role": "user",
@@ -605,6 +632,9 @@ def run():
     # terkoreksi sebelum render. Hanya string, maksimal satu per bahan.
     brief["pemahaman_bahan"] = ([str(x).strip()[:200] for x in pemahaman if str(x).strip()][:len(asset_names)]
                                 if isinstance(pemahaman, list) else [])
+    # Panjang bahan layak: draf membandingkannya dengan panjang naskah (tawaran bila kurang).
+    brief["bahan_layak_detik"] = bahan_layak
+    brief["bahan_foto"] = sum(1 for p in asset_paths if os.path.splitext(p)[1].lower() in IMAGE_EXTENSIONS)
     brief["media_assets"] = resolve_assets(asset_names)
     brief["asset_names"] = asset_names
     brief["brief_id"] = f"brief_{now_iso()}"

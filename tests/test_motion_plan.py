@@ -118,13 +118,14 @@ def test_jangkar_tidak_terucap_dibuang_dan_dicatat():
     assert any("tidak ditemukan" in c for c in cat)
 
 
-def test_nomor_langkah_dihitung_kode():
+def test_langkah_tanpa_penanda_nomor():
+    """Penanda "1/2" dihapus (permintaan user 25 Sep): tidak bermakna di konten user."""
     el = [{"jenis": "langkah", "teks": "Daftar", "saat_kata": "Daftar"},
           {"jenis": "langkah", "teks": "Datang", "saat_kata": "datang"}]
     b, _ = bersih(rencana(elemen=el))
     items, _ = mp.jadwal(b, kata_waktu(per=0.6), len(NASKAH.split()) * 0.6 + 0.5)
     langkah = [i for i in items if i["jenis"] == "langkah"]
-    assert [(i["nomor"], i["total"]) for i in langkah] == [(1, 2), (2, 2)]
+    assert len(langkah) == 2 and all("nomor" not in i and "total" not in i for i in langkah)
 
 
 def test_mode_suara_asli_hanya_hook_dan_cta():

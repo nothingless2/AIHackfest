@@ -186,9 +186,6 @@ def jadwal(bersih, kata_waktu, durasi, *, ada_teks_statis=False):
         elemen.append({"jenis": el["jenis"], "mulai": round(a, 3), "selesai": round(b, 3),
                        "teks": el["teks"], "sub": el["sub"], "emoji": el["emoji"]})
         akhir_prev, mulai_prev = b, a
-    langkah = [e for e in elemen if e["jenis"] == "langkah"]
-    for n, e in enumerate(langkah, 1):
-        e.update(nomor=n, total=len(langkah))
     items += elemen
     if bersih.get("cta") and mulai_cta < durasi:
         items.append({"jenis": "kartu_cta", "mulai": round(mulai_cta, 3), "selesai": round(durasi, 3),

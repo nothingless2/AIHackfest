@@ -34,6 +34,7 @@ from duration import (  # noqa: E402
     DURATION_TOLERANCE, off_target, word_target,
 )
 import broll as _broll  # noqa: E402
+import alokasi as _alokasi  # noqa: E402
 import motion_plan as _mp  # noqa: E402
 import overlay_remotion as _ovr  # noqa: E402
 import visual_quality as _vq  # noqa: E402
@@ -752,27 +753,30 @@ def terapkan_potong_visual(rencana, data):
     return hasil
 
 
-def rentang_layak_ai(path):
-    """(a, b) rentang layak TERPANJANG untuk mode voice-over AI, atau None bila tidak
-    perlu dipotong / tidak terukur."""
-    if not _vq.aktif():
-        return None
-    buruk = _buruk_visual(path)
-    if not buruk:
-        return None
-    try:
-        dur = media_duration(path)
-    except Exception:
-        return None
-    layak = _vq.kurangi([(0.0, dur)], buruk, min_keep=MIN_CLIP_DURATION)
-    nama = os.path.basename(path)
-    for a, b, alasan in buruk:
-        _catat_visual("dipotong", {"file": nama, "dari": round(a, 2), "sampai": round(b, 2),
-                                   "alasan": alasan})
-    if not layak:
-        _catat_visual("dikembalikan", {"file": nama, "alasan": "tidak ada bagian layak yang cukup panjang"})
-        return None
-    return max(layak, key=lambda r: r[1] - r[0])
+def bahan_ai(assets, tanpa_ukur=()):
+    """Masukan alokasi.susun_potongan untuk mode voice-over AI: foto = lentur; video = SEMUA
+    rentang layaknya (bagian goyang/oleng/buram dibuang), bukan hanya yang terpanjang.
+    `tanpa_ukur`: klip yang tidak dianalisis (B-roll stok)."""
+    hasil = []
+    for path in assets:
+        if os.path.splitext(path)[1].lower() in IMAGE_EXTENSIONS:
+            hasil.append({"path": path, "foto": True})
+            continue
+        try:
+            dur = media_duration(path)
+        except Exception:
+            dur = 0.0
+        buruk = _buruk_visual(path) if (_vq.aktif() and path not in tanpa_ukur) else []
+        rentang, dikembalikan = _vq.rentang_layak(dur, buruk or [], MIN_CLIP_DURATION)
+        nama = os.path.basename(path)
+        if dikembalikan:
+            _catat_visual("dikembalikan", {"file": nama, "alasan": "tidak ada bagian layak yang cukup panjang"})
+        elif buruk:
+            for a, b, alasan in buruk:
+                _catat_visual("dipotong", {"file": nama, "dari": round(a, 2), "sampai": round(b, 2),
+                                           "alasan": alasan})
+        hasil.append({"path": path, "rentang": rentang})
+    return hasil
 
 
 def fade_flags(batas, jumlah):
@@ -931,32 +935,20 @@ def build_segment(asset_path, duration, segment_path, *, keep_audio=False,
             args = [*iris, "-i", asset_path, "-vf", vf,
                     "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "fast", *audio_enc]
         else:
-            # -stream_loop -1 mengulang video kalau lebih pendek dari `duration`;
-            # -t memotongnya persis di durasi target.
+            # TANPA -stream_loop (24 Sep: klip pendek terputar ±4x terlihat user). Rentang
+            # sumber sudah dihitung alokasi.susun_potongan cukup untuk `duration` pada
+            # `speed_factor` ini; tpad (menahan frame terakhir) hanya jaring pengaman untuk
+            # pembulatan, supaya segmen TIDAK PERNAH lebih pendek dari slotnya (video = audio).
             #
-            # speed ramp: `-t` di sini adalah batas durasi OUTPUT (posisinya
-            # setelah -i), jadi tetap actual_duration apa pun speed_factor-nya --
-            # setpts hanya mengubah SEBERAPA BANYAK bahan sumber terpakai untuk
-            # mengisi jendela waktu itu (lebih cepat = lebih banyak, lebih lambat
-            # = diulang lebih sering lewat -stream_loop). Slot di timeline gabungan
-            # tidak pernah berubah, jadi ini aman untuk scene/subtitle di sekitarnya.
+            # speed ramp: `-t` adalah batas durasi OUTPUT, jadi slot di timeline tetap
+            # actual_duration apa pun speed_factor-nya; setpts hanya mengubah seberapa banyak
+            # sumber terpakai.
             vf_speed = vf if speed_factor == 1.0 else f"{vf},setpts=PTS/{speed_factor}"
-            sumber = asset_path
-            if potong:
-                # Rentang layak saja (bagian goyang dibuang), lalu di-loop bila lebih pendek
-                # dari slot. Dipotong ke berkas sementara: -stream_loop tidak menghormati -ss.
-                sumber = os.path.splitext(segment_path)[0] + "_layak.mp4"
-                run_ffmpeg(["-ss", f"{potong[0]:.3f}", "-to", f"{potong[1]:.3f}", "-i", asset_path,
-                            "-an", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "16", sumber],
-                           f"rentang layak {os.path.basename(asset_path)}")
-            args = ["-stream_loop", "-1", "-i", sumber,
+            vf_speed += f",tpad=stop_mode=clone:stop_duration={actual_duration:.3f}"
+            args = [*iris, "-i", asset_path,
                     "-t", f"{actual_duration:.3f}", "-vf", vf_speed, "-an",
                     "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "fast"]
-        try:
-            run_ffmpeg(args + [segment_path], f"video {os.path.basename(asset_path)}")
-        finally:
-            if not keep_audio and potong and sumber != asset_path and os.path.exists(sumber):
-                os.remove(sumber)
+        run_ffmpeg(args + [segment_path], f"video {os.path.basename(asset_path)}")
 
     else:
         raise ValueError(f"Ekstensi tidak didukung untuk '{asset_path}': {ext}")
@@ -1404,6 +1396,7 @@ def build_drawtext_chain(scenes, video_height, video_width=None):
 
 TEKS_ANIMASI = {}
 MOTION = {}
+PENGISIAN = {}      # alokasi.susun_potongan: narasi vs bahan layak, gerak lambat, dipakai ulang
 
 
 def _sumber_fakta(data):
@@ -1712,30 +1705,6 @@ DURATION_FIX_MODEL = os.getenv("DURATION_FIX_MODEL") or None
 DURATION_FIX_TIMEOUT = float(os.getenv("DURATION_FIX_TIMEOUT_SECONDS", "25"))
 
 
-def bagi_durasi(assets, total_duration):
-    """(aset_dipakai, durasi_per_klip). ATURAN TETAP: durasi video = durasi audio.
-
-    `per_clip = total / n` apa adanya. Kalau hasilnya di bawah MIN_CLIP_DURATION,
-    yang dikurangi adalah JUMLAH ASET, bukan per_clip-nya.
-
-    Versi lama memakai `max(MIN_CLIP_DURATION, total/n)`, yang membuat video
-    MELEBIHI audio saat asetnya banyak; `-shortest` lalu memotongnya, jadi aset
-    terakhir hilang di tengah. `min(...)` juga salah dengan cara sebaliknya:
-    audio 30 detik dengan 3 aset akan jadi video 4,5 detik.
-    """
-    n = len(assets)
-    if not n or total_duration <= 0:
-        return assets, [0.0] * n
-    if total_duration / n < MIN_CLIP_DURATION:
-        muat = max(1, int(total_duration // MIN_CLIP_DURATION))
-        if muat < n:
-            print(f"⚠️ {n} bahan terlalu banyak untuk {total_duration:.1f} detik "
-                  f"(min {MIN_CLIP_DURATION} dtk/klip) — dipakai {muat} bahan pertama.")
-            assets = assets[:muat]
-    per = total_duration / len(assets)
-    return assets, [per] * len(assets)
-
-
 def clamp_scenes(scenes, total_duration):
     """Jepit scene ke durasi video yang sebenarnya.
 
@@ -1853,6 +1822,7 @@ def render_from_agent_script(
         data = json.load(f)
 
     POTONG_VISUAL.clear()
+    PENGISIAN.clear()
     audio_mode = (data.get("audio_mode") or "ai").strip().lower()
     bisu = audio_mode == "mute"
     # `pakai_audio_asli` = jalur berbasis durasi klip + transkrip (seleksi, subtitle kata).
@@ -1953,7 +1923,7 @@ def render_from_agent_script(
                 print(f"⏱️ Durasi setelah koreksi: {total_duration:.1f} detik")
 
         # B-roll stok (Pexels) disisipkan SETELAH durasi narasi diketahui: jumlahnya dibatasi
-        # supaya bagi_durasi tidak membuang bahan user (lihat broll.jatah).
+        # supaya alokasi tidak membuang bahan user (lihat broll.jatah).
         try:
             cfg_broll = _broll.resolve_broll()
         except BrollError as e:
@@ -1981,9 +1951,22 @@ def render_from_agent_script(
                 else:
                     print(f"[warn] B-roll tidak tersedia: {gagal}")
 
-        existing_assets, durasi_klip = bagi_durasi(existing_assets, total_duration)
-        per = durasi_klip[0] if durasi_klip else 0.0
-        print(f"🖼️ Menyusun {len(existing_assets)} bahan mentah user ({per:.1f} detik per bahan)")
+        # Jatah per potongan dari panjang bahan LAYAK, bukan sama rata -- tanpa loop.
+        # speed ramp HANYA di cabang voice-over AI ini (lihat style.resolve_speed_factor):
+        # ikut dihitung di alokasi karena mengubah seberapa banyak sumber terpakai.
+        faktor_kecepatan = resolve_speed_factor()
+        potongan_ai, info_isi = _alokasi.susun_potongan(
+            bahan_ai(existing_assets, tanpa_ukur=set(broll_tmp)), total_duration,
+            speed=faktor_kecepatan, min_klip=MIN_CLIP_DURATION)
+        PENGISIAN.clear()
+        PENGISIAN.update(info_isi)
+        durasi_klip = [p["durasi"] for p in potongan_ai]
+        existing_assets = list(dict.fromkeys(p["path"] for p in potongan_ai))
+        print(f"🖼️ {len(potongan_ai)} potongan dari {len(existing_assets)} bahan untuk narasi "
+              f"{total_duration:.1f} dtk (bahan layak {info_isi['bahan_layak']:.1f} dtk"
+              + (f", diperlambat {info_isi['lambat']}x" if info_isi["lambat"] else "")
+              + (f", {info_isi['dipakai_ulang_detik']} dtk dipakai ulang" if info_isi["dipakai_ulang_detik"] else "")
+              + ")")
 
     # Teks statis: SATU teks sepanjang video, hanya untuk teks tulisan (tanpa timestamp
     # kata). Bahan berucapan tetap memakai subtitle -- teks statis bukan penggantinya.
@@ -2026,14 +2009,12 @@ def render_from_agent_script(
         # kecepatan klip tidak membuat apa pun lepas sinkron. Mode audio asli/
         # mute (cabang di atas) TIDAK memanggil resolve_speed_factor() sama
         # sekali -- lihat catatan di style.resolve_speed_factor().
-        faktor_kecepatan = resolve_speed_factor()
-        bendera = fade_flags(sambungan_scene(durasi_klip, scenes), len(existing_assets))
-        for i, asset_path in enumerate(existing_assets):
+        bendera = fade_flags(sambungan_scene(durasi_klip, scenes), len(potongan_ai))
+        for i, pot in enumerate(potongan_ai):
             seg_path = os.path.join(output_dir, f"_segment_{i}.mp4")
-            layak = rentang_layak_ai(asset_path) if asset_path not in broll_tmp else None
-            build_segment(asset_path, durasi_klip[i], seg_path, keep_audio=False,
+            build_segment(pot["path"], pot["durasi"], seg_path, keep_audio=False,
                           fade_in=bendera[i][0], fade_out=bendera[i][1],
-                          speed_factor=faktor_kecepatan, potong=layak)
+                          speed_factor=pot["speed"], potong=pot["potong"])
             segment_paths.append(seg_path)
 
     fade_dipakai = sum(1 for f_in, _ in bendera if f_in)
@@ -2137,6 +2118,7 @@ def render_from_agent_script(
         emoji_dihapus=sorted(set(EMOJI_DIHAPUS)) or None,
         teks_animasi=dict(TEKS_ANIMASI) or None,
         motion=dict(MOTION) or None,
+        pengisian=dict(PENGISIAN) if audio_mode == "ai" and PENGISIAN else None,
         potong_visual={k: v for k, v in POTONG_VISUAL.items()} or None,
         suara=dict(TTS_CATATAN) if audio_mode == "ai" else None,
         audio_mode=audio_mode,

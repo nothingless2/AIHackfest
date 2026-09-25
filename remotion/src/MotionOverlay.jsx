@@ -5,7 +5,7 @@ import {loadFont} from '@remotion/fonts';
 import {susunBaris} from './layout.js';
 
 // Motion graphic penjelas konteks, gaya video referensi user (24 Sep): kartu kaca gelap,
-// cahaya ungu, kata kunci disorot, chip "1/3". KATALOG TERTUTUP -- jenis & waktu divalidasi
+// cahaya ungu, kata kunci disorot. KATALOG TERTUTUP -- jenis & waktu divalidasi
 // scripts/motion_plan.py; di sini hanya digambar. Semua di luar zona teks narasi (58-74% tinggi).
 // Setelah masukFrames elemen DIAM (nilai animasi tepat 1): Python hanya merender frame masuk,
 // lalu SATU gambar diam untuk sisanya; animasi keluar = pudar alpha oleh ffmpeg pada gambar diam
@@ -138,11 +138,8 @@ const Ikon = ({it, g, W, H, c}) => (
 const Langkah = ({it, g, W, H, c}) => (
   <AbsoluteFill style={{alignItems: 'center', paddingTop: H * 0.14}}>
     <div style={{opacity: g.op, transform: `translateY(${(1 - g.m) * -90}px)`, position: 'relative'}}>
-      <Kartu c={c} lebar={W * 0.74} style={{padding: '52px 44px 40px'}}>
-        <div style={{position: 'absolute', top: -26, right: 34, background: c.aksen, color: '#FFF',
-          borderRadius: 999, padding: '8px 22px', fontSize: W * 0.034, boxShadow: c.glow}}>
-          {it.nomor}/{it.total}
-        </div>
+      {/* Tanpa penanda "1/2": di konten user angkanya tidak bermakna (permintaan user 25 Sep). */}
+      <Kartu c={c} lebar={W * 0.74} style={{padding: '40px 44px'}}>
         <div style={{color: '#FFF', fontSize: W * 0.07, background: 'rgba(255,255,255,0.10)',
           border: '2px solid rgba(255,255,255,0.32)', borderBottomWidth: 6, borderRadius: 22,
           padding: '10px 34px', textAlign: 'center'}}>

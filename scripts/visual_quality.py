@@ -152,6 +152,19 @@ def kurangi(ranges, buruk, min_keep=0.8):
     return hasil
 
 
+def rentang_layak(durasi, buruk, min_keep=1.5):
+    """(rentang, dikembalikan). SEMUA rentang layak [(a, b)] sebuah klip -- dipakai brief
+    (panjang bahan untuk naskah) dan renderer (alokasi) supaya angkanya sama. Tidak ada bagian
+    layak yang cukup panjang -> seluruh klip dipakai (dikembalikan=True): lebih baik tampil
+    goyang daripada klip hilang tanpa kabar."""
+    if durasi <= 0:
+        return [], False
+    layak = kurangi([(0.0, durasi)], buruk or [], min_keep=min_keep)
+    if layak:
+        return layak, False
+    return [(0.0, durasi)], bool(buruk)
+
+
 def analisis(path):
     """{durasi, buruk:[(a,b,alasan)], layak_detik} -- atau melempar VisualError."""
     m = ukur(path)

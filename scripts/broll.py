@@ -10,8 +10,8 @@ ATURAN YANG DIJAGA (semuanya berasal dari kegagalan nyata di repo ini):
   hasil kosong) tidak menggagalkan video yang sudah jadi, tapi DILAPORKAN dengan alasan.
 - Hanya mode voice-over AI. Mode audio asli/mute masih menampilkan orang yang bicara, dan
   menyisipkan klip di tengahnya menggeser subtitle yang dipatok ke transkrip.
-- Jumlah B-roll dibatasi supaya bahan USER tidak terbuang: `bagi_durasi` membuang aset
-  terakhir bila terlalu banyak untuk durasi yang ada.
+- Jumlah B-roll dibatasi supaya bahan USER tidak terbuang: `alokasi.susun_potongan` hanya
+  memakai sebanyak potongan yang muat (min. 1,5 dtk per potongan) untuk durasi narasi.
 - Tautan unduhan dari respons API hanya diikuti bila https dan host-nya milik Pexels.
 - Pexels meminta kredit kreator; `kredit` dikembalikan supaya ikut ke caption.
 """
@@ -247,6 +247,6 @@ def susun_urutan(aset_user, klip_broll):
 
 
 def jatah(jumlah_diminta, jumlah_aset_user, total_detik, min_klip):
-    """Berapa B-roll yang boleh disisipkan tanpa membuang bahan user (lihat bagi_durasi)."""
+    """Berapa B-roll yang boleh disisipkan tanpa membuang bahan user (lihat alokasi)."""
     muat = int(total_detik // min_klip)
     return max(0, min(jumlah_diminta, muat - jumlah_aset_user))

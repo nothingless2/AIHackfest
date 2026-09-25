@@ -137,7 +137,7 @@ Mode voice-over AI kini menampilkan teks NARASI satu kata per tampilan yang meng
 donor darah") dan teruskan ke `--user-context`; naskah ditulis sebagai kreator yang menyapa
 penonton, bukan deskripsi gambar.
 
-Motion graphic (kartu pembuka, sorot kata kunci, ikon, langkah "1/3", label, kartu ajakan) kini
+Motion graphic (kartu pembuka, sorot kata kunci, ikon, langkah, label, kartu ajakan) kini
 BAWAAN, gaya kartu gelap berpendar seperti video referensi. BrainIdea mengusulkannya di draf
 (baris "Grafik:"); kode memeriksa dan memasangnya tepat saat kata jangkarnya diucapkan narasi.
 Elemen penjelas (sorot/ikon/langkah/label) hanya di mode voice-over AI; mode suara asli hanya
@@ -196,6 +196,10 @@ Membaca balasan user:
   `varian[].naskah` di hasil draf, terapkan PERSIS perubahan yang diminta user (jangan
   menulis ulang bagian lain), lalu kirim naskah LENGKAP hasilnya lewat `--naskah "..."`.
   Kalau user menulis naskahnya sendiri seluruhnya, pakai teks user apa adanya.
+- Pesan draf bisa berisi "Catatan: naskah ... lebih panjang dari bahan video". Balasan user:
+  "stok" -> render dengan `--broll` (klip stok Pexels mengisi kekurangan); kirim video tambahan
+  -> kumpulkan SEMUA path (lama + baru), ulangi Langkah 1 lalu Langkah 3 (draf baru); "biarkan"
+  / pilih A/B saja -> render biasa (sebagian gambar diperlambat atau dipakai ulang).
 - User mengoreksi pemahaman ("itu bukan antrean, itu pendaftaran") atau minta gaya lain ->
   jalankan Langkah 3 lagi dengan koreksi itu ditambahkan ke `--user-context` (draf baru).
 
@@ -222,6 +226,10 @@ Baca output JSON (satu baris) dari proses latar belakang itu.
   `deskripsi` + `hashtags`. Sebutkan `catatan_durasi` kalau ada isinya (artinya
   durasi diminta user dijepit ke batas yang berbeda). Kalau `catatan_naskah` berisi sesuatu,
   sebutkan singkat (naskah user tetap dipakai apa adanya).
+- Kalau `catatan_bahan` berisi sesuatu (mis. "2 dari 3 bahan tampil tanpa subtitle — saldo/kuota
+  API habis"), sampaikan apa adanya: penyebabnya menentukan tindak lanjut user.
+- Kalau `pengisian.lambat` atau `pengisian.dipakai_ulang_detik` terisi, sebutkan singkat bahwa
+  bahan video lebih pendek dari narasi, jadi sebagian gambar diperlambat atau dipakai ulang.
 - **`ok: false`**: sampaikan `alasan` apa adanya ke user dalam kalimat biasa.
   Jangan mencoba lagi otomatis kalau alasannya `render_sibuk`.
 

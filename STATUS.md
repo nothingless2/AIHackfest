@@ -504,3 +504,45 @@ Keputusan user: 2 alternatif (pilih lalu boleh edit), tingkat grafik "sedang", m
   ke `LLM_MODEL` gratis (baris `KEYWORD_MODEL` di `.env` dijadikan komentar). Uji nyata: kata
   kunci relevan, 5 dtk, $0. Yang masih berbayar: `EDIT_MODEL` (seleksi potongan ucapan, hanya
   di mode suara asli).
+
+## 25 Sept — audit kode, pembersihan jalur OpenClaw, klip tidak lagi diulang-ulang
+
+**Audit** (pyflakes + vulture + graf impor dari titik masuk aktif: `hermes_render`, `inspect_media`,
+`orchestrator`, `check_locks`, `remotion/render.mjs`):
+- **Dihapus, tidak dirujuk jalur aktif (±11.700 baris)**:
+  - `openclaw-plugin/`, `run_and_deliver.py`, `pipeline.py`, `agent4_approval.py`, `publish.py`,
+    `gateway_check.py`, `install_plugin.sh`, `openclaw.config.json`, `agents/*.md`, skill
+    deskriptor tanpa kode, `make_demo_music.py`, `cost_report.py`.
+  - Fungsi mati (pengirim Telegram, allowlist chat, lock approval, pembungkus transkripsi, dsb.)
+    dan tesnya.
+  - `notify()` kini hanya mencetak: cabang kirim-Telegram tidak pernah jalan di Hermes.
+- **Celah yang ditemukan dan diperbaiki**:
+  - Catatan "N bahan tanpa subtitle + penyebabnya", "teks dari tampilan saja", dan ringkasan
+    seleksi hanya ada di caption OpenClaw. Jadi sejak pindah ke Hermes, user tidak pernah diberi
+    tahu kenapa subtitle hilang. Sekarang `catatan_bahan` ada di hasil `hermes_render`.
+  - Teks agent dari `inspect` masih menyuruh `content_factory_run` (nama tool plugin), sekarang
+    flag `hermes_render`.
+  - `requirements.txt` tidak memuat `numpy` (dipakai), tapi memuat `requests` (tidak dipakai).
+
+**Klip diulang-ulang (keluhan user 24 Sep)**:
+- **Penyebab**: narasi dibagi SAMA RATA per klip. Klip yang lebih pendek dari jatahnya diputar
+  `-stream_loop`, dan hanya satu rentang layak per klip yang dipakai. Kasus nyata: 1,75 dtk layak,
+  jatah 7,38 dtk, jadi ±4x.
+- **Brief**: naskah menyesuaikan total bahan layak (sama dengan hitungan renderer). Durasi yang
+  diminta user tetap menang.
+- **Draf**: menampilkan "narasi ±N dtk · bahan video layak ±M dtk". Bila kurang, menawarkan kirim
+  video tambahan / "stok" (Pexels, bila key ada) / biarkan. Naskah ubahan user tidak pernah
+  dikoreksi otomatis.
+- **Render** (`scripts/alokasi.py`): semua rentang layak dipakai, jatah "isi air" (tanpa melebihi
+  sumber), foto menyerap kekurangan, lalu gerak lambat maksimal 0,8x, lalu dipakai ulang
+  bergiliran (dari ujung rentang, tidak berturut-turut). `-stream_loop` dihapus. `tpad` menahan
+  frame terakhir hanya sebagai jaring pengaman pembulatan. Laporannya di `pengisian`.
+- **Tes**: tes piksel render penuh (klip A 1,5 dtk + B 4 dtk, narasi 5 dtk). Renderer lama gagal
+  (merah terulang di detik 1,8), yang baru lolos.
+- Penanda "1/2" di elemen langkah dihapus (permintaan user).
+- **Uji nyata (3 video user, 25 Sep)**:
+  - Draf 138 dtk. Naskah A ±13 dtk dan B ±11 dtk, dengan bahan layak ±14 dtk (sebelumnya
+    naskah 22 dtk).
+  - Render 100 dtk: narasi nyata 14,65 dtk, diperlambat tipis 0,93x, tanpa potongan dipakai ulang.
+  - Deteksi frame kembar berjarak ≥ 2 dtk: render lama 24 pasangan (berulang tiap 1,75 dtk),
+    render baru 0.

@@ -14,6 +14,7 @@ import pytest
 
 import duration as d
 import spoken as sp
+from alokasi import susun_potongan
 import auto_render as ar
 
 
@@ -77,24 +78,28 @@ def test_ambang_toleransi(aktual, target, meleset):
 
 # ---------- pembagian durasi ----------
 
+def _foto(n):
+    return [{"path": f"f{i}.jpg", "foto": True} for i in range(n)]
+
+
 def test_per_klip_tepat_membagi_habis():
-    aset, klip = ar.bagi_durasi(["a", "b", "c"], 30.0)
-    assert len(aset) == 3
-    assert sum(klip) == pytest.approx(30.0), "durasi video harus SAMA dengan audio"
+    pot, _ = susun_potongan(_foto(3), 30.0)
+    assert len(pot) == 3
+    assert sum(p["durasi"] for p in pot) == pytest.approx(30.0), "durasi video harus SAMA dengan audio"
 
 
 def test_aset_dikurangi_bukan_per_klip_dinaikkan():
     """10 detik untuk 8 aset: yang dipotong jumlah asetnya, bukan durasinya —
     menaikkan per_clip membuat video melebihi audio lalu -shortest memotongnya."""
-    aset, klip = ar.bagi_durasi(["a"] * 8, 10.0)
-    assert len(aset) < 8
-    assert min(klip) >= ar.MIN_CLIP_DURATION
-    assert sum(klip) == pytest.approx(10.0)
+    pot, info = susun_potongan(_foto(8), 10.0, min_klip=ar.MIN_CLIP_DURATION)
+    assert len(pot) < 8 and info["potongan_dibuang"] == 8 - len(pot)
+    assert min(p["durasi"] for p in pot) >= ar.MIN_CLIP_DURATION
+    assert sum(p["durasi"] for p in pot) == pytest.approx(10.0)
 
 
 def test_audio_sangat_pendek_tetap_satu_aset():
-    aset, klip = ar.bagi_durasi(["a", "b"], 1.0)
-    assert len(aset) == 1 and sum(klip) == pytest.approx(1.0)
+    pot, _ = susun_potongan(_foto(2), 1.0)
+    assert len(pot) == 1 and sum(p["durasi"] for p in pot) == pytest.approx(1.0)
 
 
 # ---------- scene dijepit ----------
@@ -222,8 +227,9 @@ def test_setiap_bahan_yang_dipakai_benar_benar_tampil(render_kecil, tmp_path,
     keluaran = tmp_path / "hasil.mp4"
     ar.render_from_agent_script(str(skrip), str(keluaran))
 
-    dipakai, klip = ar.bagi_durasi(aset, durasi_audio)
-    per = klip[0]
+    pot, _ = susun_potongan([{"path": a, "foto": True} for a in aset], durasi_audio,
+                            min_klip=ar.MIN_CLIP_DURATION)
+    dipakai, per = pot, pot[0]["durasi"]
     for i in range(len(dipakai)):
         harap = (i * 30) % 256
         terlihat = _warna(keluaran, i * per + per / 2)

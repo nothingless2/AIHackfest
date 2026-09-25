@@ -476,6 +476,7 @@ def main(argv=None):
         "musik_suasana": (mood or {}).get("mood"),
         "musik_tempo_bpm": (mood or {}).get("tempo_bpm") if (mood or {}).get("tempo_yakin") else None,
         "catatan_bahan": catatan_bahan(brief),
+        "pengisian": status.get("pengisian"),
         "draf": brief.get("draf"),
         "catatan_naskah": ((brief.get("naskah_status") or {}).get("catatan") or None)
         if (brief.get("draf") or {}).get("diedit") else None,

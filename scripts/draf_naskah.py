@@ -17,6 +17,7 @@ import secrets
 import time
 
 from common import STATE_DIR, write_json
+from duration import perkiraan_detik
 from naskah import periksa
 
 DRAF_DIR = os.path.join(STATE_DIR, "draf_naskah")
@@ -24,6 +25,19 @@ DRAF_TTL_JAM = float(os.getenv("DRAF_TTL_HOURS", "24"))
 _ID = re.compile(r"^[0-9a-f]{12}$")
 HURUF = "AB"
 MAKS_NASKAH_USER = 1500
+# Narasi lebih panjang dari bahan layak x ini -> gambar harus diperlambat/dipakai ulang:
+# user diberi tahu dan ditawari pilihan (keputusan user 24 Sep: naskah menyesuaikan bahan).
+BATAS_KURANG = 1.15
+
+
+def bahan_kurang(teks, brief):
+    """(narasi_detik, bahan_detik) bila narasi jelas lebih panjang dari bahan video layak,
+    selain itu None. Foto bisa tampil sepanjang apa pun, jadi bahan berfoto tidak dianggap kurang."""
+    bahan = brief.get("bahan_layak_detik")
+    if brief.get("audio_mode") != "ai" or not bahan or brief.get("bahan_foto"):
+        return None
+    narasi = perkiraan_detik(teks)
+    return (narasi, bahan) if narasi > bahan * BATAS_KURANG else None
 
 # Field yang BERBEDA antar-varian; sisanya (transkrip, rencana edit, mode audio, bahan) sama.
 FIELD_VARIAN = ("gaya", "judul", "deskripsi", "full_voice_over", "voice_over_spoken", "scenes",
@@ -132,7 +146,15 @@ def brief_terpilih(d, huruf, naskah=None):
         brief["full_voice_over"] = teks
         brief["voice_over_spoken"] = teks
         info["diedit"] = True
-        brief["naskah_status"] = {"sumber": "user", "catatan": periksa(teks)}
+        catatan = periksa(teks)
+        kurang = bahan_kurang(teks, d["brief"])
+        if kurang:
+            catatan.append(f"naskah ±{kurang[0]:.0f} dtk, bahan video layak ±{kurang[1]:.0f} dtk: "
+                           "sebagian gambar akan diperlambat atau dipakai ulang")
+        brief["naskah_status"] = {"sumber": "user", "catatan": catatan}
+        # Naskah user dipakai APA ADANYA: koreksi durasi otomatis saat render (yang menulis
+        # ulang naskah bila meleset dari target) tidak boleh menyentuhnya.
+        brief["target_duration"] = None
     brief["draf"] = info
     return brief
 
@@ -146,7 +168,7 @@ def susun_pesan(d):
     """Pesan draf siap kirim (teks biasa) -- disusun KODE supaya isinya persis draf."""
     brief = d["brief"]
     ai = brief.get("audio_mode") == "ai"
-    baris = []
+    baris, kurang_varian = [], []
     paham = brief.get("pemahaman_bahan") or []
     if paham:
         baris.append(f"Saya sudah menonton {len(d.get('bahan') or [])} bahan. Yang saya tangkap:")
@@ -159,6 +181,11 @@ def susun_pesan(d):
         baris.append(f"Judul: {v.get('judul', '')}")
         if ai:
             baris.append(f"Naskah (dibacakan suara AI): \"{_potong(v.get('full_voice_over'))}\"")
+            detik = perkiraan_detik(v.get("full_voice_over"))
+            bahan = brief.get("bahan_layak_detik")
+            baris.append(f"Durasi: narasi ±{detik:.0f} dtk" + (f" · bahan video layak ±{bahan:.0f} dtk" if bahan else ""))
+            if bahan_kurang(v.get("full_voice_over"), brief):
+                kurang_varian.append(HURUF[i])
         else:
             teks = [s.get("text", "") for s in (v.get("scenes") or []) if isinstance(s, dict)]
             if teks:
@@ -172,6 +199,15 @@ def susun_pesan(d):
         grafik = ringkas_grafik(v.get("motion_plan"), naskah=v.get("full_voice_over"), brief=brief)
         if grafik:
             baris.append(f"Grafik: {grafik}")
+        baris.append("")
+    if kurang_varian:
+        from broll import tersedia as broll_tersedia
+        opsi = ["kirim video tambahan (saya buatkan draf baru)"]
+        if broll_tersedia():
+            opsi.append("balas \"stok\" untuk mengisi dengan klip stok Pexels yang relevan")
+        opsi.append("biarkan saja: sebagian gambar diperlambat atau dipakai ulang")
+        baris.append(f"Catatan: naskah {', '.join(kurang_varian)} lebih panjang dari bahan video. "
+                     "Pilihanmu: " + "; ".join(opsi) + ".")
         baris.append("")
     pilihan = " atau ".join(HURUF[:len(d["varian"])])
     baris.append(f"Balas {pilihan}. Mau mengubah kalimatnya? Tulis saja versimu, "

@@ -106,6 +106,27 @@ def duration_text(detik=None):
     return f"TEPAT sekitar {detik} detik (kira-kira {kmin}-{kmax} kata)"
 
 
+def target_dari_bahan(bahan_detik):
+    """Target narasi (detik) supaya gambar user tidak perlu diulang, atau None bila bahan cukup
+    untuk rentang bawaan. Asal: 24 Sep, narasi 22 dtk untuk bahan layak 13,6 dtk -> klip
+    terputar berulang. Minimal DURATION_MIN: narasi lebih pendek dari itu jarang bermakna."""
+    if not bahan_detik or bahan_detik >= DEFAULT_RANGE[1]:
+        return None
+    return max(DURATION_MIN, int(round(bahan_detik)))
+
+
+def kata_untuk_bahan(detik):
+    """(min_kata, max_kata) untuk narasi yang harus MUAT di bahan: batas atas hanya +5%
+    (bukan +25% seperti word_target) karena kelebihan berarti gambar diperlambat/diulang."""
+    kmax = max(5, int(detik * WORDS_PER_SECOND * 1.05))
+    return max(4, int(kmax * 0.75)), kmax
+
+
+def perkiraan_detik(teks):
+    """Perkiraan lama narasi dibacakan (detik) dari jumlah kata."""
+    return len((teks or "").split()) / WORDS_PER_SECOND
+
+
 def off_target(aktual, target, tolerance=None):
     """True kalau durasi nyata meleset melebihi toleransi relatif."""
     if not target or not aktual:

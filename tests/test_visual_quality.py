@@ -6,6 +6,7 @@ stabil <= 20 %lebar/dtk; kamera mengayun ke lantai 170-317 %lebar/dtk."""
 
 import subprocess
 
+import numpy as np
 import pytest
 
 import auto_render as ar
@@ -123,23 +124,37 @@ def test_dimatikan_tidak_menganalisis(monkeypatch):
 
 # ------------------------------------------------------------------ mode voice-over AI
 
-def test_ai_memilih_rentang_layak_terpanjang(klip, nyala):
-    a, b = ar.rentang_layak_ai(klip["guncang"])
+def test_ai_memakai_SEMUA_rentang_layak_bukan_hanya_terpanjang(klip, nyala):
+    (b,) = ar.bahan_ai([klip["guncang"]])
     (x, y, _), = vq.analisis(klip["guncang"])["buruk"]
-    assert b <= x or a >= y, "rentang terpilih tidak boleh menyentuh bagian goyang"
-    sisa = [(0.0, x), (y, 5.0)]
-    assert (b - a) == pytest.approx(max(q - p for p, q in sisa), abs=0.05), "harus yang terpanjang"
+    assert len(b["rentang"]) == 2, "kedua sisi bagian goyang dipakai"
+    for p, q in b["rentang"]:
+        assert q <= x + 1e-6 or p >= y - 1e-6, "rentang tidak boleh menyentuh bagian goyang"
+    assert ar.POTONG_VISUAL["dipotong"][0]["file"].endswith("guncang.mp4")
 
 
-def test_ai_klip_stabil_tidak_dipotong(klip, nyala):
-    assert ar.rentang_layak_ai(klip["stabil"]) is None
+def test_ai_klip_stabil_utuh(klip, nyala):
+    (b,) = ar.bahan_ai([klip["stabil"]])
+    assert b["rentang"] == [(0.0, pytest.approx(5.0, abs=0.1))]
 
 
-def test_build_segment_dengan_potong_diloop_dan_durasi_tetap(klip, tmp_path):
+def _frame_gray(path, t):
+    r = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{t}", "-i", str(path), "-frames:v", "1",
+                        "-vf", "scale=64:36,format=gray", "-f", "rawvideo", "-"], capture_output=True)
+    return np.frombuffer(r.stdout, np.uint8).astype(int)
+
+
+def test_build_segment_tidak_pernah_loop_dan_durasi_tetap(klip, tmp_path):
+    """Sumber 1 dtk untuk slot 3 dtk (jaring pengaman pembulatan): durasi tetap 3 dtk, tapi
+    frame terakhir DITAHAN -- bukan kembali ke awal sumber (loop, keluhan user 24 Sep)."""
     seg = tmp_path / "seg.mp4"
-    ar.build_segment(klip["stabil"], 3.0, str(seg), keep_audio=False, potong=(0.5, 1.5),
+    ar.build_segment(klip["pan"], 3.0, str(seg), keep_audio=False, potong=(0.5, 1.5),
                      fade_in=False, fade_out=False)
     dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
                                 "-of", "csv=p=0", str(seg)], capture_output=True, text=True).stdout)
-    assert dur == pytest.approx(3.0, abs=0.1), "rentang 1 dtk harus diloop mengisi slot 3 dtk"
-    assert not list(tmp_path.glob("*_layak.mp4")), "berkas sementara harus dibersihkan"
+    assert dur == pytest.approx(3.0, abs=0.1), "segmen tidak boleh lebih pendek dari slotnya"
+    # Kontrol positif: sumber memang bergerak (pan), jadi frame awal & akhir potongan beda.
+    assert np.abs(_frame_gray(seg, 0.1) - _frame_gray(seg, 0.9)).mean() > 2
+    # Setelah sumber habis: diam (ditahan), BUKAN kembali ke frame awal.
+    assert np.abs(_frame_gray(seg, 1.6) - _frame_gray(seg, 2.8)).mean() < 1
+    assert np.abs(_frame_gray(seg, 2.8) - _frame_gray(seg, 0.1)).mean() > 2

@@ -356,3 +356,66 @@ def test_motion_mati_tersimpan_di_draf_dan_dipakai_saat_render(env, capsys, monk
     monkeypatch.setenv("MOTION_GRAPHIC", "sedang")      # proses render = proses baru
     jalan(capsys, "--chat-id", CHAT, "--draft-id", d["draft_id"], "--varian", "A")
     assert os.environ.get("MOTION_GRAPHIC") == "mati"
+
+
+# ------------------------------------------------------------------ naskah vs panjang bahan
+
+PANJANG = " ".join(["kata"] * 60)          # ±22 dtk dibacakan
+
+
+def _draf_bahan(naskah_a, bahan=13.6, foto=0):
+    return {"draft_id": "0123456789ab", "bahan": ["a"],
+            "brief": {"audio_mode": "ai", "bahan_layak_detik": bahan, "bahan_foto": foto},
+            "varian": [{**VARIAN[0], "full_voice_over": naskah_a}, VARIAN[1]]}
+
+
+def test_pesan_draf_membandingkan_durasi_dan_menawarkan_pilihan(monkeypatch):
+    import broll
+    monkeypatch.setattr(broll, "tersedia", lambda: True)
+    pesan = dn.susun_pesan(_draf_bahan(PANJANG))
+    assert "narasi ±22 dtk · bahan video layak ±14 dtk" in pesan
+    assert "naskah A lebih panjang dari bahan video" in pesan, "hanya varian yang kelebihan disebut"
+    assert "video tambahan" in pesan and '"stok"' in pesan
+
+
+def test_tanpa_key_pexels_tidak_menawarkan_stok(monkeypatch):
+    import broll
+    monkeypatch.setattr(broll, "tersedia", lambda: False)
+    pesan = dn.susun_pesan(_draf_bahan(PANJANG))
+    assert "video tambahan" in pesan and '"stok"' not in pesan
+
+
+def test_naskah_muat_tidak_ada_catatan():
+    pesan = dn.susun_pesan(_draf_bahan(" ".join(["kata"] * 35)))     # ±13 dtk
+    assert "lebih panjang dari bahan" not in pesan
+
+
+def test_bahan_berfoto_tidak_dianggap_kurang():
+    assert dn.bahan_kurang(PANJANG, {"audio_mode": "ai", "bahan_layak_detik": 5, "bahan_foto": 1}) is None
+
+
+def test_naskah_ubahan_panjang_dicatat_dan_tidak_dikoreksi_otomatis():
+    d = _draf_bahan(VARIAN[0]["full_voice_over"])
+    d["brief"]["target_duration"] = 30
+    b = dn.brief_terpilih(d, "A", PANJANG)
+    assert b["full_voice_over"] == PANJANG
+    assert any("bahan video layak" in c for c in b["naskah_status"]["catatan"])
+    assert b["target_duration"] is None, "koreksi durasi saat render tidak boleh menulis ulang naskah user"
+
+
+def test_prompt_brief_menyesuaikan_panjang_bahan():
+    p = ab.build_prompt(["a.mp4"], {}, jumlah_gambar=1, bahan_layak=13.6)
+    assert "sekitar 14 detik SAJA" in p and "±14 detik" in p
+    # durasi yang DIMINTA user menang
+    p = ab.build_prompt(["a.mp4"], {}, jumlah_gambar=1, bahan_layak=13.6, target_duration=30)
+    assert "SAJA" not in p and "30 detik" in p
+    # bahan panjang: rentang bawaan
+    p = ab.build_prompt(["a.mp4"], {}, jumlah_gambar=1, bahan_layak=50)
+    assert "20-35 detik" in p
+
+
+def test_hitung_bahan_layak_sama_dengan_renderer():
+    total = ab.hitung_bahan_layak(["/v1.mp4", "/v2.mp4", "/f.jpg"],
+                                  {"/v1.mp4": 5.5, "/v2.mp4": 3.6},
+                                  {"/v2.mp4": [(1.75, 3.6, "goyang")]})
+    assert total == pytest.approx(5.5 + 1.75 + ab.FOTO_DETIK, abs=0.06)   # dibulatkan 0,1

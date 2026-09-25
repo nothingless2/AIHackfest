@@ -101,7 +101,7 @@ Instruksi agent: `hermes-skill/content-factory/SKILL.md` (salin ke `~/.hermes/sk
 
 **Motion graphic** (bawaan `sedang`, matikan dengan `--motion mati`) dirender Remotion
 (`remotion/src/MotionOverlay.jsx`):
-- Jenisnya: kartu pembuka, sorot kata kunci, ikon, langkah "1/3", label, kartu ajakan.
+- Jenisnya: kartu pembuka, sorot kata kunci, ikon, langkah, label, kartu ajakan.
 - LLM hanya mengusulkan. `scripts/motion_plan.py` menegakkan katalog, menolak angka yang tidak
   ada di permintaan user, dan memasang tiap elemen tepat saat kata jangkarnya **diucapkan**
   narasi TTS.
