@@ -51,7 +51,7 @@ from style import (  # noqa: E402
     auto_zoom_enabled, resolve_color_filter, resolve_speed_factor,
     resolve_text_font, resolve_text_position,
 )
-from subtitle_layout import layout_group, text_width  # noqa: E402
+from subtitle_layout import MAX_WIDTH_RATIO as SUBTITLE_MAX_WIDTH, layout_group, text_width  # noqa: E402
 from thumbnail import (  # noqa: E402
     THUMBNAIL_ENABLED, extract_thumbnail, thumbnail_time,
 )
@@ -1100,7 +1100,7 @@ def wrap_text(teks, fontsize, video_width, *, max_lines=MAX_SUBTITLE_LINES):
     (100+ karakter), sedangkan scene tulisan LLM dibatasi 6 kata. Tanpa ini,
     kalimat panjang melebar keluar layar dan kedua ujungnya terpotong.
     """
-    lebar_aman = video_width * 0.88
+    lebar_aman = video_width * SUBTITLE_MAX_WIDTH
     maks = max(8, int(lebar_aman / (fontsize * CHAR_WIDTH_RATIO)))
 
     baris, sekarang = [], ""
@@ -1153,12 +1153,12 @@ def text_y(video_height, y_bawah):
     return y_bawah
 
 
-def _muat_lebar(teks, fs, video_width, font_path, *, batas=0.9):
+def _muat_lebar(teks, fs, video_width, font_path, *, batas=None):
     """Ukuran font terbesar <= fs yang membuat SETIAP baris hasil wrap_text muat di
     `batas` x lebar kanvas, DIUKUR dengan berkas font yang dipakai. CHAR_WIDTH_RATIO
     hanyalah perkiraan satu font; font lebar (Montserrat ExtraBold, Pacifico) melewati
     tepi dan terpotong -- terukur di render nyata saat judul tengah dibesarkan."""
-    lebar_maks = video_width * batas
+    lebar_maks = video_width * (SUBTITLE_MAX_WIDTH if batas is None else batas)
     f, minimum = fs, max(16, int(fs * 0.5))
     kata = teks.split()
     while f > minimum:
@@ -1306,7 +1306,7 @@ def filter_per_kata(kata, akhir, W, H, gaya):
         if sampai <= dari:
             continue
         f = fs
-        while f > 16 and text_width(font, f, teks) > W * 0.9:
+        while f > 16 and text_width(font, f, teks) > W * SUBTITLE_MAX_WIDTH:   # tombol kanan TikTok
             f -= 4
         hasil.append(_drawtext(escape_drawtext(teks), f, f"{y}-text_h/2", gaya,
                                f"between(t,{dari:.3f},{sampai:.3f})", font_path=font))
@@ -1528,8 +1528,10 @@ def _usulan_broll(data, kata_waktu, durasi, sibuk=()):
     user = [q for q in (_broll._bersihkan_query(x) for x in (os.getenv("BROLL_QUERY") or "").split(","))
             if q]
     if user:
-        usulan = [{"query": q, "saat_kata": (usulan[i]["saat_kata"] if i < len(usulan) else "")}
-                  for i, q in enumerate(user[:_broll.MAKS_USULAN])]
+        # Kata kunci dari USER dipercaya apa adanya (boleh bahasa Indonesia; tidak disaring
+        # relevansi judul klip yang berbahasa Inggris).
+        usulan = [{"query": q, "saat_kata": (usulan[i]["saat_kata"] if i < len(usulan) else ""),
+                   "dari_user": True} for i, q in enumerate(user[:_broll.MAKS_USULAN])]
     if not usulan and data.get("judul"):
         usulan = [{"query": _broll._bersihkan_query(data["judul"])[:60], "saat_kata": ""}]
     kosong = [u for u in usulan if not u["saat_kata"]]
@@ -1569,7 +1571,8 @@ def siapkan_cutaway(data, kata_waktu, durasi, sibuk, folder):
     orientasi = _broll.orientasi_untuk(TARGET_W, TARGET_H)
     for k, c in enumerate(jadwal):
         klip, alasan = _broll.ambil([c["query"]], CUTAWAY_KANDIDAT, orientasi, folder,
-                                    os.getenv("CONTENT_FACTORY_RUN_ID") or "", awalan=f"_broll_c{k}_")
+                                    os.getenv("CONTENT_FACTORY_RUN_ID") or "", awalan=f"_broll_c{k}_",
+                                    saring=not c.get("dari_user"))
         lama = c["selesai"] - c["mulai"]
         layak = [x for x in klip if detail_klip(x["path"], min(lama, float(x.get("durasi") or lama))) >= DETAIL_MIN]
         if klip and not layak:
@@ -1706,18 +1709,16 @@ def split_for_subtitle(teks, fontsize, video_width, *, max_lines=MAX_SUBTITLE_LI
     sini kalimat dipecah jadi beberapa bagian yang masing-masing muat, lalu
     pemanggil membagi durasinya secara proporsional.
     """
-    lebar_aman = video_width * 0.88
-    per_baris = max(8, int(lebar_aman / (fontsize * CHAR_WIDTH_RATIO)))
-    # 90% dari anggaran penuh: pemecahan dan pembungkusan memakai perkiraan yang
-    # sama, jadi tanpa margin ini batas kata bisa mendorong potongan ke baris
-    # keempat dan wrap_text terpaksa memotongnya dengan "..." -- membuang ucapan
-    # user padahal seluruhnya sebenarnya muat.
-    per_tampilan = int(per_baris * max_lines * 0.9)
+    # Muat = wrap_text SENDIRI menggambarnya tanpa "..." (bukan taksiran karakter). Taksiran
+    # dengan margin 90% cukup pada lebar 0,88 tapi gagal setelah subtitle dipersempit ke 0,74
+    # (25 Sep): sisa ruang di ujung baris jadi relatif besar dan kata terpotong jadi "...".
+    def muat(calon):
+        return not wrap_text(calon, fontsize, video_width, max_lines=max_lines).endswith("...")
 
     bagian, sekarang = [], ""
     for kata in teks.split():
         calon = f"{sekarang} {kata}".strip()
-        if len(calon) <= per_tampilan or not sekarang:
+        if not sekarang or muat(calon):
             sekarang = calon
         else:
             bagian.append(sekarang)
@@ -1734,7 +1735,7 @@ def chunk_words(words, fs, video_width, *, max_lines=None):
     tampilan diambil dari kata pertama dan terakhirnya sendiri.
     """
     baris_maks = max_lines or SUBTITLE_MAX_LINES
-    per_baris = max(8, int(video_width * 0.88 / (fs * CHAR_WIDTH_RATIO)))
+    per_baris = max(8, int(video_width * SUBTITLE_MAX_WIDTH / (fs * CHAR_WIDTH_RATIO)))
     per_tampilan = int(per_baris * baris_maks * 0.9)
 
     kelompok, sekarang = [], []
@@ -2101,7 +2102,9 @@ def render_from_agent_script(
                 klip, gagal = _broll.ambil(
                     cfg_broll["queries"] or usul or [data.get("judul") or "b-roll"], kuota,
                     _broll.orientasi_untuk(TARGET_W, TARGET_H), output_dir,
-                    os.getenv("CONTENT_FACTORY_RUN_ID") or "")
+                    os.getenv("CONTENT_FACTORY_RUN_ID") or "",
+                    # Usulan BrainIdea (Inggris) disaring relevansi; kata kunci user tidak.
+                    saring=not cfg_broll["queries"] and bool(usul))
                 broll_tmp = [k["path"] for k in klip]
                 broll_info = {"dipakai": [{"id": k["id"], "kredit": k["kredit"],
                                            "halaman": k["halaman"]} for k in klip],

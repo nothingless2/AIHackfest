@@ -3,6 +3,7 @@
 Asal: user menilai naskah hambar dan meminta teks seperti video referensi (kreator TikTok):
 satu kata per tampilan, berganti tepat mengikuti ucapan."""
 
+import os
 import json
 import shutil
 import subprocess
@@ -165,3 +166,22 @@ def test_huruf_asing_dari_model_ditandai():
     assert any("确认" in x for x in m)
     assert nk.periksa("Yuk daftar! Café, naïve, 100% seru 🎉") == [], "Latin beraksen & emoji bukan huruf asing"
     assert nk.periksa("Привет всем") and nk.periksa("안녕 teman")
+
+
+def test_kata_narasi_panjang_tidak_masuk_area_tombol_kanan():
+    """25 Sep: kata narasi panjang ('TERSELAMATKAN') selebar ±95% masuk area tombol TikTok."""
+    import auto_render as ar
+    from subtitle_layout import text_width
+    gaya = ar.SUBTITLE_STYLES["kata"]
+    f = ar.filter_per_kata([{"word": "terselamatkan", "start": 0, "end": 1}], 1.0, 1080, 1920, gaya)
+    fs = int(f[0].split("fontsize=")[1].split(":")[0])
+    font = os.path.join(ar.ASSETS_FONTS, gaya["font"])
+    assert text_width(font, fs, "TERSELAMATKAN") <= 1080 * ar.SUBTITLE_MAX_WIDTH
+
+
+def test_angka_karangan_di_naskah_ditandai():
+    """25 Sep: 'cuma 15 menit' dikarang untuk ajakan donor yang tidak menyebut durasi."""
+    m = nk.periksa("Mau bantu cuma 15 menit? Yuk daftar!", sumber="ajak donor darah minggu depan")
+    assert any("15" in x for x in m)
+    assert nk.periksa("Donor tanggal 12, yuk!", sumber="donor darah tanggal 12") == []
+    assert nk.periksa("Cuma 15 menit, yuk!") == [], "tanpa sumber: tidak dinilai (perilaku lama)"

@@ -201,3 +201,13 @@ def test_inspect_menawarkan_beberapa_short_bila_ucapan_panjang():
     pendek = {**ringk, "detik_ucapan": 50}
     assert "short" not in [x["kode"] for x in im.susun_pertanyaan(pendek, im.dari_konteks("edit ya"))]
     assert "short" not in [x["kode"] for x in im.susun_pertanyaan(ringk, im.dari_konteks("jadi 2 short ya"))]
+
+
+def test_pesan_draf_jujur_bila_short_kurang_dari_permintaan(env, capsys):
+    out = buat_draf(env, capsys)
+    d = _jadikan_draf_short(out["draft_id"])
+    d["varian"] = d["varian"][:1]
+    d["brief"]["edit_status"] = {"diminta": 2, "jadi": 1,
+                                 "catatan": ["short 2 dibuang: hasil terlalu pendek (13.1 dtk < 15 dtk)"]}
+    pesan = dn.susun_pesan(d)
+    assert "hanya 1 dari 2 short" in pesan and "13.1 dtk" in pesan and 'Balas "A"' in pesan

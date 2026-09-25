@@ -47,6 +47,25 @@ def norm(kata):
     return re.sub(r"[^\w]", "", str(kata or "").lower())
 
 
+def token_jangkar(saat_kata):
+    """Jangkar -> daftar kata ternormalisasi. LLM sering menulis frasa ("API key", "langsung
+    beres") walau diminta SATU kata -- terukur 25 Sep: semua elemen grafik short terbuang karena
+    jangkar dua kata tidak pernah cocok dengan satu kata. Frasa dicocokkan sebagai kata BERURUTAN."""
+    return [t for t in (norm(x) for x in str(saat_kata or "").split()) if t][:4]
+
+
+def cari_frasa(kata, token, mulai=0, dilewati=()):
+    """Indeks kata pertama di `kata` (daftar ternormalisasi) tempat `token` muncul berurutan,
+    mulai dari `mulai`, melewati indeks di `dilewati`; None bila tidak ada."""
+    n = len(token)
+    if not n:
+        return None
+    for k in range(mulai, len(kata) - n + 1):
+        if k not in dilewati and kata[k:k + n] == token:
+            return k
+    return None
+
+
 def _teks(nilai, batas):
     """Teks bersih, atau (None, alasan) bila melewati batas. TIDAK dipotong: potongan bisa
     mengubah makna."""
@@ -113,7 +132,7 @@ def bersihkan(plan, *, naskah, sumber_fakta, pakai_jangkar):
         catatan.append(f"{len(elemen)} elemen dilewati: hanya untuk mode voice-over AI "
                        "(butuh waktu kata narasi)")
         elemen = []
-    kata_naskah = {norm(w) for w in (naskah or "").split()}
+    kata_naskah = [norm(w) for w in (naskah or "").split()]
     for i, el in enumerate(elemen, 1):
         if not isinstance(el, dict):
             continue
@@ -128,8 +147,8 @@ def bersihkan(plan, *, naskah, sumber_fakta, pakai_jangkar):
         sub, _ = _teks(el.get("sub"), BATAS["sub"])
         if not cek_angka(f"elemen {i} ({jenis})", teks, sub or ""):
             continue
-        jangkar = norm(el.get("saat_kata"))
-        if not jangkar or jangkar not in kata_naskah:
+        jangkar = token_jangkar(el.get("saat_kata"))
+        if cari_frasa(kata_naskah, jangkar) is None:
             catatan.append(f"elemen {i} ({jenis}) dibuang: kata jangkar {el.get('saat_kata')!r} "
                            "tidak ada di naskah")
             continue
@@ -169,9 +188,9 @@ def jadwal(bersih, kata_waktu, durasi, *, ada_teks_statis=False):
     pos, akhir_prev, mulai_prev = -1, akhir_hook, None
     elemen = []
     for el in bersih.get("elemen") or []:
-        j = next((k for k in range(pos + 1, len(waktu)) if waktu[k][0] == el["jangkar"]), None)
+        j = cari_frasa([w for w, _ in waktu], el["jangkar"], mulai=pos + 1)
         if j is None:
-            catatan.append(f"{el['jenis']} \"{el['teks']}\" dibuang: kata \"{el['jangkar']}\" "
+            catatan.append(f"{el['jenis']} \"{el['teks']}\" dibuang: kata \"{' '.join(el['jangkar'])}\" "
                            "tidak ditemukan di suara narasi")
             continue
         pos = j
@@ -217,9 +236,7 @@ def jadwal_broll(usulan, kata_waktu, durasi, *, sibuk=()):
     #    dijamin urut waktu), lalu diproses urut WAKTU.
     dipakai, berjangkar = set(), []
     for u in usulan or []:
-        jangkar = norm(u.get("saat_kata"))
-        j = next((k for k in range(len(waktu)) if jangkar and k not in dipakai
-                  and waktu[k][0] == jangkar), None)
+        j = cari_frasa([w for w, _ in waktu], token_jangkar(u.get("saat_kata")), dilewati=dipakai)
         if j is None:
             catatan.append(f"B-roll '{u['query']}' dibuang: kata \"{u.get('saat_kata')}\" tidak "
                            "ditemukan di ucapan")
@@ -250,6 +267,6 @@ def jadwal_broll(usulan, kata_waktu, durasi, *, sibuk=()):
                            "di sekitar kata jangkarnya")
             continue
         jadwal.append({"query": u["query"], "saat_kata": u.get("saat_kata"),
-                       "mulai": round(a, 3), "selesai": round(b, 3)})
+                       "mulai": round(a, 3), "selesai": round(b, 3), "dari_user": bool(u.get("dari_user"))})
         terpakai.append((a, b))
     return jadwal, catatan

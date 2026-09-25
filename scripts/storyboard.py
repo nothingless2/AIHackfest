@@ -238,12 +238,23 @@ def kalimat_pertama(teks, maks=140):
     return t[:maks].rsplit(" ", 1)[0] if len(t) > maks else t
 
 
+def impor_auto_render():
+    """auto_render ada di skills/video_generator, TIDAK di jalur impor hermes_render -- tanpa ini
+    contoh suara di draf nyata 25 Sep gagal "No module named 'auto_render'"."""
+    import sys
+    jalur = os.path.join(PROJECT_ROOT, "skills", "video_generator")
+    if jalur not in sys.path:
+        sys.path.insert(0, jalur)
+    import auto_render
+    return auto_render
+
+
 def contoh_suara(teks, keluar):
     """Cuplikan suara narasi (kalimat pertama) dengan mesin & suara terpilih. Return
     (path, catatan). Mesin utama gagal -> cadangan edge-tts dicatat oleh auto_render."""
     import asyncio
 
-    import auto_render as ar
+    ar = impor_auto_render()
     asyncio.run(ar.generate_voice(kalimat_pertama(teks), keluar))
     return keluar, dict(ar.TTS_CATATAN) or None
 

@@ -38,12 +38,23 @@ HURUF_ASING = re.compile(r"[\u0400-\u04FF\u0590-\u06FF\u0E00-\u0E7F\u3040-\u30FF
                          r"\u3400-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF]+")
 
 
-def periksa(teks):
-    """Daftar masalah yang TERUKUR pada naskah; [] = lolos."""
+ANGKA = re.compile(r"\d+(?:[.,]\d+)*")
+
+
+def periksa(teks, sumber=None):
+    """Daftar masalah yang TERUKUR pada naskah; [] = lolos. `sumber` (permintaan user + ucapan):
+    bila diberikan, angka di naskah yang tidak ada di sumber = fakta karangan (terukur 25 Sep:
+    "cuma 15 menit" di naskah ajakan donor yang tidak pernah menyebut durasi)."""
     t = (teks or "").strip()
     if not t:
         return []
     masalah = []
+    if sumber is not None:
+        sah = {a.replace(",", ".") for a in ANGKA.findall(sumber)}
+        asing = [a for a in ANGKA.findall(t) if a.replace(",", ".") not in sah]
+        if asing:
+            masalah.append(f"angka {', '.join(asing[:3])} tidak ada di permintaan user -- hapus, "
+                           "jangan mengarang fakta")
     asing = HURUF_ASING.findall(t)
     if asing:
         masalah.append(f'huruf asing "{" ".join(asing[:3])}" -- tulis dalam bahasa Indonesia')
@@ -79,7 +90,7 @@ ejaan fonetis untuk TTS (kata asing dieja Indonesia, angka dieja)"}}"""
 
 def rapikan(brief, konteks, chat_json, **kw):
     """(brief, catatan). Maksimal SATU panggilan LLM; gagal = naskah lama dipertahankan."""
-    masalah = periksa(brief.get("full_voice_over"))
+    masalah = periksa(brief.get("full_voice_over"), sumber=konteks or "")
     if not masalah:
         return brief, {"diperiksa": True, "masalah": [], "ditulis_ulang": False}
     try:
@@ -87,7 +98,7 @@ def rapikan(brief, konteks, chat_json, **kw):
         fvo = (baru or {}).get("full_voice_over", "").strip()
         if not fvo:
             raise ValueError("jawaban tanpa full_voice_over")
-        sisa = periksa(fvo)
+        sisa = periksa(fvo, sumber=konteks or "")
         hasil = {**brief, "full_voice_over": fvo}
         if baru.get("voice_over_spoken"):
             hasil["voice_over_spoken"] = baru["voice_over_spoken"].strip()

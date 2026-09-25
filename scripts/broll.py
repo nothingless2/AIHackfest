@@ -182,12 +182,47 @@ def pilih_berkas(berkas, tinggi_min=720, tinggi_maks=2200):
     return min(layak, key=lambda x: x[0])[1] if layak else None
 
 
-def _urutan_variasi(kandidat, run_id):
-    """Deterministik per run (bisa diulang), bervariasi antar run."""
-    if not kandidat:
-        return []
-    geser = int(hashlib.sha1(str(run_id).encode()).hexdigest(), 16) % len(kandidat)
-    return kandidat[geser:] + kandidat[:geser]
+VARIASI_TERATAS = 3
+# Kata yang terlalu umum untuk membuktikan relevansi (ada di hampir semua judul klip).
+KATA_UMUM = {"a", "an", "the", "of", "in", "on", "at", "with", "and", "for", "to", "by", "from",
+             "people", "person", "man", "woman", "men", "women", "young", "old", "group", "close",
+             "up", "shot", "view", "video", "footage", "stock", "happy", "smiling", "background",
+             "slow", "motion", "top", "aerial", "while", "using", "their", "his", "her"}
+
+
+def _kata_kunci(teks):
+    kata = re.findall(r"[a-z]+", str(teks or "").lower())
+    return {k[:-1] if k.endswith("s") and len(k) > 4 else k for k in kata if k not in KATA_UMUM and len(k) > 2}
+
+
+def relevan(query, kandidat):
+    """Judul klip (slug halaman Pexels) berbagi minimal satu kata bermakna dengan kata kunci.
+    Terukur 25 Sep: 'young people registering blood donation' -> klip 'people-holding-dog',
+    'blood donation process' -> 'test-tubes-in-a-machine' -- lebih baik tanpa B-roll."""
+    kunci = _kata_kunci(query)
+    if not kunci:              # kata kunci tanpa kata bermakna: tidak bisa dinilai, tidak ditolak
+        return True
+    judul = re.sub(r"\d+", " ", (kandidat.get("halaman") or "").rstrip("/").rsplit("/", 1)[-1].replace("-", " "))
+    return bool(kunci & _kata_kunci(judul))
+
+
+def _urutan_variasi(per_query, run_id):
+    """Urutan kandidat: BERGILIRAN menurut peringkat per kata kunci (teratas tiap kata kunci
+    dulu), variasi antar run hanya di antara VARIASI_TERATAS hasil teratas. Deterministik per run.
+
+    Versi lama memutar daftar GABUNGAN semua hasil dari posisi acak: render nyata 25 Sep memakai
+    hasil ke-30-an ('pria memegang jam', 'klinik hewan') untuk video ajakan donor darah."""
+    h = int(hashlib.sha1(str(run_id).encode()).hexdigest(), 16)
+    urut = []
+    for daftar in per_query:
+        n = min(VARIASI_TERATAS, len(daftar))
+        g = h % n if n else 0
+        urut.append(daftar[:n][g:] + daftar[:n][:g] + daftar[n:])
+    hasil, r = [], 0
+    while any(r < len(d) for d in urut):
+        hasil += [d[r] for d in urut if r < len(d)]
+        r += 1
+    return hasil
 
 
 def _sah_video(path):
@@ -202,19 +237,27 @@ def _sah_video(path):
         return False
 
 
-def ambil(queries, jumlah, orientasi, folder, run_id, awalan="_broll_"):
+def ambil(queries, jumlah, orientasi, folder, run_id, awalan="_broll_", saring=True):
     """(daftar_klip, catatan_gagal). Tiap klip: {path, id, durasi, kredit}.
 
     Tidak pernah melempar karena jaringan: alasan kegagalan dikembalikan sebagai teks
     supaya video yang sudah jadi tidak digagalkan, tapi user TAHU B-roll-nya tidak ada."""
     os.makedirs(folder, exist_ok=True)
-    kandidat, terlihat, catatan = [], set(), []
+    per_query, terlihat, catatan = [], set(), []
     for q in queries:
         try:
+            daftar, tak_relevan = [], 0
             for c in cari(q, orientasi):
-                if c["id"] not in terlihat:
-                    terlihat.add(c["id"])
-                    kandidat.append(c)
+                if c["id"] in terlihat:
+                    continue
+                if saring and not relevan(q, c):
+                    tak_relevan += 1
+                    continue
+                terlihat.add(c["id"])
+                daftar.append(c)
+            if not daftar and tak_relevan:
+                catatan.append(f"'{q}': {tak_relevan} klip ditemukan tapi tidak ada yang relevan")
+            per_query.append(daftar)
         except urllib.error.HTTPError as e:
             if e.code in (401, 403):
                 return [], f"key Pexels ditolak (HTTP {e.code}) -- periksa PEXELS_API_KEY"
@@ -223,11 +266,11 @@ def ambil(queries, jumlah, orientasi, folder, run_id, awalan="_broll_"):
             catatan.append(f"pencarian '{q}' gagal (HTTP {e.code})")
         except Exception as e:                       # jaringan, JSON rusak, dsb.
             catatan.append(f"pencarian '{q}' gagal ({type(e).__name__})")
-    if not kandidat:
+    if not any(per_query):
         return [], "; ".join(catatan) or f"tidak ada klip yang cocok untuk: {', '.join(queries)}"
 
     klip = []
-    for c in _urutan_variasi(kandidat, run_id):
+    for c in _urutan_variasi(per_query, run_id):
         if len(klip) >= jumlah:
             break
         tujuan = os.path.join(folder, f"{awalan}{len(klip)}.mp4")
@@ -254,7 +297,7 @@ def pratinjau(query, orientasi, tujuan):
     """Gambar pratinjau (JPG) klip teratas untuk `query` -- untuk storyboard draf, tanpa
     mengunduh videonya. Return (path, None) atau (None, alasan). Tidak pernah melempar."""
     try:
-        kandidat = [c for c in cari(query, orientasi, per_page=5) if c.get("gambar")]
+        kandidat = [c for c in cari(query, orientasi, per_page=5) if c.get("gambar") and relevan(query, c)]
     except Exception as e:
         return None, f"pencarian gagal ({type(e).__name__})"
     if not kandidat:

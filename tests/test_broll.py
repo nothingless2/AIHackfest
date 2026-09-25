@@ -88,8 +88,8 @@ def test_pilih_berkas_terkecil_yang_masih_hd_dan_hanya_mp4_di_host_sah():
 
 # ------------------------------------------------------------------ pencarian
 
-def _video(id_, durasi=10, link="https://videos.pexels.com/v.mp4"):
-    return {"id": id_, "duration": durasi, "url": f"https://www.pexels.com/video/{id_}/",
+def _video(id_, durasi=10, link="https://videos.pexels.com/v.mp4", judul="secangkir-kopi"):
+    return {"id": id_, "duration": durasi, "url": f"https://www.pexels.com/video/{judul}-{id_}/",
             "user": {"name": "Ani", "url": "https://www.pexels.com/@ani"},
             "video_files": [{"file_type": "video/mp4", "width": 720, "height": 1280, "link": link}]}
 
@@ -404,3 +404,24 @@ def test_env_hermes_render_tidak_bocor_antar_test_1(monkeypatch, tmp_path, capsy
 def test_env_hermes_render_tidak_bocor_antar_test_2():
     import os
     assert os.environ.get("BROLL") is None
+
+
+def test_urutan_bergiliran_menurut_peringkat_bukan_ekor_daftar():
+    """25 Sep: rotasi daftar gabungan memakai hasil ke-30-an yang tidak relevan."""
+    per_query = [[{"id": f"a{i}"} for i in range(15)], [{"id": f"b{i}"} for i in range(15)],
+                 [{"id": f"c{i}"} for i in range(15)]]
+    for run in ("r1", "r2", "r3", "r4"):
+        urut = [c["id"] for c in b._urutan_variasi(per_query, run)]
+        assert len(urut) == 45
+        assert {x[1:] for x in urut[:3]} <= {"0", "1", "2"}, "tiga pertama = hasil teratas tiap kata kunci"
+        assert {x[0] for x in urut[:3]} == {"a", "b", "c"}, "bergiliran antar kata kunci"
+
+
+def test_relevansi_dari_judul_klip():
+    """25 Sep: klip tak relevan terpakai ('orang menggendong anjing' untuk donor darah)."""
+    k = lambda slug: {"halaman": f"https://www.pexels.com/video/{slug}/"}
+    assert not b.relevan("young people registering blood donation", k("people-holding-dog-6568962"))
+    assert not b.relevan("blood donation process close up", k("close-up-shot-of-test-tubes-in-a-machine-8381266"))
+    assert b.relevan("blood donation", k("a-nurse-preparing-a-blood-bag-for-donation-123"))
+    assert b.relevan("software dashboard", k("efficient-task-management-on-digital-dashboard-38902001"))
+    assert b.relevan("volunteers", k("a-happy-volunteer-with-a-plant-7475367")), "bentuk tunggal/jamak"

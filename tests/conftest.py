@@ -67,6 +67,9 @@ os.environ["VISUAL_CUT"] = "0"
 # TTS & key ElevenLabs asli di .env tidak boleh mengubah test (dan tidak boleh memakai
 # kuota): test TTS menyetelnya sendiri.
 os.environ["TTS_PROVIDER"] = ""
+# Rantai model cadangan dari .env asli tidak boleh mengubah perilaku test (test_rantai_model.py
+# menyetelnya sendiri).
+os.environ["LLM_FALLBACK"] = ""
 os.environ["ELEVENLABS_API_KEY"] = ""
 os.environ["TTS_VOICE_GENDER"] = ""
 

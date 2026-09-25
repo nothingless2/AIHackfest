@@ -441,3 +441,12 @@ def test_huruf_asing_di_caption_ditandai():
          "varian": [{**VARIAN[0], "deskripsi": "OpenClaw yang报错 lalu Hermes"}, VARIAN[1]]}
     pesan = dn.susun_pesan(d)
     assert pesan.count("huruf asing") == 1 and "报错" in pesan
+
+
+def test_pesan_draf_jujur_bila_model_tidak_melihat_video():
+    d = {"draft_id": "0123456789ab", "bahan": ["a", "b"],
+         "brief": {"audio_mode": "ai", "tanpa_gambar": True, "pemahaman_bahan": ["x", "y"]},
+         "varian": [VARIAN[0], VARIAN[1]]}
+    pesan = dn.susun_pesan(d)
+    assert "TIDAK bisa melihat video" in pesan and "Saya sudah membaca 2 bahan" in pesan
+    assert "menonton" not in pesan

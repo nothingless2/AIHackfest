@@ -183,8 +183,14 @@ def susun_pesan(d):
     ai = brief.get("audio_mode") == "ai"
     baris, kurang_varian = [], []
     paham = brief.get("pemahaman_bahan") or []
+    if brief.get("tanpa_gambar"):
+        baris.append("Catatan: model AI yang tersedia saat ini TIDAK bisa melihat video, jadi pemahaman "
+                     "dan naskah di bawah hanya dari ucapan & permintaanmu. Periksa baik-baik, atau minta "
+                     "draf ulang nanti.")
+        baris.append("")
     if paham:
-        baris.append(f"Saya sudah menonton {len(d.get('bahan') or [])} bahan. Yang saya tangkap:")
+        kata_kerja = "membaca" if brief.get("tanpa_gambar") else "menonton"
+        baris.append(f"Saya sudah {kata_kerja} {len(d.get('bahan') or [])} bahan. Yang saya tangkap:")
         baris += [f"{i}. {t}" for i, t in enumerate(paham, 1)]
         baris.append("(Kalau ada yang keliru, koreksi dulu, nanti saya buatkan draf baru.)")
         baris.append("")
@@ -245,8 +251,14 @@ def susun_pesan(d):
                      "Pilihanmu: " + "; ".join(opsi) + ".")
         baris.append("")
     if brief.get("jumlah_short"):
-        baris.append(f"Balas \"semua\" untuk membuat {len(d['varian'])} short sekaligus, atau pilih "
-                     "hurufnya (mis. \"A, C\").")
+        st = brief.get("edit_status") or {}
+        if st.get("diminta") and st.get("jadi", 0) < st["diminta"]:
+            # Jujur soal kekurangannya (25 Sep: 2 diminta, 1 jadi karena short ke-2 < 15 dtk).
+            baris.append(f"Catatan: hanya {st['jadi']} dari {st['diminta']} short yang bisa dibuat -- "
+                         + "; ".join(st.get("catatan") or []) + ".")
+        n = len(d["varian"])
+        baris.append(f"Balas \"semua\" untuk membuat {n} short sekaligus, atau pilih hurufnya "
+                     "(mis. \"A, C\")." if n > 1 else "Balas \"A\" untuk membuat short ini.")
         return "\n".join(baris).strip()
     pilihan = " atau ".join(HURUF[:len(d["varian"])])
     baris.append(f"Balas {pilihan}. Mau mengubah kalimatnya? Tulis saja versimu, "

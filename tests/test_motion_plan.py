@@ -157,3 +157,19 @@ def test_tingkat(monkeypatch):
     assert mp.tingkat() == "sedang", "bawaan = sedang (keputusan user)"
     with pytest.raises(StyleError):
         mp.tingkat("heboh")
+
+
+def test_jangkar_frasa_dicocokkan_sebagai_kata_berurutan():
+    """25 Sep: LLM menulis jangkar 'API key' / 'langsung beres'; semua elemen short terbuang."""
+    naskah = "ganti API key di OpenClaw sulit tapi Hermes langsung beres tanpa error"
+    kw = [{"word": w, "start": 0.5 * i, "end": 0.5 * i + 0.4} for i, w in enumerate(naskah.split())]
+    p = {"elemen": [{"jenis": "sorot", "teks": "API key", "saat_kata": "API key"},
+                    {"jenis": "sorot", "teks": "Beres", "saat_kata": "langsung beres"},
+                    {"jenis": "sorot", "teks": "Salah", "saat_kata": "key ganti"}]}
+    b, cat = mp.bersihkan(p, naskah=naskah, sumber_fakta="", pakai_jangkar=True)
+    assert [e["teks"] for e in b["elemen"]] == ["API key", "Beres"], "urutan terbalik bukan frasa"
+    items, _ = mp.jadwal(b, kw, 20.0)
+    beres = next(i for i in items if i["teks"] == "Beres")
+    assert beres["mulai"] == pytest.approx(kw[naskah.split().index("langsung")]["start"])
+    jadwal, _ = mp.jadwal_broll([{"query": "api", "saat_kata": "API key"}], kw, 20.0)
+    assert jadwal and jadwal[0]["mulai"] == pytest.approx(kw[1]["start"] - mp.CUT_SEBELUM)

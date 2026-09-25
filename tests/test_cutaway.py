@@ -63,7 +63,8 @@ def test_tidak_bertumpuk_dengan_elemen_motion():
 def test_query_user_menang_jangkar_tetap_dari_brief(monkeypatch):
     monkeypatch.setenv("BROLL_QUERY", "blood bag, nurse")
     u = ar._usulan_broll({"broll": [{"query": "donation", "saat_kata": "donor"}]}, _kata(), 12.0)
-    assert u == [{"query": "blood bag", "saat_kata": "donor"}, {"query": "nurse", "saat_kata": u[1]["saat_kata"]}]
+    assert u == [{"query": "blood bag", "saat_kata": "donor", "dari_user": True},
+                 {"query": "nurse", "saat_kata": u[1]["saat_kata"], "dari_user": True}]
     assert u[1]["saat_kata"] in KATA, "tanpa jangkar: kata yang diucapkan di titik merata"
 
 
@@ -117,7 +118,7 @@ def render(monkeypatch, tmp_path):
                     "yuv420p", str(bertekstur)], check=True, capture_output=True)
     diambil = []
 
-    def palsu(queries, jumlah, orientasi, folder, run_id, awalan="_broll_"):
+    def palsu(queries, jumlah, orientasi, folder, run_id, awalan="_broll_", saring=True):
         import shutil
         tujuan = f"{folder}/{awalan}0.mp4"
         shutil.copy2(bertekstur, tujuan)

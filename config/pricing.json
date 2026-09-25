@@ -1,6 +1,6 @@
 {
   "_catatan": "Harga per 1 JUTA token, mata uang USD. PERIKSA ULANG di halaman resmi penyedia sebelum dipakai untuk keputusan biaya nyata -- harga berubah dan file ini tidak memperbarui dirinya sendiri. Model yang TIDAK ada di sini tidak akan ditebak: biayanya dilaporkan null, bukan dikarang.",
-  "updated_at": "2026-09-24",
+  "updated_at": "2026-09-25",
   "currency": "USD",
   "llm": {
     "gpt-4o": {
@@ -14,6 +14,21 @@
       "sumber": "https://openrouter.ai/models (varian ':free' OpenRouter berharga $0 per definisi; dibatasi rate-limit, bukan biaya)"
     },
     "nex-agi/nex-n2.5-mini:free": {
+      "input_per_1m": 0.0,
+      "output_per_1m": 0.0,
+      "sumber": "https://openrouter.ai/models (varian ':free' OpenRouter berharga $0 per definisi; dibatasi rate-limit, bukan biaya)"
+    },
+    "qwen/qwen3.8-27b:free": {
+      "input_per_1m": 0.0,
+      "output_per_1m": 0.0,
+      "sumber": "https://openrouter.ai/models (varian ':free' OpenRouter berharga $0 per definisi; dibatasi rate-limit, bukan biaya)"
+    },
+    "google/gemma-4-31b-it:free": {
+      "input_per_1m": 0.0,
+      "output_per_1m": 0.0,
+      "sumber": "https://openrouter.ai/models (varian ':free' OpenRouter berharga $0 per definisi; dibatasi rate-limit, bukan biaya)"
+    },
+    "nvidia/nemotron-3-ultra-550b-a55b:free": {
       "input_per_1m": 0.0,
       "output_per_1m": 0.0,
       "sumber": "https://openrouter.ai/models (varian ':free' OpenRouter berharga $0 per definisi; dibatasi rate-limit, bukan biaya)"

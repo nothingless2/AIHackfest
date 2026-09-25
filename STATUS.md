@@ -599,3 +599,31 @@ pro 23,6 dtk. `EDIT_MODEL` berbayar dijadikan komentar sehingga memakai model gr
     per kata kunci.
   - Temuan 2: huruf Mandarin "报错" bocor ke caption varian B. Pesan draf kini menandai huruf
     asing di judul/caption juga.
+
+## 25-26 Sept — key baru, model gratis dicabut, rantai model, uji nyata ulang
+
+- Key OpenRouter baru terpasang (tanpa kedaluwarsa). Lalu `nex-agi/nex-n2.5-*:free` **dicabut**
+  dari OpenRouter ("No endpoints found"). Qwen/Gemma gratis bergantian 429 (antrean penyedia
+  bersama, bukan kuota key).
+- **Rantai model**:
+  - Pipeline: `LLM_MODEL=qwen/qwen3.8-27b:free` + `LLM_FALLBACK=gemma-4-31b-it, nemotron-3-ultra`.
+    Model yang tidak tersedia (404/429/502/503) dilewati; 2 putaran.
+  - Pesan bergambar: model teks-saja PALING AKHIR, diberi tahu ia tidak melihat video; brief
+    menandai `tanpa_gambar` dan draf mengakuinya.
+  - Hermes: `fallback_providers` yang sama.
+- **Temuan uji nyata & perbaikan**:
+  - Model teks-saja mengarang "petugas medis memeriksa calon pendonor" untuk video food court.
+    Penyebab: model itu dipakai di putaran pertama.
+  - Naskah mengarang "cuma 15 menit", sekarang diperiksa `naskah.periksa(sumber=...)` (angka
+    yang tidak ada di permintaan user = masalah, ditulis ulang).
+  - B-roll mode AI tak relevan ('people-holding-dog' untuk donor darah). Kini judul klip harus
+    berbagi kata bermakna dengan kata kunci AI; kata kunci user tidak disaring. Urutan kandidat
+    bergiliran menurut peringkat, bukan ekor daftar gabungan.
+  - Contoh suara draf gagal (`auto_render` tidak di jalur impor hermes_render), sudah diperbaiki.
+  - Subtitle & kata narasi maks 74% lebar (tombol kanan TikTok). Pemecah kalimat kini memakai
+    `wrap_text` sendiri: taksiran lama memotong kata jadi "..." setelah dipersempit.
+  - Jangkar grafik/B-roll boleh frasa ("API key"), dicocokkan sebagai kata berurutan.
+  - Short: pesan draf jujur bila jumlah jadi < diminta.
+- **Hasil nyata**:
+  - Suara asli + B-roll: peringatan tombol kanan hilang.
+  - 2 short dari 6 video (32 & 18 dtk), masing-masing dengan cutaway + grafik; QA lolos.

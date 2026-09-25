@@ -619,6 +619,10 @@ def run():
     )
 
     trend_report = result["trend_report"]
+    import common as _common
+    tanpa_gambar = bool(image_parts) and bool(_common.PANGGILAN_TERAKHIR.get("tanpa_gambar"))
+    if tanpa_gambar:
+        print("[warn] brief dibuat TANPA melihat gambar (semua model bergambar tidak tersedia).")
     varian = None
     if mode_draf() and not multi_short:
         varian = validasi_varian(result.get("varian"))
@@ -680,6 +684,8 @@ def run():
                                 if isinstance(pemahaman, list) else [])
     # Panjang bahan layak: draf membandingkannya dengan panjang naskah (tawaran bila kurang).
     brief["bahan_layak_detik"] = bahan_layak
+    # Pemahaman tanpa melihat video harus diakui ke user (bukan disajikan sebagai "menonton").
+    brief["tanpa_gambar"] = tanpa_gambar
     brief["bahan_foto"] = sum(1 for p in asset_paths if os.path.splitext(p)[1].lower() in IMAGE_EXTENSIONS)
     brief["media_assets"] = resolve_assets(asset_names)
     brief["asset_names"] = asset_names

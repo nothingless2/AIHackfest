@@ -324,22 +324,139 @@ def chat_json(messages, *, model, label="panggilan LLM", max_attempts=None, time
 
     client = make_openai_client(timeout=timeout)
 
-    def sekali():
+    def sekali(m=model, pesan=messages):
         resp = client.chat.completions.create(
-            model=model, messages=messages,
+            model=m, messages=pesan,
             response_format={"type": "json_object"},
         )
-        _catat_pemakaian_llm(model, resp, label)
+        _catat_pemakaian_llm(m, resp, label)
         return parse_json_lenient(resp.choices[0].message.content)
 
-    kw = {} if max_attempts is None else {"max_attempts": max_attempts}
-    return with_retry(
-        sekali,
-        is_retriable=openai_is_retriable,
-        extract_retry_after=openai_retry_after,
-        label=label,
-        **kw,
-    )
+    rantai = rantai_model(model)
+    if len(rantai) == 1:
+        kw = {} if max_attempts is None else {"max_attempts": max_attempts}
+        return with_retry(
+            sekali,
+            is_retriable=openai_is_retriable,
+            extract_retry_after=openai_retry_after,
+            label=label,
+            **kw,
+        )
+    return _chat_rantai(sekali, rantai, messages, label=label,
+                        putaran=max_attempts if max_attempts is not None else PUTARAN_RANTAI)
+
+
+PUTARAN_RANTAI = int(os.getenv("LLM_FALLBACK_ROUNDS", "2"))
+STATUS_TIDAK_TERSEDIA = {404, 429, 502, 503}
+
+
+def rantai_model(model):
+    """Model utama + cadangan (LLM_FALLBACK, dipisah koma), tanpa duplikat. Asal: 25 Sep model
+    gratis utama (nex-n2.5-mini) DICABUT dari OpenRouter ("No endpoints found") dan model gratis
+    lain bergantian dibatasi antrean bersama (429) -- satu model saja tidak bisa diandalkan."""
+    cadangan = [m.strip() for m in (os.getenv("LLM_FALLBACK") or "").split(",") if m.strip()]
+    return list(dict.fromkeys([model] + cadangan))
+
+
+def model_tidak_tersedia(exc):
+    """Model tidak bisa melayani SEKARANG (dicabut, antrean penuh, penyedia down) -> coba model
+    lain. Kuota/kredit habis dan kunci salah BUKAN kasus ini (tidak akan membaik di model lain)."""
+    pesan = str(exc)
+    if "insufficient_quota" in pesan or "credit_balance_exhausted" in pesan:
+        return False
+    status = getattr(exc, "status_code", None)
+    if status in STATUS_TIDAK_TERSEDIA:
+        return True
+    import openai
+    return isinstance(exc, (openai.APIConnectionError, openai.InternalServerError))
+
+
+def _tanpa_gambar(messages):
+    hasil = []
+    for m in messages:
+        isi = m.get("content")
+        if isinstance(isi, list):
+            isi = [x for x in isi if not (isinstance(x, dict) and x.get("type") == "image_url")]
+        hasil.append({**m, "content": isi})
+    return hasil
+
+
+def _ada_gambar(messages):
+    return any(isinstance(m.get("content"), list) and any(
+        isinstance(x, dict) and x.get("type") == "image_url" for x in m["content"]) for m in messages)
+
+
+# Panggilan chat_json terakhir: model yang menjawab & apakah gambar terpaksa dibuang. Dibaca
+# pemanggil (brief) untuk JUJUR bahwa pemahaman dibuat tanpa melihat video.
+PANGGILAN_TERAKHIR = {}
+
+CATATAN_TANPA_GAMBAR = (
+    "\n\nCATATAN SISTEM: gambar bahan TIDAK bisa dikirim ke model ini -- kamu TIDAK melihat "
+    "videonya. DILARANG mendeskripsikan isi visual (orang, tempat, kegiatan) yang tidak disebut "
+    "di transkrip, fakta per bahan, atau permintaan user. Untuk pemahaman per bahan tulis hanya "
+    "yang diketahui dari ucapan/fakta; kalau tidak ada, tulis \"(tidak terlihat oleh model)\".")
+
+
+def _tanpa_gambar_dengan_catatan(messages):
+    hasil = _tanpa_gambar(messages)
+    for i in range(len(hasil) - 1, -1, -1):
+        if hasil[i].get("role") == "user":
+            isi = hasil[i]["content"]
+            if isinstance(isi, list):
+                isi = [dict(x) for x in isi]
+                teks = [x for x in isi if x.get("type") == "text"]
+                if teks:
+                    teks[-1]["text"] = teks[-1]["text"] + CATATAN_TANPA_GAMBAR
+            else:
+                isi = str(isi) + CATATAN_TANPA_GAMBAR
+            hasil[i] = {**hasil[i], "content": isi}
+            break
+    return hasil
+
+
+def _chat_rantai(sekali, rantai, messages, *, label, putaran):
+    """Coba tiap model berurutan; model yang tidak tersedia dilewati ke cadangan berikutnya.
+
+    Pesan BERGAMBAR: model yang menolak gambar dicatat dan baru dipakai PALING AKHIR (setelah
+    semua putaran model bergambar gagal), dengan gambar dibuang + catatan bahwa model tidak
+    melihat video. Terukur 25 Sep: model teks-saja langsung dipakai di putaran pertama lalu
+    mengarang "petugas medis memeriksa calon pendonor" untuk video suasana food court.
+    Galat lain (kunci salah, kuota) langsung naik."""
+    import time
+    PANGGILAN_TERAKHIR.clear()
+    terakhir, teks_saja = None, []
+    bergambar = _ada_gambar(messages)
+    for p in range(max(1, putaran)):
+        for m in rantai:
+            if m in teks_saja:
+                continue
+            try:
+                hasil = sekali(m, messages)
+                PANGGILAN_TERAKHIR.update(model=m, tanpa_gambar=False)
+                return hasil
+            except Exception as e:
+                terakhir = e
+                if bergambar and getattr(e, "status_code", None) == 404 and "image" in str(e).lower():
+                    teks_saja.append(m)
+                    print(f"[warn] {label}: {m} tidak menerima gambar -- disimpan sebagai cadangan terakhir.")
+                    continue
+                if not model_tidak_tersedia(e):
+                    raise
+                print(f"[warn] {label}: model {m} tidak tersedia ({getattr(e, 'status_code', type(e).__name__)})"
+                      " -- mencoba model cadangan.")
+        if p < putaran - 1:
+            time.sleep(3)
+    for m in teks_saja:
+        try:
+            print(f"[warn] {label}: semua model bergambar tidak tersedia -- {m} TANPA gambar.")
+            hasil = sekali(m, _tanpa_gambar_dengan_catatan(messages))
+            PANGGILAN_TERAKHIR.update(model=m, tanpa_gambar=True)
+            return hasil
+        except Exception as e:
+            terakhir = e
+            if not model_tidak_tersedia(e):
+                raise
+    raise terakhir
 
 
 def _catat_pemakaian_llm(model, resp, label):

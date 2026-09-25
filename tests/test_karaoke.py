@@ -104,9 +104,20 @@ def test_kelompok_yang_kepanjangan_ditolak_bukan_dipangkas():
 
 def test_kotak_membungkus_seluruh_teks_dalam_kanvas():
     t = lay.layout_group(_kata("informasi unit yang tidak update"), font_path=ar.FONT_PATH,
-                         fs=86, canvas_w=W, max_lines=2, y_top=1400)
+                         fs=72, canvas_w=W, max_lines=2, y_top=1400)
     x, y, w, h = t["box"]
     assert x >= 0 and x + w <= W and h > 0
+
+
+def test_kotak_subtitle_tidak_masuk_area_tombol_kanan_tiktok():
+    """25 Sep: baris subtitle selebar 88% (dikotak) terdeteksi pemeriksa mutu masuk area tombol
+    kanan TikTok (mulai ±88% lebar). Lebar 0,74 + padding kotak harus berakhir <= 89%."""
+    for teks in ("OpenClaw, tapi ini pendapat pribadi aku ya", "informasi unit yang tidak update sama sekali"):
+        t = lay.layout_group(_kata(teks), font_path=ar.FONT_PATH, fs=64, canvas_w=W, max_lines=2,
+                             y_top=1400)
+        if t:
+            x, y, w, h = t["box"]
+            assert x + w <= W * 0.89, f"kotak sampai {(x + w) / W:.2f} lebar"
 
 
 # ---------- pembangun filter ----------
@@ -140,7 +151,7 @@ def test_kelompok_terlalu_panjang_dipecah_dua_tanpa_membuang_kata():
     f = ar.build_drawtext_chain([_scene(teks)], H, W)
     kata = [x.split("text='")[1].split("'")[0] for x in f if x.startswith("drawtext")]
     assert kata == teks.split(), "tidak ada kata yang hilang"
-    assert sum(x.startswith("drawbox") for x in f) == 2, "dua tampilan, dua kotak"
+    assert sum(x.startswith("drawbox") for x in f) >= 2, "dipecah jadi beberapa tampilan, satu kotak masing-masing"
 
 
 def test_scene_tanpa_kata_tetap_memakai_jalur_lama():

@@ -117,3 +117,13 @@ def test_draf_membawa_path_storyboard(env, monkeypatch, capsys):
                                       "gagal": []})
     out = buat_draf(env, capsys)
     assert out["storyboard"][0].endswith(out["draft_id"] + "_A.jpg") and out["storyboard_gagal"] is None
+
+
+def test_auto_render_terimpor_dari_proses_hermes_render():
+    """Proses hermes_render hanya punya scripts/ di jalur impor (bug nyata 25 Sep)."""
+    import sys
+    scripts = os.path.dirname(os.path.abspath(sb.__file__))
+    kode = (f"import sys; sys.path = [{scripts!r}] + [p for p in sys.path if 'video_generator' not in p];"
+            "import storyboard; m = storyboard.impor_auto_render(); print(hasattr(m, 'generate_voice'))")
+    out = subprocess.run([sys.executable, "-c", kode], capture_output=True, text=True, timeout=120)
+    assert out.stdout.strip().endswith("True"), out.stderr[-400:]

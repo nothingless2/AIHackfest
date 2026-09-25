@@ -20,14 +20,18 @@ Dua fakta hasil pengukuran ffmpeg 4.4 yang menentukan rancangan ini:
   berbeda semuanya bertumpu tepat di garis dasar yang sama.
 """
 
+import os
 from functools import lru_cache
 
 from PIL import ImageFont
 
 # Sama dengan subtitle_geometry(): tinggi blok = jumlah baris * fontsize * 1,25.
 LINE_PITCH_RATIO = 1.25
-# Lebar teks maksimum sebagai fraksi lebar kanvas (sisa untuk margin aman).
-MAX_WIDTH_RATIO = 0.88
+# Lebar teks maksimum sebagai fraksi lebar kanvas. 0,74 (dulu 0,88): tombol kanan TikTok/Reels
+# mulai di ±88% lebar; teks 0,88 yang di-tengahkan + padding kotak membentang ±5-95% dan tertutup
+# tombol (terdeteksi pemeriksa mutu pada render nyata 25 Sep, detik 9-13 & 37-38). Dengan 0,74
+# kotak subtitle berada di ±11-89%.
+MAX_WIDTH_RATIO = float(os.getenv("SUBTITLE_MAX_WIDTH", "0.74"))
 
 
 @lru_cache(maxsize=16)
