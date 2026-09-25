@@ -125,3 +125,16 @@ def test_render_sambungan_jatuh_di_ketukan(render_montase):
     assert len(ketuk) >= 8, "kontrol: ketukan musik memang terdengar di keluaran"
     for c in cut:
         assert min(abs(c - k) for k in ketuk) <= SATU_FRAME + 0.01, f"sambungan {c} tidak di ketukan"
+
+
+def test_tempo_ganjil_tidak_menumpuk_meleset_di_akhir_lagu(tmp_path):
+    """Tempo kasar berlangkah 0,5 BPM: salah 0,5 BPM = ±0,3 dtk meleset setelah 60 dtk.
+    Tempo dihaluskan (0,05 BPM) -> ketukan ke-N di akhir lagu 40 dtk tetap dalam 1 frame."""
+    bpm, fase = 97.3, 0.21
+    k = mm.ketukan(_klik(tmp_path / "k.wav", bpm, fase, detik=40))
+    assert k["bpm"] == pytest.approx(bpm, abs=0.1)
+    per_asli = 60 / bpm
+    n = int((38 - fase) / per_asli)
+    asli = fase + n * per_asli
+    tebak = k["fase"] + round((asli - k["fase"]) / k["periode"]) * k["periode"]
+    assert abs(tebak - asli) <= SATU_FRAME, f"ketukan ke-{n} meleset {abs(tebak - asli) * 1000:.0f} ms"

@@ -218,13 +218,13 @@ def tempel_teks_animasi(video_masuk, items, video_keluar, *, lebar, tinggi, fps,
     return {"animasi": animasi, "frame_chromium": total_frame_chromium(kerja), "item": len(items)}
 
 
-def render_motion(items, folder, *, lebar, tinggi, fps, durasi, aksen=MOTION_AKSEN):
+def render_motion(items, folder, *, lebar, tinggi, fps, durasi, aksen=MOTION_AKSEN, tata="atas"):
     """Render potongan motion graphic ke `folder` (belum ditempel). Return (pekerjaan, info).
     Penempelan dilakukan komposit() -- bersama encode teks supaya tidak ada encode tambahan."""
     props_items, kerja = rencana_motion(items, fps)
     if not kerja:
         raise OverlayError("tidak ada elemen motion")
     props = {"lebar": lebar, "tinggi": tinggi, "fps": fps, "durasi": durasi, "aksen": aksen,
-             "items": props_items}
+             "items": props_items, "tata": tata}
     pekerjaan = _jalankan_node(props, kerja, folder, komposisi="MotionOverlay")
     return pekerjaan, {"frame_chromium": total_frame_chromium(kerja), "item": len(items)}

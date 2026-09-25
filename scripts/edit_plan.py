@@ -421,3 +421,90 @@ def ringkas(rencana):
     if tanpa:
         s += f" {tanpa} bahan tanpa ucapan tidak dipakai."
     return s
+
+
+# ---------------------------------------------------------------- beberapa short
+SHORT_MIN_DETIK = float(os.getenv("SHORT_MIN_SECONDS", "15"))
+SHORT_MAKS_DETIK = float(os.getenv("SHORT_MAX_SECONDS", "60"))
+SHORT_MAKS = 3
+
+
+def bangun_prompt_banyak(kandidat, jumlah, *, konteks=""):
+    baris = [f"#{c['id']} | klip {c['klip']} | {c['durasi']:.1f} dtk | {c['teks']}" for c in kandidat]
+    konteks_baris = f'Permintaan user: "{konteks}"\n' if konteks else ""
+    return f"""Kamu editor video pendek. Bahannya rekaman bicara yang PANJANG. Pecah jadi {jumlah} short
+TERPISAH untuk TikTok/Reels, masing-masing utuh dan bisa ditonton sendiri (punya hook, isi, penutup).
+
+{konteks_baris}DAFTAR KANDIDAT (satu baris = satu potongan ucapan terukur; kembalikan NOMORNYA saja):
+{chr(10).join(baris)}
+
+Aturan:
+- Tepat {jumlah} short, tiap short {SHORT_MIN_DETIK:.0f}-{SHORT_MAKS_DETIK:.0f} detik, topik tiap short berbeda.
+- Satu nomor HANYA boleh dipakai di SATU short. Potongan pertama tiap short = hook terkuat topiknya.
+- Buang take ulang, ucapan tidak jelas, dan kalimat menggantung.
+- "motion_plan": kartu pembuka "hook" (maks 6 kata), 1-3 "elemen" penjelas yang muncul saat kata
+  "saat_kata" DIUCAPKAN di potongan short itu sendiri, dan "cta" (maks 6 kata). Tanpa angka/statistik
+  yang tidak diucapkan.
+- "broll": 0-2 usulan klip stok {{"query": "kata kunci Inggris", "saat_kata": "kata yang diucapkan di short itu"}}.
+
+Balas HANYA JSON:
+{{"shorts": [{{"judul": "...", "deskripsi": "caption maks 30 kata", "hashtags": ["#..."],
+  "pilih": [{{"id": 3, "skor": 9, "transisi": "cut"}}],
+  "motion_plan": {{"hook": "...", "hook_sorot": "", "hook_emoji": "", "elemen": [{{"jenis": "sorot", "teks": "...", "saat_kata": "..."}}], "cta": "...", "cta_sub": "", "cta_emoji": ""}},
+  "broll": [{{"query": "...", "saat_kata": "..."}}]}}]}}"""
+
+
+def buat_rencana_banyak(urutan_bahan, transkrip, gagal, durasi_file, *, jumlah, konteks="",
+                        panggil_llm=None):
+    """(shorts, status). SATU panggilan LLM membagi kandidat ucapan jadi `jumlah` short; KODE
+    memvalidasi: nomor dipakai paling banyak di satu short (bentrok dibuang dari short belakangan),
+    tiap short lolos susun_rencana dengan batas SHORT_MIN..SHORT_MAKS detik. Short yang gagal
+    dibuang dan dicatat. Tiap short: {judul, deskripsi, hashtags, motion_plan, broll, edit_plan}."""
+    jumlah = max(1, min(SHORT_MAKS, int(jumlah)))
+    if not transkrip_lengkap(urutan_bahan, transkrip, gagal):
+        return [], {"status": "dilewati", "alasan": "transkrip tidak lengkap"}
+    kandidat = bangun_kandidat(urutan_bahan, transkrip, durasi_file)
+    if not kandidat:
+        return [], {"status": "dilewati", "alasan": "tidak ada kandidat ucapan"}
+    total_bahan = sum(c["durasi"] for c in kandidat)
+    if total_bahan < SHORT_MIN_DETIK * jumlah:
+        return [], {"status": "dilewati",
+                    "alasan": f"ucapan hanya {total_bahan:.0f} dtk, kurang untuk {jumlah} short "
+                              f"@{SHORT_MIN_DETIK:.0f} dtk"}
+    prompt = bangun_prompt_banyak(kandidat, jumlah, konteks=konteks)
+    try:
+        if panggil_llm is None:
+            from common import LLM_MODEL, chat_json
+            usulan = chat_json([{"role": "user", "content": prompt}],
+                               model=os.getenv("EDIT_MODEL") or LLM_MODEL, label="seleksi beberapa short",
+                               max_attempts=1, timeout=float(os.getenv("EDIT_TIMEOUT_SECONDS", "90")))
+        else:
+            usulan = panggil_llm(prompt)
+    except Exception as e:
+        return [], {"status": "dilewati", "alasan": f"LLM gagal ({type(e).__name__}): {str(e)[:160]}"}
+
+    shorts, catatan, terpakai = [], [], set()
+    for k, s in enumerate((usulan or {}).get("shorts") or [], 1):
+        if not isinstance(s, dict) or len(shorts) >= jumlah:
+            continue
+        pilih = [p for p in (s.get("pilih") or []) if isinstance(p, dict)]
+        bentrok = [p for p in pilih if _int(p.get("id")) in terpakai]
+        if bentrok:
+            catatan.append(f"short {k}: {len(bentrok)} potongan sudah dipakai short lain -- dibuang")
+        pilih = [p for p in pilih if _int(p.get("id")) not in terpakai]
+        rencana, alasan = susun_rencana(kandidat, {"pilih": pilih}, max_total=SHORT_MAKS_DETIK,
+                                        min_total=SHORT_MIN_DETIK, urutan_bahan=urutan_bahan)
+        if rencana is None:
+            catatan.append(f"short {k} dibuang: {alasan}")
+            continue
+        terpakai.update(p["id"] for p in rencana["picks"])
+        shorts.append({"judul": str(s.get("judul") or f"Short {len(shorts) + 1}")[:120],
+                       "deskripsi": str(s.get("deskripsi") or "")[:400],
+                       "hashtags": [str(h)[:40] for h in (s.get("hashtags") or [])][:8],
+                       "motion_plan": s.get("motion_plan") if isinstance(s.get("motion_plan"), dict) else None,
+                       "broll": s.get("broll") if isinstance(s.get("broll"), list) else [],
+                       "edit_plan": rencana})
+    if not shorts:
+        return [], {"status": "dilewati", "alasan": "; ".join(catatan) or "LLM tidak mengusulkan short yang sah"}
+    return shorts, {"status": "applied", "alasan": "ok", "diminta": jumlah, "jadi": len(shorts),
+                    "catatan": catatan}

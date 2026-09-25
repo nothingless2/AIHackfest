@@ -59,6 +59,8 @@ os.environ["MOTION_GRAPHIC"] = "mati"
 os.environ["QA_VIDEO"] = "0"
 # Montase ketukan menganalisis musik; tests/test_montase.py menyalakannya.
 os.environ["MONTASE"] = "0"
+# Storyboard draf membuka Chromium & TTS; tests/test_storyboard.py menyalakannya.
+os.environ["STORYBOARD"] = "0"
 # Pemotongan bagian goyang menganalisis tiap video; test lama memakai sumber sintetis dan
 # tidak menguji ini. Test-nya sendiri menyalakan (tests/test_visual_quality.py).
 os.environ["VISUAL_CUT"] = "0"

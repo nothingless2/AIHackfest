@@ -546,3 +546,46 @@ Keputusan user: 2 alternatif (pilih lalu boleh edit), tingkat grafik "sedang", m
   - Render 100 dtk: narasi nyata 14,65 dtk, diperlambat tipis 0,93x, tanpa potongan dipakai ulang.
   - Deteksi frame kembar berjarak ≥ 2 dtk: render lama 24 pasangan (berulang tiap 1,75 dtk),
     render baru 0.
+
+## 25 Sept (siang) — resep konten, beberapa short, montase ketukan, storyboard, pemeriksa mutu
+
+Permintaan user: agent menangani dua kasus pokok, (1) suara asli + subtitle + B-roll/animasi +
+musik, dan (2) voice AI natural + subtitle + animasi + musik. Ditambah pilihan user: (3) beberapa
+short dari video panjang, (4) montase ketukan, (5) pemeriksa mutu, (6) storyboard. Model Hermes
+diganti ke `nex-n2.5-mini:free`: pro macet 20 menit (provider unresponsive); mini 0,7 dtk vs
+pro 23,6 dtk. `EDIT_MODEL` berbayar dijadikan komentar sehingga memakai model gratis.
+
+- **(1) B-roll cutaway di mode suara asli**:
+  - Klip stok DITIMPA sebentar saat kata jangkarnya diucapkan; audio disalin, subtitle tidak
+    bergeser. Diuji: lag ≤ 3 ms, korelasi > 0,99.
+  - Grafik dan B-roll dijangkarkan ke kata yang terdengar (transkrip).
+  - Di mode ini grafik penjelas diturunkan ke bawah wajah. Storyboard pertama memperlihatkan
+    kartu menutupi wajah pembicara.
+  - Render nyata membuang SEMUA B-roll karena jangkarnya sama dengan jangkar grafik, jadi
+    cutaway kini boleh bertumpuk dengan kartu.
+- **(2)** BrainIdea mengusulkan `broll` (kata kunci Inggris + jangkar) per varian; wajib bila user
+  memintanya. Mode AI memakai usulan itu sebagai kata kunci sisipan.
+- **(3) Beberapa short**: satu panggilan LLM membagi kandidat ucapan. Kode menjamin potongan tidak
+  dipakai dua short dan tiap short 15-60 dtk. Draf "Short 1..N" dirender `--short semua|A,C`,
+  diklaim sekali, dan short yang gagal tidak menular.
+- **(4) Montase**:
+  - `music_mood.ketukan`: fase ketukan terkalibrasi ±2 ms pada klik 90/120/140 BPM.
+  - Tempo dihaluskan 0,05 BPM, karena tempo kasar 99,5 vs 100 BPM di uji nyata akan melenceng
+    ±0,3 dtk di video 60 dtk.
+  - Uji nyata (3 klip food court + lagu 100 BPM): sambungan tepat kelipatan unit ketukan; musik
+    terukur mulai 0,585 dtk (diminta 0,588).
+  - Potongan kelipatan ketukan, hard cut, musik mulai di ketukan pertama.
+  - Diuji dari piksel & audio keluaran: sambungan ≤ 1 frame dari ketukan.
+- **(5) Pemeriksa mutu**: kenyaringan (loudnorm + limiter), frame hitam/beku, teks terpotong/zona UI
+  (dua salah tanda di render nyata diperbaiki: peredup kartu & pencuplikan meleset frame), dan
+  durasi. Render nyata: -24,2 → -17,1 LUFS / -1,9 dBTP.
+- **(6) Storyboard**: 8 panel/varian (frame bahan, contoh teks, still Remotion asli, thumbnail
+  B-roll Pexels) ±5 dtk per varian, plus contoh suara kalimat pertama.
+- **Uji nyata Kasus 1** (6 video bicara user, brief dari draf pagi):
+  - Cutaway Pexels 'software dashboard' tampil di detik 19,8 saat "dashboard" diucapkan, dengan
+    kartu grafik di atasnya.
+  - Pemeriksa mutu: suara -24,2 → -17,1 LUFS. Peringatan benar: baris subtitle lebar masuk area
+    tombol kanan TikTok.
+- **Kendala 25 Sep**: key OpenRouter (dipakai Hermes & pipeline) **kedaluwarsa** ("API key
+  expired"). Draf baru dan bot Telegram berhenti sampai key diganti. Uji nyata render memakai brief
+  draf yang sudah ada.

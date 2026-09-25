@@ -23,7 +23,7 @@ from naskah import periksa
 DRAF_DIR = os.path.join(STATE_DIR, "draf_naskah")
 DRAF_TTL_JAM = float(os.getenv("DRAF_TTL_HOURS", "24"))
 _ID = re.compile(r"^[0-9a-f]{12}$")
-HURUF = "AB"
+HURUF = "ABC"
 MAKS_NASKAH_USER = 1500
 # Narasi lebih panjang dari bahan layak x ini -> gambar harus diperlambat/dipakai ulang:
 # user diberi tahu dan ditawari pilihan (keputusan user 24 Sep: naskah menyesuaikan bahan).
@@ -41,7 +41,8 @@ def bahan_kurang(teks, brief):
 
 # Field yang BERBEDA antar-varian; sisanya (transkrip, rencana edit, mode audio, bahan) sama.
 FIELD_VARIAN = ("gaya", "judul", "deskripsi", "full_voice_over", "voice_over_spoken", "scenes",
-                "hashtags", "target_trend", "motion_plan", "naskah_status", "broll")
+                "hashtags", "target_trend", "motion_plan", "naskah_status", "broll",
+                "edit_plan", "edit_summary")
 
 
 class DrafError(ValueError):
@@ -126,6 +127,18 @@ def indeks_varian(huruf, jumlah):
     return HURUF.index(h)
 
 
+def pilih_short(teks, jumlah):
+    """'semua' / 'A,C' / 'a c' -> ['A', 'C'] (urut, unik), atau DrafError."""
+    t = str(teks or "").strip().lower()
+    if t in ("semua", "all", "*"):
+        return list(HURUF[:jumlah])
+    huruf = sorted({x for x in re.split(r"[\s,;]+", t.upper()) if x})
+    salah = [h for h in huruf if len(h) != 1 or h not in HURUF[:jumlah]]
+    if not huruf or salah:
+        raise DrafError("varian_invalid", f"Pilih 'semua' atau huruf short: {', '.join(HURUF[:jumlah])}.")
+    return huruf
+
+
 def brief_terpilih(d, huruf, naskah=None):
     """Brief siap render dari varian pilihan user. Naskah ubahan user dipakai APA ADANYA --
     pemeriksa gaya hanya memberi catatan, tidak pernah menimpa kalimat user."""
@@ -187,7 +200,12 @@ def susun_pesan(d):
             if bahan_kurang(v.get("full_voice_over"), brief):
                 kurang_varian.append(HURUF[i])
         else:
-            ucapan = teks_ucapan(brief)
+            # Short dari video panjang: ucapan MILIK short itu sendiri (potongan terpilihnya).
+            ucapan = v.get("full_voice_over") if v.get("edit_plan") and brief.get("jumlah_short") \
+                else teks_ucapan(brief)
+            if brief.get("jumlah_short") and v.get("edit_plan"):
+                baris.append(f"Durasi: ±{v['edit_plan'].get('detik_dipilih', 0):.0f} dtk "
+                             f"({v['edit_plan'].get('dipilih')} potongan)")
             if ucapan:
                 # Mode suara asli: subtitle = ucapanmu sendiri (bukan tulisan AI).
                 baris.append(f"Subtitle dari ucapanmu: \"{_potong(ucapan, 160)}\"")
@@ -220,6 +238,10 @@ def susun_pesan(d):
         baris.append(f"Catatan: naskah {', '.join(kurang_varian)} lebih panjang dari bahan video. "
                      "Pilihanmu: " + "; ".join(opsi) + ".")
         baris.append("")
+    if brief.get("jumlah_short"):
+        baris.append(f"Balas \"semua\" untuk membuat {len(d['varian'])} short sekaligus, atau pilih "
+                     "hurufnya (mis. \"A, C\").")
+        return "\n".join(baris).strip()
     pilihan = " atau ".join(HURUF[:len(d["varian"])])
     baris.append(f"Balas {pilihan}. Mau mengubah kalimatnya? Tulis saja versimu, "
                  f"mis. \"A, tapi pembukanya: ...\".")

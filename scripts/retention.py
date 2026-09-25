@@ -109,6 +109,8 @@ def sweep_old_run_files(max_age_days=None):
         # Draf naskah (scripts/draf_naskah.py): berlaku 24 jam, memuat naskah & konteks user.
         + glob.glob(os.path.join(STATE_DIR, "draf_naskah", "*.json"))
         + glob.glob(os.path.join(STATE_DIR, "draf_naskah", "*.dipakai"))
+        + glob.glob(os.path.join(STATE_DIR, "draf_naskah", "*.jpg"))
+        + glob.glob(os.path.join(STATE_DIR, "draf_naskah", "*.mp3"))
         # Musik yang diunggah user untuk satu run (workspace/music_user/). Hak ciptanya
         # milik user, dan berkasnya besar -- tidak untuk disimpan selamanya.
         + glob.glob(os.path.join(os.path.dirname(STATE_DIR), "music_user", "*"))

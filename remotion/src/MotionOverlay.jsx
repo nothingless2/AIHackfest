@@ -107,8 +107,8 @@ const KartuCta = ({it, g, W, H, c}) => (
   </AbsoluteFill>
 );
 
-const Sorot = ({it, g, W, H, c}) => (
-  <AbsoluteFill style={{alignItems: 'center', paddingTop: H * 0.44}}>
+const Sorot = ({it, g, W, H, c, Y}) => (
+  <AbsoluteFill style={{alignItems: 'center', paddingTop: H * Y.sorot}}>
     <div style={{opacity: g.op, transform: `scale(${interpolate(g.m, [0, 1], [0.3, 1])}) rotate(${(1 - g.m) * -5}deg)`,
       background: `linear-gradient(135deg, ${c.aksen}, #EC4899)`, borderRadius: 999,
       padding: `${W * 0.018}px ${W * 0.05}px`, boxShadow: c.glow, color: '#FFF',
@@ -119,8 +119,8 @@ const Sorot = ({it, g, W, H, c}) => (
   </AbsoluteFill>
 );
 
-const Ikon = ({it, g, W, H, c}) => (
-  <AbsoluteFill style={{alignItems: 'center', paddingTop: H * 0.17}}>
+const Ikon = ({it, g, W, H, c, Y}) => (
+  <AbsoluteFill style={{alignItems: 'center', paddingTop: H * Y.ikon}}>
     <div style={{opacity: g.op, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 22,
       transform: `translateY(${(1 - g.m) * 50}px)`}}>
       <div style={{width: W * 0.24, height: W * 0.24, borderRadius: '50%', background: c.kaca,
@@ -135,8 +135,8 @@ const Ikon = ({it, g, W, H, c}) => (
   </AbsoluteFill>
 );
 
-const Langkah = ({it, g, W, H, c}) => (
-  <AbsoluteFill style={{alignItems: 'center', paddingTop: H * 0.14}}>
+const Langkah = ({it, g, W, H, c, Y}) => (
+  <AbsoluteFill style={{alignItems: 'center', paddingTop: H * Y.langkah}}>
     <div style={{opacity: g.op, transform: `translateY(${(1 - g.m) * -90}px)`, position: 'relative'}}>
       {/* Tanpa penanda "1/2": di konten user angkanya tidak bermakna (permintaan user 25 Sep). */}
       <Kartu c={c} lebar={W * 0.74} style={{padding: '40px 44px'}}>
@@ -151,8 +151,8 @@ const Langkah = ({it, g, W, H, c}) => (
   </AbsoluteFill>
 );
 
-const Label = ({it, g, W, H, c}) => (
-  <AbsoluteFill style={{paddingTop: H * 0.47, paddingLeft: W * 0.06}}>
+const Label = ({it, g, W, H, c, Y}) => (
+  <AbsoluteFill style={{paddingTop: H * Y.label, paddingLeft: W * 0.06}}>
     <div style={{opacity: g.op, transform: `translateX(${(1 - g.m) * -W * 0.7}px)`, display: 'flex',
       alignItems: 'stretch', maxWidth: W * 0.86}}>
       <div style={{width: 12, borderRadius: 6, background: c.aksen, boxShadow: c.glow, marginRight: 22}} />
@@ -166,16 +166,25 @@ const Label = ({it, g, W, H, c}) => (
   </AbsoluteFill>
 );
 
+// Posisi vertikal (fraksi tinggi) per tata letak. 'atas' = bawaan (narasi AI: gambar biasanya
+// suasana). 'bawah' = mode suara asli: pembicara biasanya di layar dan wajahnya di sepertiga
+// atas -- storyboard 25 Sep memperlihatkan kartu langkah MENUTUPI WAJAH. Elemen penjelas
+// diturunkan ke atas zona subtitle (karaoke ±76-84%); kartu pembuka/ajakan tetap (hanya 2 dtk).
+export const POSISI = {
+  atas: {sorot: 0.44, ikon: 0.17, langkah: 0.14, label: 0.47},
+  bawah: {sorot: 0.58, ikon: 0.42, langkah: 0.47, label: 0.61},
+};
+
 const KOMPONEN = {kartu_hook: KartuHook, kartu_cta: KartuCta, sorot: Sorot, ikon: Ikon,
   langkah: Langkah, label: Label};
 
-const Elemen = ({it, dur, W, H, c}) => {
+const Elemen = ({it, dur, W, H, c, Y}) => {
   const g = useGerak(it.masukFrames ?? 16, it.keluarFrames ?? 8, dur);
   const K = KOMPONEN[it.jenis];
-  return K ? <K it={it} g={g} W={W} H={H} c={c} /> : null;
+  return K ? <K it={it} g={g} W={W} H={H} c={c} Y={Y} /> : null;
 };
 
-export const MotionOverlay = ({items, aksen}) => {
+export const MotionOverlay = ({items, aksen, tata}) => {
   const {fps, width, height} = useVideoConfig();
   const [siap, setSiap] = React.useState(false);
   React.useEffect(() => {
@@ -193,7 +202,7 @@ export const MotionOverlay = ({items, aksen}) => {
         const dur = Math.max(2, Math.round((it.selesai - it.mulai) * fps));
         return (
           <Sequence key={i} from={dari} durationInFrames={dur}>
-            <Elemen it={it} dur={dur} W={width} H={height} c={c} />
+            <Elemen it={it} dur={dur} W={width} H={height} c={c} Y={POSISI[tata] || POSISI.atas} />
           </Sequence>
         );
       })}

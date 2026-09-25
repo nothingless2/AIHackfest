@@ -31,7 +31,22 @@ zoom Ken Burns otomatis (HANYA bahan foto), rasio 9:16/1:1/16:9, durasi 10-60
 detik, cover JPG.
 
 Sebelum render, BrainIdea MENONTON bahan (4 momen per klip + ucapan) lalu mengirim 2 pilihan
-naskah; video baru dibuat setelah user memilih (Langkah 3-5).
+naskah (atau beberapa short) BESERTA gambar storyboard; video baru dibuat setelah user memilih
+(Langkah 3-5).
+
+## Resep (pilih dari permintaan user, jangan menebak)
+
+| Permintaan user | Flag di Langkah 3 |
+|---|---|
+| Subtitle dari suara asli + B-roll/ilustrasi (+musik) | `--audio-mode original --broll` (+ `--music-file` bila user kirim lagu) |
+| Voice AI natural + teks + animasi (+musik/lagu) | `--audio-mode ai` (+ `--broll` bila minta klip stok, `--music on`) |
+| Video bicara panjang dipecah jadi beberapa konten | `--audio-mode original --jumlah-short 2` atau `3` |
+| Klip/foto tanpa omongan + lagu | `--audio-mode mute --music on` (+ `--music-file`); potongan otomatis mengikuti ketukan lagu |
+
+B-roll di mode suara asli ditampilkan SEBENTAR di atas video (cutaway) saat kata yang relevan
+diucapkan: suara asli dan subtitle tidak bergeser. Di mode voice-over AI klip stok disisipkan.
+Grafik penjelas (kartu, sorot, ikon, label) otomatis; di mode suara asli ditempatkan di bawah
+wajah pembicara.
 
 **YANG TIDAK ADA** — jangan dijanjikan: koreksi warna profesional/LUT, stabilisasi,
 stiker, dubbing bahasa lain, upload otomatis ke platform.
@@ -124,7 +139,8 @@ Pemetaan nama parameter di `pemetaan` (langkah 1) ke flag `hermes_render.py`:
 | suara narasi pria/wanita (dari jawaban user) | `--voice pria` / `--voice wanita` |
 | gaya suara (ramah/energik/profesional/tenang/bercerita) | `--voice-persona` |
 | potong bagian goyang (bawaan nyala; user minta jangan) | `--visual-cut off` |
-| `broll` (true) / `brollQuery` | `--broll` / `--broll-query` (WAJIB bersama `--audio-mode ai`) |
+| `broll` (true) / `brollQuery` | `--broll` / `--broll-query` (semua mode) |
+| `jumlahShort` (2/3) | `--jumlah-short 2` / `--jumlah-short 3` |
 | motion graphic (bawaan sedang; user minta tanpa grafik) | `--motion mati` |
 
 Teks tulisan di layar kini BERANIMASI (Remotion) dan emoji tampil berwarna. Kalau hasil berisi
@@ -185,9 +201,12 @@ suara asli, hard cut + fade di pergantian topik, 20-35 detik, 9:16).
 
 ## Langkah 4 — Kirim draf, tunggu pilihan user
 
-Hasil `--draft` (JSON satu baris) berisi `ok`, `draft_id`, dan `pesan`.
+Hasil `--draft` (JSON satu baris) berisi `ok`, `draft_id`, `pesan`, `storyboard`, `contoh_suara`.
 - **`ok: true`**: kirim `pesan` APA ADANYA ke user (sudah berisi apa yang BrainIdea tangkap
-  dari tiap klip, naskah A dan B, dan cara membalas). Simpan `draft_id`. Tunggu balasan.
+  dari tiap klip, naskah A dan B, dan cara membalas). Lalu kirim tiap gambar di `storyboard`
+  (satu per varian, beri keterangan "Storyboard A/B") dan, bila ada, audio `contoh_suara`
+  ("contoh suara narasi"). Kalau `storyboard_gagal` terisi, sebutkan singkat. Simpan
+  `draft_id`. Tunggu balasan.
 - **`ok: false`**: sampaikan `alasan` ke user.
 
 Membaca balasan user:
@@ -200,6 +219,9 @@ Membaca balasan user:
   "stok" -> render dengan `--broll` (klip stok Pexels mengisi kekurangan); kirim video tambahan
   -> kumpulkan SEMUA path (lama + baru), ulangi Langkah 1 lalu Langkah 3 (draf baru); "biarkan"
   / pilih A/B saja -> render biasa (sebagian gambar diperlambat atau dipakai ulang).
+- Draf BEBERAPA SHORT (varian bernama "Short 1..N"): "semua" -> `--short semua`; "A dan C" ->
+  `--short A,C`; satu huruf -> `--short A`. Hasil render berisi `shorts: [...]` -- kirim tiap
+  video dengan caption-nya sendiri, dan sebutkan short yang `gagal` bila ada.
 - User mengoreksi pemahaman ("itu bukan antrean, itu pendaftaran") atau minta gaya lain ->
   jalankan Langkah 3 lagi dengan koreksi itu ditambahkan ke `--user-context` (draf baru).
 
@@ -209,6 +231,7 @@ Membaca balasan user:
 python3 /root/AIHackfest/scripts/hermes_render.py \
   --chat-id "<label chat yang SAMA PERSIS>" \
   --draft-id "<draft_id dari langkah 3>" --varian A|B [--naskah "<naskah lengkap ubahan user>"]
+  # draf beberapa short: ganti --varian dengan --short semua  (atau --short A,C)
 ```
 
 Pengaturan (mode audio, durasi, font, musik, dst.) diambil otomatis dari draf -- TIDAK perlu
@@ -224,7 +247,11 @@ Baca output JSON (satu baris) dari proses latar belakang itu.
 - **`ok: true`**: kirim file di `video_path` ke chat ini (pakai kemampuan kirim
   file/media bawaanmu, BUKAN skrip ini), dengan caption ringkas dari `judul` +
   `deskripsi` + `hashtags`. Sebutkan `catatan_durasi` kalau ada isinya (artinya
-  durasi diminta user dijepit ke batas yang berbeda). Kalau `catatan_naskah` berisi sesuatu,
+  durasi diminta user dijepit ke batas yang berbeda). Kalau `qa.masalah` berisi sesuatu,
+  sampaikan (mis. "ada frame hitam di detik 3"); `qa.diperbaiki` (mis. suara dikeraskan) cukup
+  disebut singkat; `qa.peringatan` sebutkan bila menyangkut teks tertutup UI TikTok. Kalau
+  `montase.dipakai` false padahal bahan tanpa ucapan + lagu, sebutkan `montase.alasan`.
+  Kalau `catatan_naskah` berisi sesuatu,
   sebutkan singkat (naskah user tetap dipakai apa adanya).
 - Kalau `catatan_bahan` berisi sesuatu (mis. "2 dari 3 bahan tampil tanpa subtitle — saldo/kuota
   API habis"), sampaikan apa adanya: penyebabnya menentukan tindak lanjut user.

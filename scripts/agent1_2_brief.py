@@ -10,7 +10,7 @@ import sys
 
 from audio_mode import bahan_punya_suara, mode_eksplisit, requested_mode, resolve_audio_mode
 from duration import duration_text, kata_untuk_bahan, requested_duration, target_dari_bahan
-from edit_plan import buat_rencana, ringkas as ringkas_edit
+from edit_plan import buat_rencana, buat_rencana_banyak, ringkas as ringkas_edit
 from spoken import SPOKEN_REWRITE, prompt_rule
 from transcribe import media_duration, transcribe_assets_report
 from vision import IMAGE_EXTENSIONS, build_image_parts
@@ -286,6 +286,14 @@ MODE DRAF -- user akan MEMILIH salah satu dari DUA varian sebelum video dibuat:
 - Hook pembuka, pilihan kata, dan ajakan penutup kedua varian HARUS berbeda -- jangan
   sekadar menukar beberapa kata.
 - Kedua varian tetap wajib mematuhi SEMUA aturan di atas."""
+
+
+def jumlah_short():
+    """Beberapa short dari video panjang (hermes_render --jumlah-short N). 0/1 = satu video."""
+    try:
+        return max(0, min(3, int((os.getenv("CONTENT_FACTORY_SHORT") or "0").strip())))
+    except ValueError:
+        return 0
 
 
 def mode_draf():
@@ -586,6 +594,7 @@ def run():
     durasi_bahan = None
     if mode_audio in ("original", "mute"):
         durasi_bahan = [d for d in (media_duration(p) for p in asset_paths) if d and d > 0]
+    multi_short = mode_draf() and jumlah_short() >= 2 and mode_audio in ("original", "mute")
     durasi_semua = {p: media_duration(p) for p in asset_paths
                     if os.path.splitext(p)[1].lower() not in IMAGE_EXTENSIONS}
     klip_fakta = build_klip_note(asset_names, asset_paths, transkrip, gagal_transkrip, buruk,
@@ -597,7 +606,9 @@ def run():
         konteks=konteks, transkrip=transkrip, target_duration=target_durasi,
         durasi_bahan=durasi_bahan, teks_statis=teks_statis, audio_bisu=(mode_audio == "mute"),
         klip_fakta=klip_fakta, gaya_contoh=contoh_gaya() if mode_audio == "ai" else "",
-        kontak=True, draf=mode_draf(), mode_audio=mode_audio, bahan_layak=bahan_layak,
+        # Beberapa short: brief biasa (satu) untuk pemahaman & tren; varian draf = short-short
+        # dari seleksi terpisah di bawah, bukan dua gaya A/B.
+        kontak=True, draf=mode_draf() and not multi_short, mode_audio=mode_audio, bahan_layak=bahan_layak,
         broll_diminta=broll_aktif(),
     )
     result = chat_json(
@@ -609,7 +620,7 @@ def run():
 
     trend_report = result["trend_report"]
     varian = None
-    if mode_draf():
+    if mode_draf() and not multi_short:
         varian = validasi_varian(result.get("varian"))
         if not varian:
             raise ValueError("LLM tidak menghasilkan varian naskah yang bisa dipakai untuk draf.")
@@ -689,7 +700,31 @@ def run():
     # Gagal-aman: apa pun yang tidak beres -> rencana None -> render memakai
     # perilaku lama (semua klip). Alasannya SELALU dicatat di edit_status.
     rencana_edit, status_edit = None, {"status": "dilewati", "alasan": "mode voice-over AI"}
-    if mode_audio in ("original", "mute"):
+    if multi_short:
+        shorts, status_edit = buat_rencana_banyak(
+            asset_names, rinci, gagal_transkrip, {n: d.get("duration") for n, d in rinci.items()},
+            jumlah=jumlah_short(), konteks=konteks)
+        print(f"[info] beberapa short: {status_edit.get('jadi', 0)} dari {jumlah_short()} "
+              f"({status_edit.get('alasan')})")
+        if shorts:
+            varian = []
+            for n, s in enumerate(shorts, 1):
+                ucapan = " ".join(p["teks"] for p in s["edit_plan"]["picks"])
+                varian.append({**s, "gaya": f"Short {n}", "full_voice_over": ucapan,
+                               "voice_over_spoken": ucapan, "scenes": [],
+                               "target_trend": brief.get("target_trend"),
+                               "edit_summary": ringkas_edit(s["edit_plan"])})
+            brief["jumlah_short"] = len(varian)
+            rencana_edit = varian[0]["edit_plan"]
+        else:
+            # Gagal membagi: draf tetap jalan sebagai SATU video (seleksi biasa), alasannya dicatat.
+            rencana_edit, status_satu = buat_rencana(
+                asset_names, rinci, gagal_transkrip, {n: d.get("duration") for n, d in rinci.items()},
+                konteks=konteks, judul=brief.get("judul", ""), sudut=trend_report.get("content_angle", ""),
+                target_durasi=target_durasi)
+            status_edit = {**status_satu, "short_gagal": status_edit.get("alasan")}
+            varian = [dict(brief, gaya="Satu video")]
+    elif mode_audio in ("original", "mute"):
         if (os.getenv("CONTENT_FACTORY_EDIT") or "auto").strip().lower() == "full":
             status_edit = {"status": "dilewati",
                            "alasan": "diminta memakai semua bahan apa adanya"}

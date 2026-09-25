@@ -99,6 +99,17 @@ Instruksi agent: `hermes-skill/content-factory/SKILL.md` (salin ke `~/.hermes/sk
    lain, lebih dari 24 jam, bahannya berbeda, atau sudah dirender (klaim sekali pakai
    `O_EXCL`; dilepas lagi bila render gagal).
 
+**Resep** (lihat tabel di SKILL.md):
+1. suara asli + subtitle + B-roll cutaway/grafik (+musik);
+2. voice AI natural + teks + grafik + B-roll sisipan + musik;
+3. video bicara panjang dipecah jadi 2-3 short (`--jumlah-short`, pilih `--short semua|A,C`);
+4. klip tanpa omongan + lagu: montase yang pergantian gambarnya jatuh di ketukan.
+
+**Pengurang revisi**:
+- *Storyboard* 8 panel per varian + contoh suara dikirim bersama draf (`scripts/storyboard.py`).
+- *Pemeriksa mutu* sebelum kirim (`scripts/qa_video.py`): kenyaringan diperbaiki otomatis,
+  lalu frame hitam/beku, teks terpotong/tertutup UI TikTok, dan durasi.
+
 **Motion graphic** (bawaan `sedang`, matikan dengan `--motion mati`) dirender Remotion
 (`remotion/src/MotionOverlay.jsx`):
 - Jenisnya: kartu pembuka, sorot kata kunci, ikon, langkah, label, kartu ajakan.

@@ -223,6 +223,9 @@ def ringkas(fakta):
         "n_suasana": sum(
             f["kelas"] in ("tanpa_ucapan", "ragu") and (f["volume_db"] or -99) > AMBANG_SUARA_DB
             for f in fakta),
+        # detik UCAPAN (VAD) di video berucap: dasar tawaran "jadi beberapa short"
+        "detik_ucapan": round(sum((f.get("ucapan_detik") or 0) for f in fakta
+                                  if f.get("kelas") == "berucap"), 1),
         # hanya VIDEO: durasi musik bukan durasi bahan
         "total_detik": round(sum((f["durasi"] or 0) for f in fakta if f["jenis"] == "video"), 1),
     }
@@ -243,6 +246,9 @@ _POSISI_TEKS = re.compile(r"(teks|tulisan|judul)[^.\n]{0,40}\b(tengah|atas|bawah
 _FONT_TEKS = re.compile(r"\b(font|huruf|tipografi)\b", re.I)
 _GAYA = re.compile(r"\b(capcut|filter|warna|vivid|sinematik|cinematic|hitam\s*putih|grayscale|"
                    r"hangat|sejuk)\b", re.I)
+_SHORT = re.compile(r"\b(\d\s*(short|shorts|video|konten|klip)|beberapa\s+(short|video|konten)|"
+                    r"jadi\s+(dua|tiga|2|3)|satu\s+video\s+saja)\b", re.I)
+SHORT_UCAPAN_MIN = 90        # detik ucapan: di bawah ini satu short saja sudah pas
 _BROLL = re.compile(r"\b(b-?\s?roll|klip\s+stok|footage|video\s+stok|ilustrasi)\b", re.I)
 _MUSIK = re.compile(r"\b(musik|lagu|backsound|bgm|music|soundtrack)\b", re.I)
 _POTONG = re.compile(r"\b(buang|potong|pilih|semua|utuh|apa adanya|jangan dibuang|singkat|"
@@ -268,6 +274,7 @@ def dari_konteks(konteks):
         "font_teks": bool(_FONT_TEKS.search(k)),
         "gaya": bool(_GAYA.search(k)),
         "broll": bool(_BROLL.search(k)),
+        "short": bool(_SHORT.search(k)),
     }
 
 
@@ -452,6 +459,17 @@ def susun_pertanyaan(ringk, tahu):
             "default": "dipilih bagian terbaik, take ulang dan bagian tidak jelas dibuang",
             "alasan": f"{ringk['n_berucap']} video berucapan; pemilihan otomatis bisa membuang "
                       "bagian yang penting bagimu",
+        })
+    if (ringk.get("detik_ucapan") or 0) >= SHORT_UCAPAN_MIN and not tahu.get("short"):
+        q.append({
+            "kode": "short",
+            "tanya": f"Ucapannya panjang (±{ringk['detik_ucapan']:.0f} dtk). Mau jadi berapa video?",
+            "opsi": _opsi("Satu video terbaik", "2 short terpisah (topik berbeda)",
+                          "3 short terpisah", rekomendasi=0),
+            "catatan": "Tiap short utuh sendiri (hook, isi, penutup); kamu memilih mana yang dibuat.",
+            "param": {"B": {"jumlahShort": 2}, "C": {"jumlahShort": 3}},
+            "default": "satu video dari bagian terbaik",
+            "alasan": "ucapan cukup panjang untuk beberapa konten pendek",
         })
     if q and not tahu.get("broll"):
         from broll import tersedia as broll_tersedia

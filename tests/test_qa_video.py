@@ -109,3 +109,16 @@ def test_peredup_selebar_layar_bukan_teks_terpotong(tmp_path):
     _ff("-i", dasar, "-vf", "drawbox=x=0:y=0:w=iw:h=ih*0.55:color=black@0.6:t=fill", "-c:v", "libx264",
         "-pix_fmt", "yuv420p", "-an", str(redup))
     assert qa.periksa(str(redup), dasar=dasar, harus_bersuara=False, ada_foto=True)["lolos"]
+
+
+def test_geser_satu_frame_antar_encode_bukan_overlay(tmp_path):
+    """Salah tanda kedua di render nyata 25 Sep: cuplikan video akhir & dasar meleset 1 frame,
+    gerakan di tepi (tangan) terbaca 'teks terpotong'. Video akhir = dasar yang digeser 1 frame,
+    TANPA overlay apa pun -> harus lolos."""
+    dasar = tmp_path / "dasar.mp4"
+    _ff("-f", "lavfi", "-i", f"testsrc2=size={W}x{H}:rate=24:duration=5", "-c:v", "libx264",
+        "-pix_fmt", "yuv420p", str(dasar))
+    geser = tmp_path / "geser.mp4"
+    _ff("-i", str(dasar), "-vf", "trim=start_frame=1,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop=1",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", str(geser))
+    assert qa.periksa(str(geser), dasar=str(dasar), harus_bersuara=False, ada_foto=True)["lolos"]

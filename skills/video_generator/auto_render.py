@@ -1457,7 +1457,7 @@ def _sumber_fakta(data):
     return " ".join([data.get("konteks_user") or ""] + ucapan)
 
 
-def siapkan_motion(data, durasi, kata_waktu, ada_teks_statis, folder, naskah=None):
+def siapkan_motion(data, durasi, kata_waktu, ada_teks_statis, folder, naskah=None, tata="atas"):
     """Rencana motion graphic dari brief -> divalidasi & dijadwalkan kode (motion_plan) ->
     potongan dirender Remotion ke `folder`. Return pekerjaan (ditempel bersama encode teks)
     atau None; alasannya SELALU dicatat di MOTION (dilaporkan ke user)."""
@@ -1484,7 +1484,7 @@ def siapkan_motion(data, durasi, kata_waktu, ada_teks_statis, folder, naskah=Non
         return None
     try:
         pekerjaan, info = _ovr.render_motion(items, folder, lebar=TARGET_W, tinggi=TARGET_H,
-                                             fps=FPS, durasi=durasi)
+                                             fps=FPS, durasi=durasi, tata=tata)
     except _ovr.OverlayError as e:
         MOTION.update(dipakai=False, gagal=str(e), catatan=catatan)
         print(f"[warn] motion graphic gagal dirender ({e}) — video tanpa grafik.")
@@ -2178,10 +2178,14 @@ def render_from_agent_script(
     try:
         motion = siapkan_motion(data, float(total_duration), kata_waktu,
                                 any(s.get("statis") for s in scenes), folder_motion,
-                                naskah=naskah_terdengar)
+                                naskah=naskah_terdengar,
+                                # Suara asli: pembicara di layar -> grafik di bawah wajahnya.
+                                tata="bawah" if pakai_audio_asli else "atas")
         if pakai_audio_asli:
-            sibuk = [(e["mulai"], e["selesai"]) for e in (MOTION.get("elemen") or [])]
-            cutaway, info_cut = siapkan_cutaway(data, kata_waktu, float(total_duration), sibuk,
+            # Cutaway BOLEH bertumpuk dengan elemen motion (kartu digambar di atas klip stok):
+            # melarangnya membuang SEMUA B-roll di render nyata 25 Sep, karena momen penting untuk
+            # B-roll dan untuk grafik sering kata yang sama. Kartu pembuka/ajakan tetap dihindari.
+            cutaway, info_cut = siapkan_cutaway(data, kata_waktu, float(total_duration), [],
                                                 folder_motion)
             if info_cut is not None:
                 broll_info = info_cut

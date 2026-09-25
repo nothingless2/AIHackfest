@@ -139,14 +139,24 @@ def ketukan(path, maks_detik=MAKS_DETIK):
     log = np.log1p(mag * 10)
     flux = np.maximum(np.diff(log, axis=0), 0).sum(axis=1)
     fps = SR / HOP
-    per = fps * 60 / bpm                       # periode dalam frame STFT
     idx = np.arange(len(flux))
-    terbaik, skor = 0.0, -1.0
-    for geser in np.arange(0.0, per, 0.25):
-        pos = geser + per * np.arange(int((len(flux) - 1 - geser) // per) + 1)
-        s = float(np.interp(pos, idx, flux).sum())
-        if s > skor:
-            terbaik, skor = geser, s
+
+    def fase_terbaik(b):
+        per_ = fps * 60 / b                    # periode dalam frame STFT
+        hasil_ = (0.0, -1.0)
+        for geser_ in np.arange(0.0, per_, 0.25):
+            pos = geser_ + per_ * np.arange(int((len(flux) - 1 - geser_) // per_) + 1)
+            s_ = float(np.interp(pos, idx, flux).mean())
+            if s_ > hasil_[1]:
+                hasil_ = (geser_, s_)
+        return hasil_
+
+    # Penghalusan tempo: tempo() berlangkah 0,5 BPM; salah 0,5 BPM = grid melenceng ±3 ms per
+    # ketukan -- terukur 99,5 vs 100 BPM pada lagu uji, ±0,3 dtk di video 60 dtk. Tempo di sekitar
+    # hasil kasar dicari ulang (0,05 BPM) dengan grid yang paling menumpuk energi onset.
+    kandidat = [(b,) + fase_terbaik(b) for b in np.arange(bpm - 0.75, bpm + 0.76, 0.05)]
+    bpm_halus, terbaik, skor = max(kandidat, key=lambda k: k[2])
+    bpm = round(float(bpm_halus), 2)
     # flux[i] = perubahan frame i -> i+1; onset terlihat di frame i+1 (awal jendela).
     fase = ((terbaik + 1) * HOP) / SR + FASE_KOREKSI
     periode = 60.0 / bpm

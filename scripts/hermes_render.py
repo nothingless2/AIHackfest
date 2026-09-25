@@ -143,6 +143,10 @@ def _parser():
                    help="Bahan tanpa ucapan + musik: potongan mengikuti ketukan (bawaan on).")
     p.add_argument("--motion", default=None,
                    help="Motion graphic penjelas: sedang (bawaan) | mati.")
+    p.add_argument("--jumlah-short", type=int, choices=[1, 2, 3], default=None,
+                   help="Video panjang berucap -> N short terpisah (hanya bersama --draft).")
+    p.add_argument("--short", default=None,
+                   help="Render dari draf beberapa short: 'semua' atau huruf, mis. 'A,C'.")
     p.add_argument("--draft", action="store_true",
                    help="Hanya buat DRAF naskah (2 varian) untuk dipilih user; belum merender.")
     p.add_argument("--draft-id", default=None, help="Render dari draf yang dipilih user.")
@@ -158,10 +162,11 @@ def _parse_args(argv):
 
 # Pengaturan yang menentukan ISI draf (brief). Saat render dari draf, nilainya dikunci:
 # mengubahnya berarti naskah yang disetujui user dibuat dari pengaturan berbeda.
-DIKUNCI_DRAF = {"audio_mode", "duration_seconds", "static_text", "edit_mode", "user_context"}
+DIKUNCI_DRAF = {"audio_mode", "duration_seconds", "static_text", "edit_mode", "user_context",
+                "jumlah_short"}
 # Tidak relevan saat render dari draf: gerbang inspect sudah dilewati saat draf dibuat.
 DIABAIKAN_DRAF = {"media_paths", "inspect_id", "user_answered", "require_inspect", "chat_id",
-                  "draft", "draft_id", "varian", "naskah", "help"}
+                  "draft", "draft_id", "varian", "naskah", "short", "help"}
 
 
 def _flag_eksplisit(parser, argv):
@@ -218,6 +223,8 @@ def _apply_env(args):
         os.environ["CONTENT_FACTORY_STATIC_TEXT"] = "1"
     if args.duration_seconds:
         os.environ["CONTENT_FACTORY_DURATION"] = str(args.duration_seconds)
+    if args.jumlah_short:
+        os.environ["CONTENT_FACTORY_SHORT"] = str(args.jumlah_short)
     if args.speed_factor is not None:
         os.environ["SPEED_FACTOR"] = str(args.speed_factor)
     if args.auto_zoom:
@@ -282,6 +289,15 @@ def _selesai_draf(run_id, chat_id, run_prefix, nama_bahan, args, media_paths):
         log_event("run_rejected", run_id, chat_id=chat_id, reason=e.kode)
         return 1
     d = draf_naskah.muat(draft_id, chat_id or "")
+    # Pratinjau storyboard (+ contoh suara): tampilan disetujui SEBELUM render penuh. Gagal =
+    # draf tetap terkirim, alasannya dilaporkan.
+    pratinjau = {"storyboard": [], "contoh_suara": None, "gagal": []}
+    if (os.getenv("STORYBOARD") or "1").strip().lower() not in ("0", "off", "mati"):
+        try:
+            import storyboard
+            pratinjau = storyboard.untuk_draf(d, draf_naskah.DRAF_DIR)
+        except Exception as e:
+            pratinjau["gagal"].append(f"storyboard: {type(e).__name__}: {str(e)[:120]}")
     hasil = {
         "ok": True,
         "mode": "draf",
@@ -291,10 +307,90 @@ def _selesai_draf(run_id, chat_id, run_prefix, nama_bahan, args, media_paths):
         "varian": [{"huruf": draf_naskah.HURUF[i], "gaya": v.get("gaya"), "judul": v.get("judul"),
                     "naskah": v.get("full_voice_over")} for i, v in enumerate(d["varian"])],
         "audio_mode": brief.get("audio_mode"),
+        "storyboard": pratinjau["storyboard"],
+        "contoh_suara": pratinjau["contoh_suara"],
+        "storyboard_gagal": pratinjau["gagal"] or None,
         "biaya": ringkasan_biaya(run_id),
     }
     print(json.dumps(hasil, ensure_ascii=False))
     log_event("draft_ready", run_id, chat_id=chat_id)
+    return 0
+
+
+def _hasil_render(run_id, pesan_durasi):
+    """JSON hasil satu render (dibaca dari berkas hasil per run)."""
+    brief = read_json(brief_path_for_run(run_id), {}) or {}
+    status = read_json(os.path.join(STATE_DIR, "render_status.json"), {}) or {}
+    mood = status.get("music_mood")
+    return {
+        "ok": True,
+        "run_id": run_id,
+        "video_path": draft_video_path_for_run(run_id),
+        "thumb_path": draft_thumb_path_for_run(run_id),
+        "judul": brief.get("judul"),
+        "deskripsi": brief.get("deskripsi"),
+        "hashtags": brief.get("hashtags"),
+        "biaya": ringkasan_biaya(run_id),
+        "catatan_durasi": pesan_durasi or None,
+        "catatan_teks": ("Emoji " + " ".join(status["emoji_dihapus"]) + " dihapus dari teks di layar "
+                         "(font tidak mendukung emoji); tetap ada di caption.") if status.get("emoji_dihapus") else None,
+        "teks_animasi": status.get("teks_animasi"),
+        "motion": status.get("motion"),
+        "potongan_visual": status.get("potong_visual"),
+        "suara": status.get("suara"),
+        "broll": status.get("broll"),
+        "broll_kredit": [d["kredit"] for d in ((status.get("broll") or {}).get("dipakai") or [])],
+        "musik": status.get("music"),
+        "musik_suasana": (mood or {}).get("mood"),
+        "musik_tempo_bpm": (mood or {}).get("tempo_bpm") if (mood or {}).get("tempo_yakin") else None,
+        "catatan_bahan": catatan_bahan(brief),
+        "pengisian": status.get("pengisian"),
+        "qa": status.get("qa"),
+        "montase": status.get("montase"),
+        "draf": brief.get("draf"),
+        "catatan_naskah": ((brief.get("naskah_status") or {}).get("catatan") or None)
+        if (brief.get("draf") or {}).get("diedit") else None,
+    }
+
+
+def _render_beberapa_short(run_id, chat_id, draf, target, pesan_durasi, gagal):
+    """Render beberapa short dari satu draf, berurutan (satu lock per short). Draf diklaim
+    sekali (short pertama); short yang gagal tidak menggagalkan yang lain dan dilaporkan.
+    Semua gagal -> klaim dilepas (draf boleh dicoba lagi)."""
+    hasil, gagal_list, diklaim = [], [], []
+    for n, (huruf, brief_k) in enumerate(target):
+        rid = run_id if n == 0 else sanitize_run_id(f"{run_id[:8]}{huruf.lower()}{n}")
+
+        def sebelum_tahap(brief_k=brief_k, rid=rid):
+            if not diklaim:
+                draf_naskah.klaim(draf["draft_id"])
+                diklaim.append(True)
+            write_json(BRIEF_PATH, {**brief_k, "brief_id": f"brief_draf_{rid}"})
+
+        try:
+            status, detail = run_core_stages_locked(
+                rid, chat_id=chat_id, capture_output=True,
+                on_noncritical_failure=_on_noncritical_failure,
+                stages=RENDER_STAGES, sebelum_tahap=sebelum_tahap)
+        except FileLockBusyError as e:
+            gagal_list.append({"short": huruf, "alasan": f"render lain sedang berjalan ({e.elapsed_seconds:.0f} dtk)"})
+            continue
+        except DrafError as e:
+            return gagal(e.kode, str(e))
+        if status == "FAILED":
+            _, (label, output) = detail
+            gagal_list.append({"short": huruf, "alasan": f"gagal di tahap {label}: "
+                                                         f"{(output or '').splitlines()[-1:] or ''}"})
+            continue
+        item = _hasil_render(rid, pesan_durasi)
+        item["short"] = huruf
+        hasil.append(item)
+        log_event("delivered", rid, chat_id=chat_id)
+    if not hasil:
+        if diklaim:
+            draf_naskah.lepas(draf["draft_id"])
+        return gagal("render_gagal", "; ".join(f"short {g['short']}: {g['alasan']}" for g in gagal_list))
+    print(json.dumps({"ok": True, "shorts": hasil, "gagal": gagal_list or None}, ensure_ascii=False))
     return 0
 
 
@@ -334,9 +430,18 @@ def main(argv=None):
                 sidik = sidik_bahan(_validate_media_paths(
                     [p for p in args.media_paths if os.path.splitext(p)[1].lower() not in AUDIO_EXT]))
             draf = draf_naskah.muat(args.draft_id, chat_id or "", sidik=sidik)
-            draf_naskah.indeks_varian(args.varian, len(draf["varian"]))
+            if args.short:
+                # Draf beberapa short: render satu atau lebih short sekaligus.
+                if not draf["brief"].get("jumlah_short"):
+                    raise DrafError("argumen_invalid", "--short hanya untuk draf beberapa short.")
+                huruf = draf_naskah.pilih_short(args.short, len(draf["varian"]))
+            else:
+                draf_naskah.indeks_varian(args.varian, len(draf["varian"]))
+                huruf = [args.varian]
             args = _gabung_args_draf(parser, args, argv, draf.get("args") or {})
-            brief_pilihan = draf_naskah.brief_terpilih(draf, args.varian, args.naskah)
+            target = [(h, draf_naskah.brief_terpilih(draf, h, args.naskah if len(huruf) == 1 else None))
+                      for h in huruf]
+            brief_pilihan = target[0][1]
         except MediaPathError as e:
             return gagal("lampiran_invalid", str(e))
         except DrafError as e:
@@ -347,8 +452,14 @@ def main(argv=None):
         if hilang:
             return gagal("draf_bahan_hilang", "Bahan draf ini sudah tidak ada di server. Kirim ulang bahannya.")
     else:
-        if args.varian or args.naskah:
-            return gagal("argumen_invalid", "--varian/--naskah hanya bersama --draft-id.")
+        if args.varian or args.naskah or args.short:
+            return gagal("argumen_invalid", "--varian/--naskah/--short hanya bersama --draft-id.")
+        if (args.jumlah_short or 0) > 1 and not args.draft:
+            return gagal("short_butuh_draf", "Beberapa short dibuat lewat draf dulu (--draft), "
+                         "supaya kamu memilih short mana yang dirender.")
+        if (args.jumlah_short or 0) > 1 and args.audio_mode == "ai":
+            return gagal("short_butuh_suara_asli", "Beberapa short memotong ucapan asli; tidak bisa "
+                         "dengan voice-over AI.")
         # Berkas AUDIO yang terkirim sebagai --media-path adalah musik user, bukan bahan visual
         # Dipindah ke --music-file, bukan ditolak.
         audio = [p for p in args.media_paths if os.path.splitext(p)[1].lower() in AUDIO_EXT]
@@ -414,6 +525,9 @@ def main(argv=None):
     if target_durasi:
         os.environ["CONTENT_FACTORY_DURATION"] = str(target_durasi)
 
+    if draf and len(target) > 1:
+        return _render_beberapa_short(run_id, chat_id, draf, target, pesan_durasi, gagal)
+
     opsi = {}
     diklaim = []
     if draf:
@@ -452,38 +566,7 @@ def main(argv=None):
     if args.draft:
         return _selesai_draf(run_id, chat_id, run_prefix, nama_bahan, args, media_paths)
 
-    brief = read_json(brief_path_for_run(run_id), {}) or {}
-    status = read_json(os.path.join(STATE_DIR, "render_status.json"), {}) or {}
-    mood = status.get("music_mood")
-    hasil = {
-        "ok": True,
-        "run_id": run_id,
-        "video_path": draft_video_path_for_run(run_id),
-        "thumb_path": draft_thumb_path_for_run(run_id),
-        "judul": brief.get("judul"),
-        "deskripsi": brief.get("deskripsi"),
-        "hashtags": brief.get("hashtags"),
-        "biaya": ringkasan_biaya(run_id),
-        "catatan_durasi": pesan_durasi or None,
-        "catatan_teks": ("Emoji " + " ".join(status["emoji_dihapus"]) + " dihapus dari teks di layar "
-                         "(font tidak mendukung emoji); tetap ada di caption.") if status.get("emoji_dihapus") else None,
-        "teks_animasi": status.get("teks_animasi"),
-        "motion": status.get("motion"),
-        "potongan_visual": status.get("potong_visual"),
-        "suara": status.get("suara"),
-        "broll": status.get("broll"),
-        "broll_kredit": [d["kredit"] for d in ((status.get("broll") or {}).get("dipakai") or [])],
-        "musik": status.get("music"),
-        "musik_suasana": (mood or {}).get("mood"),
-        "musik_tempo_bpm": (mood or {}).get("tempo_bpm") if (mood or {}).get("tempo_yakin") else None,
-        "catatan_bahan": catatan_bahan(brief),
-        "pengisian": status.get("pengisian"),
-        "qa": status.get("qa"),
-        "montase": status.get("montase"),
-        "draf": brief.get("draf"),
-        "catatan_naskah": ((brief.get("naskah_status") or {}).get("catatan") or None)
-        if (brief.get("draf") or {}).get("diedit") else None,
-    }
+    hasil = _hasil_render(run_id, pesan_durasi)
     print(json.dumps(hasil, ensure_ascii=False))
     log_event("delivered", run_id, chat_id=chat_id)
     return 0

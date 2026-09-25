@@ -96,41 +96,51 @@ def rentang_beku(path, min_detik=BEKU_MIN):
     return [(a, akhir[i] if i < len(akhir) else dur) for i, a in enumerate(mulai)]
 
 
-def _frame(path, t):
-    r = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{t:.3f}", "-i", path, "-frames:v", "1",
-                        "-vf", f"scale={LEBAR_UJI}:{TINGGI_UJI}", "-f", "rawvideo", "-pix_fmt", "rgb24",
-                        "-"], capture_output=True, timeout=60)
+FPS_UJI = 24
+GESER_MAKS = 2            # frame: pencuplikan dua encode bisa meleset beberapa frame
+
+
+def _semua_frame(path):
+    """Seluruh video pada resolusi uji, SEKALI dekode (deterministik per indeks frame; seek
+    -ss per cuplikan pada dua encode berbeda terukur meleset >1 frame)."""
+    r = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-an", "-vf",
+                        f"fps={FPS_UJI},scale={LEBAR_UJI}:{TINGGI_UJI}", "-f", "rawvideo",
+                        "-pix_fmt", "rgb24", "-"], capture_output=True, timeout=300)
     n = LEBAR_UJI * TINGGI_UJI * 3
-    if len(r.stdout) < n:
+    if r.returncode != 0 or len(r.stdout) < n:
         return None
-    return np.frombuffer(r.stdout[:n], np.uint8).reshape(TINGGI_UJI, LEBAR_UJI, 3).astype(int)
+    return np.frombuffer(r.stdout[: len(r.stdout) // n * n], np.uint8).reshape(-1, TINGGI_UJI, LEBAR_UJI, 3)
 
 
 def overlay_di_zona(akhir, dasar, durasi, *, lewati=(), langkah=0.5):
-    """{"terpotong": [detik], "zona": {nama: [detik]}} -- piksel yang BERBEDA antara video
-    akhir dan video sebelum overlay (teks/grafik), dicicip tiap `langkah` detik. `lewati`:
-    jendela cutaway B-roll (seluruh frame memang berganti)."""
+    """{"terpotong": [detik], "zona": {nama: [detik]}} -- piksel yang jadi LEBIH TERANG di video
+    akhir dibanding video sebelum overlay (teks/grafik), dicicip tiap `langkah` detik.
+    `lewati`: jendela cutaway B-roll (seluruh frame memang berganti).
+    - Hanya "lebih terang": lapisan peredup kartu pembuka selebar layar bukan teks terpotong
+      (salah tanda pertama di render nyata 25 Sep, detik 0-2).
+    - Harus lebih terang dari SEMUA frame dasar dalam ±GESER_MAKS: gerakan (tangan di tepi)
+      pada encode yang meleset beberapa frame bukan overlay (salah tanda kedua, detik 6-13)."""
     hasil = {"terpotong": [], "zona": {k: [] for k in ZONA_UI}}
-    t = 0.25
+    fa_all, fd_all = _semua_frame(akhir), _semua_frame(dasar)
+    if fa_all is None or fd_all is None:
+        raise RuntimeError("video tidak bisa didekode untuk uji zona")
+    fa_all, fd_all = fa_all.astype(np.int16), fd_all.astype(np.int16)
     kiri, kanan = int(LEBAR_UJI * TEPI) + 1, LEBAR_UJI - int(LEBAR_UJI * TEPI) - 1
+    t = 0.25
     while t < durasi - 0.25:
-        if not any(a - 0.2 <= t <= b + 0.2 for a, b in lewati):
-            fa, fd = _frame(akhir, t), _frame(dasar, t)
-            if fa is not None and fd is not None:
-                # Hanya piksel yang jadi LEBIH TERANG = huruf/ikon. Lapisan peredup kartu pembuka
-                # selebar layar menggelapkan tepi dan bukan "teks terpotong" (salah tanda pertama
-                # di render nyata 25 Sep, detik 0-2).
-                beda = (fa - fd).max(axis=2) > AMBANG_PIKSEL
-                # Terpotong: overlay menyentuh kolom tepi di baris yang sama di KEDUA sisi tidak
-                # perlu; satu sisi saja sudah berarti teks keluar kanvas.
-                # Jumlah ABSOLUT, bukan rata-rata kolom: goresan huruf tipis tenggelam bila dirata-
-                # ratakan ke seluruh tinggi layar (terukur: teks jelas terpotong tidak tertangkap).
-                if beda[:, :kiri].sum() >= PIKSEL_TEPI_MIN or beda[:, kanan:].sum() >= PIKSEL_TEPI_MIN:
-                    hasil["terpotong"].append(round(t, 2))
-                for nama, (x0, x1, y0, y1) in ZONA_UI.items():
-                    z = beda[int(y0 * TINGGI_UJI):int(y1 * TINGGI_UJI), int(x0 * LEBAR_UJI):int(x1 * LEBAR_UJI)]
-                    if z.size and z.mean() > FRAKSI_ZONA:
-                        hasil["zona"][nama].append(round(t, 2))
+        i = int(round(t * FPS_UJI))
+        if i < len(fa_all) and not any(a - 0.2 <= t <= b + 0.2 for a, b in lewati):
+            fa = fa_all[i]
+            dasar_k = [fd_all[j] for j in range(i - GESER_MAKS, i + GESER_MAKS + 1) if 0 <= j < len(fd_all)]
+            beda = np.logical_and.reduce([(fa - fd).max(axis=2) > AMBANG_PIKSEL for fd in dasar_k])
+            # Jumlah ABSOLUT, bukan rata-rata kolom: goresan huruf tipis tenggelam bila dirata-
+            # ratakan ke seluruh tinggi layar (terukur: teks jelas terpotong tidak tertangkap).
+            if beda[:, :kiri].sum() >= PIKSEL_TEPI_MIN or beda[:, kanan:].sum() >= PIKSEL_TEPI_MIN:
+                hasil["terpotong"].append(round(t, 2))
+            for nama, (x0, x1, y0, y1) in ZONA_UI.items():
+                z = beda[int(y0 * TINGGI_UJI):int(y1 * TINGGI_UJI), int(x0 * LEBAR_UJI):int(x1 * LEBAR_UJI)]
+                if z.size and z.mean() > FRAKSI_ZONA:
+                    hasil["zona"][nama].append(round(t, 2))
         t += langkah
     return hasil
 
@@ -188,7 +198,11 @@ def periksa(path, *, dasar=None, ada_foto=False, harus_bersuara=True, lewati=(),
             masalah.append(f"gambar beku di {_rentang_teks(beku)}")
 
     if dasar and os.path.exists(dasar):
-        o = overlay_di_zona(path, dasar, durasi, lewati=lewati)
+        try:
+            o = overlay_di_zona(path, dasar, durasi, lewati=lewati)
+        except Exception as e:
+            peringatan.append(f"uji tepi/zona gagal berjalan ({type(e).__name__})")
+            o = {"terpotong": [], "zona": {}}
         if o["terpotong"]:
             masalah.append(f"teks/grafik menyentuh tepi layar (terpotong) di detik "
                            f"{', '.join(map(str, o['terpotong'][:4]))}")
