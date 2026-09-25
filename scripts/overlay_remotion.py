@@ -224,17 +224,3 @@ def render_motion(items, folder, *, lebar, tinggi, fps, durasi, aksen=MOTION_AKS
              "items": props_items}
     pekerjaan = _jalankan_node(props, kerja, folder, komposisi="MotionOverlay")
     return pekerjaan, {"frame_chromium": total_frame_chromium(kerja), "item": len(items)}
-
-
-def tempel_motion(video_masuk, items, video_keluar, *, lebar, tinggi, fps, durasi,
-                  aksen=MOTION_AKSEN, filter_akhir=None):
-    """Render + tempel motion graphic dalam satu langkah. Melempar OverlayError; berkas kerja
-    selalu dibersihkan. Audio video masukan (bila ada) disalin apa adanya."""
-    folder = tempfile.mkdtemp(prefix="_overlay_", dir=os.path.dirname(os.path.abspath(video_keluar)))
-    try:
-        pekerjaan, info = render_motion(items, folder, lebar=lebar, tinggi=tinggi, fps=fps,
-                                        durasi=durasi, aksen=aksen)
-        komposit(video_masuk, pekerjaan, fps, video_keluar, filter_akhir=filter_akhir)
-    finally:
-        shutil.rmtree(folder, ignore_errors=True)
-    return info

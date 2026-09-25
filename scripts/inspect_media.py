@@ -5,17 +5,17 @@ nyata (19 Sep): tiga klip B-roll food court tanpa ucapan diminta "diedit sebagus
 mungkin"; tanpa tahu acaranya, judul dan teks hanya bisa TEBAKAN ("materi edukasi",
 "ratusan peserta"). Bertanya dulu lebih murah daripada merender ulang.
 
-Alurnya dua panggilan tool biasa -- TANPA timer, penjadwal, atau proses latar
-belakang. Percakapannya sepenuhnya urusan OpenClaw:
+Alurnya (agent Hermes, lihat hermes-skill/content-factory/SKILL.md) -- TANPA timer atau
+penjadwal. Percakapannya sepenuhnya urusan agent:
 
-    1. content_factory_inspect  -> fakta terukur + pertanyaan yang kurang + inspect_id
+    1. inspect_media.py inspect -> fakta terukur + pertanyaan yang kurang + inspect_id
     2. agent bertanya ke user, lalu BERHENTI; jawaban user = giliran baru
-    3. content_factory_run(inspectId, userAnswered=true, userContext=...) -> render
+    3. hermes_render.py --draft --inspect-id ... --user-answered --user-context ... -> draf
 
 Pembagian kerja (aturan #5 CLAUDE.md): KODE yang mengukur fakta dan menentukan
 pertanyaan mana yang perlu; LLM hanya menyampaikannya dengan bahasanya sendiri.
 
-Pintu masuk `run` diperiksa oleh cek_izin(): inspect_id harus ada, milik chat yang
+Pintu masuk hermes_render diperiksa oleh cek_izin(): inspect_id harus ada, milik chat yang
 sama, untuk bahan yang sama, belum kedaluwarsa, dan -- kalau ada pertanyaan --
 sudah ditanyakan. Semua gagal-tertutup.
 
@@ -31,7 +31,6 @@ import re
 import secrets
 import subprocess
 import sys
-import time
 from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -50,7 +49,6 @@ VAD_TIMEOUT = 40
 
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 AUDIO_EXT = {".mp3", ".m4a", ".aac", ".wav", ".ogg", ".opus", ".flac"}
-VIDEO_EXT = {".mp4", ".mov", ".mkv", ".avi", ".webm"}
 
 # Rasio detik-berucap terhadap durasi. Diukur pada klip nyata: talking-head 0,93-0,97,
 # B-roll keramaian 0-0,35 (yang 0,35 itu klip yang dihalusinasi Whisper).
@@ -513,7 +511,7 @@ def susun_pemetaan(pertanyaan):
             baris.append(f"    {i}{huruf} -> {isi}")
         if not p.get("param"):
             baris.append(f"    {i}* -> tidak ada parameter; masukkan jawaban user (nama, brand, "
-                         "istilah) ke userContext APA ADANYA")
+                         "istilah) ke --user-context APA ADANYA")
     return baris
 
 
@@ -532,7 +530,7 @@ def susun_pesan_pertanyaan(pertanyaan, ringk=None):
 
     Semua pilihan ditulis di sini, oleh kode. Format teks biasa (tanpa markdown) supaya
     tidak ada risiko gagal parse di Telegram. Sengaja SATU pesan biasa yang tidak
-    memblokir -- bukan ask_user OpenClaw, yang menahan giliran agent lalu kedaluwarsa
+    memblokir -- bukan tool tanya-jawab yang menahan giliran agent lalu kedaluwarsa
     tepat 15 menit dan menggagalkan giliran itu (terjadi 19 Sep pukul 22:34-23:05:
     user membalas setelah 28 menit, dan tiga pertanyaan dalam satu ask_user tidak bisa
     dijawab dengan satu balasan bebas).
@@ -611,7 +609,6 @@ def susun_teks(fakta, pertanyaan, tahu, ringk, *, inspect_id, paths):
                  "voice-over AI), subtitle karaoke bila ada ucapan, musik latar bila tersedia, "
                  "durasi mengikuti bahan (maks 60 dtk).")
 
-    paths_json = json.dumps(paths, ensure_ascii=False)
     baris.append("")
     if pertanyaan:
         baris += [
@@ -623,28 +620,27 @@ def susun_teks(fakta, pertanyaan, tahu, ringk, *, inspect_id, paths):
             "PESAN>>>",
             "",
             "ATURAN LANJUTAN:",
-            "- JANGAN memakai ask_user untuk ini. ask_user menahan giliran agent lalu "
-            "kedaluwarsa tepat 15 menit dan menggagalkan giliran itu; user boleh membalas kapan "
-            "saja dalam 24 jam.",
-            "- JANGAN memanggil content_factory_run pada giliran ini, dan jangan menanyakan hal "
+            "- JANGAN memakai tool tanya-jawab yang menahan giliran (mis. ask_user): tool seperti "
+            "itu kedaluwarsa (terukur 15 menit) dan menggagalkan giliran; user boleh membalas "
+            "kapan saja dalam 24 jam.",
+            "- JANGAN menjalankan hermes_render.py pada giliran ini, dan jangan menanyakan hal "
             "lain di luar pesan itu.",
             "- Saat user membalas (huruf seperti '1A 2B', jawaban bebas, atau 'terserah' = semua "
             "pilihan bertanda ★), terjemahkan ke parameter berikut:",
             *susun_pemetaan(pertanyaan),
             "  Pilihan yang tidak disebut user = pilihan bertanda ★. Jawaban bebas yang menyebut "
-            "nama, tempat, atau brand HARUS masuk userContext dengan ejaan user.",
-            "- Lalu panggil content_factory_run dengan:",
-            f"    mediaPaths = {paths_json}",
-            f"    inspectId = {inspect_id}",
-            "    userAnswered = true",
-            "    userContext = permintaan awal + jawaban user apa adanya",
+            "nama, tempat, atau brand HARUS masuk --user-context dengan ejaan user.",
+            "- Lalu jalankan draf (Langkah 3 skill) dengan:",
+            f"    {_flag_bahan(paths)}",
+            f"    --inspect-id {inspect_id} --user-answered",
+            "    --user-context \"permintaan awal + jawaban user apa adanya\"",
         ]
     else:
         baris += [
             "Tidak ada yang perlu ditanyakan: permintaan user sudah cukup lengkap. Langsung "
-            "panggil content_factory_run dengan:",
-            f"    mediaPaths = {paths_json}",
-            f"    inspectId = {inspect_id}",
+            "jalankan draf (Langkah 3 skill) dengan:",
+            f"    {_flag_bahan(paths)}",
+            f"    --inspect-id {inspect_id}",
         ]
     return "\n".join(baris)
 
@@ -720,16 +716,21 @@ def inspeksi(paths, konteks="", chat_id=""):
             "ringkasan": ringk, "degraded": degraded, "teks": teks}
 
 
+def _flag_bahan(paths):
+    return " ".join(f"--media-path {json.dumps(p, ensure_ascii=False)}" for p in paths)
+
+
 def _teks_degraded(pertanyaan, inspect_id, paths):
     baris = [
         "Pemeriksaan otomatis bahan gagal, jadi hanya dua pertanyaan dasar. KIRIM PESAN DI "
-        "BAWAH INI APA ADANYA sebagai pesan biasa lalu AKHIRI giliranmu (JANGAN memakai ask_user):",
+        "BAWAH INI APA ADANYA sebagai pesan biasa lalu AKHIRI giliranmu (JANGAN memakai tool tanya-jawab yang menahan "
+        "giliran, mis. ask_user):",
         "<<<PESAN", susun_pesan_pertanyaan(pertanyaan), "PESAN>>>", "",
         "Setelah user membalas, terjemahkan jawabannya:",
         *susun_pemetaan(pertanyaan),
-        "lalu panggil content_factory_run dengan "
-        f"mediaPaths = {json.dumps(paths, ensure_ascii=False)}, inspectId = {inspect_id}, "
-        "userAnswered = true, dan userContext berisi jawaban user apa adanya.",
+        f"lalu jalankan draf (Langkah 3 skill) dengan {_flag_bahan(paths)} "
+        f"--inspect-id {inspect_id} --user-answered, dan --user-context berisi jawaban user "
+        "apa adanya.",
     ]
     return "\n".join(baris)
 
@@ -766,48 +767,47 @@ def cek_izin(inspect_id, chat_id, paths, user_answered=False, konteks=None):
 
     if not inspect_id:
         return tolak("wajib_inspect",
-                     "Belum ada pemeriksaan bahan. Panggil content_factory_inspect dengan "
-                     "mediaPaths yang sama TERLEBIH DAHULU, tanyakan ke user pertanyaan yang "
-                     "diminta, lalu panggil content_factory_run lagi dengan inspectId dari hasil "
-                     "itu.")
+                     "Belum ada pemeriksaan bahan. Jalankan inspect_media.py inspect untuk bahan "
+                     "yang sama TERLEBIH DAHULU, tanyakan ke user pertanyaan yang diminta, lalu "
+                     "jalankan lagi dengan --inspect-id dari hasil itu.")
     p = _path_state(inspect_id)
     if p is None or not os.path.exists(p):
-        return tolak("tidak_ditemukan", "inspectId tidak dikenal atau sudah dihapus. Panggil "
-                                        "content_factory_inspect lagi untuk bahan ini.")
+        return tolak("tidak_ditemukan", "inspect-id tidak dikenal atau sudah dihapus. Jalankan "
+                                        "inspect_media.py inspect lagi untuk bahan ini.")
     try:
         with open(p, encoding="utf-8") as f:
             st = json.load(f)
     except (OSError, ValueError):
-        return tolak("tidak_ditemukan", "Status pemeriksaan rusak. Panggil content_factory_inspect lagi.")
+        return tolak("tidak_ditemukan", "Status pemeriksaan rusak. Jalankan inspect_media.py inspect lagi.")
 
     if str(st.get("chat_id")) != str(chat_id):
-        return tolak("milik_chat_lain", "inspectId ini bukan milik chat ini. Panggil "
-                                        "content_factory_inspect untuk bahan yang diupload di sini.")
+        return tolak("milik_chat_lain", "inspect-id ini bukan milik chat ini. Jalankan "
+                                        "inspect_media.py inspect untuk bahan yang diupload di sini.")
     try:
         umur_jam = (_sekarang() - datetime.fromisoformat(st["dibuat"])).total_seconds() / 3600
     except (KeyError, ValueError):
         umur_jam = float("inf")
     if umur_jam > INSPECT_TTL_HOURS:
         return tolak("kedaluwarsa", f"Pemeriksaan sudah lebih dari {INSPECT_TTL_HOURS:.0f} jam. "
-                                    "Panggil content_factory_inspect lagi.")
+                                    "Jalankan inspect_media.py inspect lagi.")
     if sorted(st.get("bahan") or []) != sidik_bahan(paths):
         return tolak("bahan_berbeda", "Bahan yang dikirim tidak sama dengan yang diperiksa. "
-                                      "Pakai mediaPaths PERSIS seperti pada hasil pemeriksaan.")
+                                      "Pakai --media-path PERSIS seperti pada pemeriksaan.")
     if st.get("pertanyaan") and not user_answered:
         return tolak("belum_ditanyakan",
                      "Pemeriksaan menemukan hal yang perlu ditanyakan ke user "
                      f"({', '.join(st['pertanyaan'])}). Tanyakan dulu dan tunggu jawabannya, lalu "
-                     "panggil lagi dengan userAnswered = true dan userContext berisi jawaban user.")
+                     "jalankan lagi dengan --user-answered dan --user-context berisi jawaban user.")
     # Pertanyaan topik/tujuan hanya berguna kalau jawabannya SAMPAI ke pipeline. `konteks`
-    # None = pemanggil lama yang tidak mengirimnya (tidak diperiksa); plugin selalu mengirim.
+    # None = pemanggil yang tidak mengirimnya (tidak diperiksa); hermes_render selalu mengirim.
     if (konteks is not None and st.get("pertanyaan")
             and {"topik", "tujuan"} & set(st["pertanyaan"])
             and not konteks_memuat_jawaban(konteks, st.get("konteks_awal", ""))):
         return tolak("jawaban_tidak_di_konteks",
-                     "userContext belum memuat jawaban user. Pemeriksaan menanyakan topik/tujuan, "
-                     "jadi isi userContext dengan permintaan awal DITAMBAH jawaban user apa adanya "
+                     "--user-context belum memuat jawaban user. Pemeriksaan menanyakan topik/tujuan, "
+                     "jadi isi --user-context dengan permintaan awal DITAMBAH jawaban user apa adanya "
                      "(nama tempat, acara, brand dengan ejaan persis). Kalau user menjawab "
-                     "'terserah', tulis itu di userContext. Lalu panggil lagi.")
+                     "'terserah', tulis itu di --user-context. Lalu jalankan lagi.")
     return {"ok": True, "kode": "ok", "teks": ""}
 
 
@@ -815,22 +815,17 @@ def cek_izin(inspect_id, chat_id, paths, user_answered=False, konteks=None):
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    if not argv or argv[0] not in ("inspect", "check"):
+    if not argv or argv[0] != "inspect":
         print(json.dumps({"ok": False, "kode": "penggunaan",
-                          "teks": "pakai: inspect_media.py inspect|check (JSON di stdin)"}))
+                          "teks": "pakai: inspect_media.py inspect (JSON di stdin)"}))
         return 2
     try:
         masuk = json.load(sys.stdin)
     except ValueError:
         print(json.dumps({"ok": False, "kode": "masukan_rusak", "teks": "stdin bukan JSON"}))
         return 2
-    if argv[0] == "inspect":
-        hasil = inspeksi(masuk.get("paths") or [], masuk.get("konteks") or "",
-                         str(masuk.get("chat_id") or ""))
-    else:
-        hasil = cek_izin(masuk.get("inspect_id") or "", str(masuk.get("chat_id") or ""),
-                         masuk.get("paths") or [], bool(masuk.get("user_answered")),
-                         masuk.get("konteks"))
+    hasil = inspeksi(masuk.get("paths") or [], masuk.get("konteks") or "",
+                     str(masuk.get("chat_id") or ""))
     print(json.dumps(hasil, ensure_ascii=False))
     return 0
 

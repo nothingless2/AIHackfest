@@ -8,7 +8,6 @@ aritmetikanya.
 """
 
 import json
-import os
 import subprocess
 
 import pytest
@@ -119,11 +118,6 @@ def test_tts_memakai_versi_lafal():
     assert sp.spoken_text(BRIEF_LAFAL) == "dapatkan liids lebih banyak"
 
 
-def test_subtitle_memakai_ejaan_benar():
-    """Tertukar = subtitle salah eja di layar."""
-    assert sp.written_text(BRIEF_LAFAL) == "dapatkan leads lebih banyak"
-
-
 def test_brief_lama_tanpa_field_lafal_tetap_jalan():
     assert sp.spoken_text({"full_voice_over": "halo"}) == "halo"
     assert sp.spoken_text({"full_voice_over": "halo", "voice_over_spoken": ""}) == "halo"
@@ -131,7 +125,7 @@ def test_brief_lama_tanpa_field_lafal_tetap_jalan():
 
 def test_spoken_rewrite_dimatikan_menyamakan_keduanya(monkeypatch):
     monkeypatch.setattr(sp, "SPOKEN_REWRITE", False)
-    assert sp.spoken_text(BRIEF_LAFAL) == sp.written_text(BRIEF_LAFAL)
+    assert sp.spoken_text(BRIEF_LAFAL) == BRIEF_LAFAL["full_voice_over"]
 
 
 def test_aturan_lafal_hilang_dari_prompt_kalau_dimatikan(monkeypatch):
@@ -226,7 +220,7 @@ def test_setiap_bahan_yang_dipakai_benar_benar_tampil(render_kecil, tmp_path,
     }), encoding="utf-8")
 
     keluaran = tmp_path / "hasil.mp4"
-    ar.render_from_agent_script(str(skrip), "", str(keluaran))
+    ar.render_from_agent_script(str(skrip), str(keluaran))
 
     dipakai, klip = ar.bagi_durasi(aset, durasi_audio)
     per = klip[0]
@@ -264,7 +258,7 @@ def test_koreksi_durasi_dipanggil_TEPAT_sekali(render_kecil, tmp_path, monkeypat
         "media_assets": buat_aset(2), "scenes": [],
     }), encoding="utf-8")
 
-    ar.render_from_agent_script(str(skrip), "", str(tmp_path / "hasil.mp4"))
+    ar.render_from_agent_script(str(skrip), str(tmp_path / "hasil.mp4"))
 
     assert len(panggilan) == 1, f"koreksi dipanggil {len(panggilan)} kali"
 
@@ -286,7 +280,7 @@ def test_tanpa_target_tidak_ada_koreksi(render_kecil, tmp_path, monkeypatch):
         "full_voice_over": "naskah", "media_assets": buat_aset(2), "scenes": [],
     }), encoding="utf-8")
 
-    ar.render_from_agent_script(str(skrip), "", str(tmp_path / "hasil.mp4"))
+    ar.render_from_agent_script(str(skrip), str(tmp_path / "hasil.mp4"))
 
 
 # ---------- isi prompt koreksi ----------

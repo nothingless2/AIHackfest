@@ -4,11 +4,10 @@ Modul ringan (hanya stdlib) supaya titik masuk bisa memvalidasi SEBELUM lock
 render dan sebelum satu pun panggilan LLM -- sama alasannya dengan canvas.py.
 
 Dua jalur deteksi, sengaja tidak cuma satu:
-- UTAMA: parameter tool `durationSeconds` dari OpenClaw, diteruskan sebagai
-  env CONTENT_FACTORY_DURATION. Model jauh lebih andal mengekstrak angka dari
-  kalimat Bahasa Indonesia daripada regex.
-- CADANGAN: regex atas CONTENT_FACTORY_USER_CONTEXT, untuk jalur CLI dan untuk
-  kasus model lupa mengisi parameter.
+- UTAMA: flag `--duration-seconds` hermes_render (diisi agent dari jawaban user),
+  diteruskan sebagai env CONTENT_FACTORY_DURATION. Model jauh lebih andal mengekstrak
+  angka dari kalimat Bahasa Indonesia daripada regex.
+- CADANGAN: regex atas CONTENT_FACTORY_USER_CONTEXT, untuk kasus agent lupa mengisi flag.
 
 Di luar rentang TIDAK ditolak melainkan dijepit ke batas terdekat, dan nilai
 yang dipakai dikembalikan sebagai pesan supaya user diberi tahu -- menolak

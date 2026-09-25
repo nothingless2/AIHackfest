@@ -25,7 +25,6 @@ import time
 
 import json
 import signal
-import sys
 import threading
 
 from common import OPENAI_API_KEY, PROJECT_ROOT
@@ -160,11 +159,6 @@ def extract_audio(path, out_path):
     except (subprocess.TimeoutExpired, OSError) as e:
         print(f"[warn] transcribe: gagal mengekstrak audio dari {os.path.basename(path)}: {e}")
         return False
-
-
-def transcribe_file(audio_path, *, durasi=0.0):
-    """Transkrip satu file audio. Return teks, atau "" kalau gagal."""
-    return (transcribe_file_detailed(audio_path, durasi=durasi) or {}).get("text", "")
 
 
 def transcribe_file_detailed(audio_path, *, durasi=0.0, vocab_prompt=None):
@@ -424,15 +418,6 @@ def _catat_biaya(durasi_detik, teks, *, lokal=False):
         print(f"[warn] cost: gagal mencatat transkripsi: {type(e).__name__}: {e}")
 
 
-def transcribe_assets(paths, *, max_assets=None, konteks=""):
-    """Transkrip semua bahan yang punya audio. Return {nama_file: teks}."""
-    return {
-        nama: data["text"]
-        for nama, data in transcribe_assets_detailed(
-            paths, max_assets=max_assets, konteks=konteks).items()
-    }
-
-
 def _buang(path):
     """Hapus berkas sementara tanpa pernah menggagalkan apa pun karenanya."""
     try:
@@ -441,22 +426,9 @@ def _buang(path):
         pass
 
 
-def transcribe_assets_detailed(paths, *, max_assets=None, konteks=""):
-    """Seperti transcribe_assets, tapi menyertakan potongan bertimestamp.
-
-    Return {nama_file: {"text":..., "segments":[...], "duration": float}} — hanya
-    berisi yang BERHASIL dan tidak kosong. Bahan tanpa audio, gagal ekstrak, atau
-    gagal transkrip tidak muncul, sehingga pemanggil tidak pernah menyangka ada
-    teks padahal tidak ada.
-
-    Pemanggil yang perlu tahu KENAPA sebuah bahan tidak muncul memakai
-    transcribe_assets_report().
-    """
-    return transcribe_assets_report(paths, max_assets=max_assets, konteks=konteks)[0]
-
-
 def transcribe_assets_report(paths, *, max_assets=None, konteks=""):
-    """(hasil, gagal): `hasil` seperti transcribe_assets_detailed, `gagal` adalah
+    """(hasil, gagal): `hasil` = {nama_file: {"text", "segments", "words", "duration", ...}}
+    untuk bahan yang BERHASIL dan tidak kosong; `gagal` adalah
     {nama_file: kode_alasan} untuk SETIAP bahan yang tidak menghasilkan transkrip.
 
     Alasan dicatat karena "subtitle hilang" punya penyebab yang sangat berbeda

@@ -29,9 +29,7 @@ sys.path.insert(
     0,
     os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "scripts"),
 )
-from canvas import (  # noqa: E402
-    ASPECT_PRESETS, FIT_MODES, CanvasError, resolve_canvas,
-)
+from canvas import resolve_canvas  # noqa: E402
 from duration import (  # noqa: E402
     DURATION_TOLERANCE, off_target, word_target,
 )
@@ -101,8 +99,6 @@ def resolve_font(nama=None, berat=None):
 
 
 FONT_PATH = resolve_font()
-SAFE_TOP_MARGIN_PX = 300
-SAFE_BOTTOM_MARGIN_PX = 300
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv"}
@@ -1848,7 +1844,6 @@ def tambah_musik(video_path, track, out_path, durasi, ada_ucapan=True):
 
 def render_from_agent_script(
     json_path="workspace/drafts/script.json",
-    image_path="",
     output_video="workspace/drafts/video_output.mp4",
 ):
     if not os.path.exists(json_path):
@@ -2149,15 +2144,3 @@ def render_from_agent_script(
         scene_count=len(scenes),
         source_assets=existing_assets,
     )
-
-
-if __name__ == "__main__":
-    script_file = sys.argv[1] if len(sys.argv) > 1 else "workspace/drafts/script.json"
-    image_file = sys.argv[2] if len(sys.argv) > 2 else ""
-
-    try:
-        render_from_agent_script(script_file, image_file)
-    except Exception as e:
-        log_error("auto_render.py render failure", e)
-        write_status("FAILED", error=str(e))
-        print(f"❌ Error: {e}. Detail lengkap dicatat di {ERROR_LOG_PATH}.")

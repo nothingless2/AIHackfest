@@ -1,18 +1,14 @@
-"""Fondasi bersama semua agent: path, state, logging, notifikasi Telegram, persona."""
+"""Fondasi bersama semua agent: path, state, logging, LLM, persona log."""
 
 import json
 import os
-import tempfile
 import traceback
 from datetime import datetime, timezone
 
-import requests
 from dotenv import load_dotenv
 
-from thumbnail import telegram_thumb
-
 # --- Root proyek dihitung dari lokasi file ini, bukan dari cwd pemanggil.
-# Ini penting: pipeline bisa dipanggil dari mana saja (plugin OpenClaw, cron, CLI)
+# Ini penting: pipeline bisa dipanggil dari mana saja (agent Hermes, CLI, test)
 # tanpa path menjadi salah arah.
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -37,7 +33,7 @@ DRAFT_VIDEO_PATH = os.path.join(DRAFTS_DIR, "video_output.mp4")
 
 def draft_video_path_for_run(run_id):
     """Path video hasil akhir milik satu run spesifik — dibaca oleh apa pun
-    yang berjalan SETELAH lock render dilepas (delivery, approval-wait),
+    yang berjalan SETELAH lock render dilepas (hermes_render membaca hasilnya),
     supaya tidak pernah membaca file yang bisa tertimpa run berikutnya.
     Fallback ke path tetap kalau run_id kosong (pemakaian standalone lama)."""
     if not run_id:
@@ -65,58 +61,22 @@ def brief_path_for_run(run_id):
         return BRIEF_PATH
     return os.path.join(STATE_DIR, f"creative_brief_{run_id}.json")
 
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Chat tujuan untuk RUN INI. Satu-satunya sumber: CONTENT_FACTORY_CHAT_ID, yang
-# diisi oleh titik masuk (plugin OpenClaw dari nativeChannelId, atau pipeline.py
-# dari .env untuk pemakaian CLI) lalu diwariskan ke semua tahap sebagai env.
-#
-# TIDAK ADA fallback ke TELEGRAM_CHAT_ID di sini. Versi lama memakai
-# `CONTENT_FACTORY_CHAT_ID or TELEGRAM_CHAT_ID`, sehingga ketika chat pemicu tidak
-# dapat ditentukan, hasil run SIAPA PUN dikirim ke satu chat tetap di .env --
-# materi milik user A bisa sampai ke user B. Sekarang gagal-tertutup: tidak tahu
-# tujuannya berarti tidak mengirim.
+# Label chat run ini untuk LOG (CONTENT_FACTORY_CHAT_ID), atau None. Bukan tujuan kirim:
+# tidak ada kode di repo ini yang mengirim ke chat. TIDAK ADA fallback ke nilai tetap di .env
+# -- versi lama pernah mengirim hasil run siapa pun ke satu chat tetap.
 def resolve_chat_id():
-    """Chat tujuan run ini, atau None kalau tidak dapat ditentukan."""
+    """Label chat run ini, atau None."""
     return (os.getenv("CONTENT_FACTORY_CHAT_ID") or "").strip() or None
 
 
-# HANYA untuk jalur CLI (pipeline.py) sebagai nilai awal yang lalu diteruskan
-# lewat CONTENT_FACTORY_CHAT_ID. Jangan pernah dipakai langsung sebagai tujuan.
-CLI_CHAT_ID = (os.getenv("TELEGRAM_CHAT_ID") or "").strip() or None
-
-
-def allowed_chat_ids():
-    """Himpunan chat yang boleh memicu pipeline, dari ALLOWED_CHAT_IDS di .env.
-
-    Dibaca per-panggilan (bukan konstanta modul) supaya perubahan .env tidak
-    butuh restart, dan supaya test bisa mengubahnya lewat monkeypatch env.
-    """
-    raw = os.getenv("ALLOWED_CHAT_IDS", "")
-    return {part.strip() for part in raw.split(",") if part.strip()}
-
-
-def chat_allowed(chat_id):
-    """True kalau chat_id boleh memicu pipeline.
-
-    GAGAL-TERTUTUP: ALLOWED_CHAT_IDS kosong/tidak diset berarti TIDAK ADA yang
-    diizinkan -- bukan "semua boleh". Pipeline ini membakar kredit OpenAI dan
-    mengirim materi user, jadi daftar kosong harus berarti berhenti, bukan
-    terbuka lebar untuk siapa pun yang kebetulan sudah paired di Telegram.
-    """
-    if not chat_id:
-        return False
-    return str(chat_id) in allowed_chat_ids()
-
-# Persona sesuai agent yang terdaftar di OpenClaw (agents.entries).
+# Label persona di log tiap tahap.
 PERSONA = {
     "trendanalysts": "🔍 TrendAnalysts",
     "brainidea": "💡 BrainIdea",
     "contentmakers": "✍️ ContentMakers",
-    "approvalpost": "✅ ApprovalPost",
     "contentinsight": "📊 ContentInsight",
-    "pipeline": "⚙️ Pipeline",
 }
 
 MEDIA_EXTENSIONS = {
@@ -169,142 +129,13 @@ def write_json(path, payload):
             os.remove(sementara)
 
 
-def telegram_configured(chat_id=None):
-    """Siap mengirim? Butuh token DAN chat tujuan yang eksplisit.
-
-    chat_id=None berarti "pakai tujuan run ini" (resolve_chat_id()).
-    """
-    target = chat_id if chat_id is not None else resolve_chat_id()
-    return bool(TELEGRAM_BOT_TOKEN and target)
-
-
-def notify(agent_key, message, *, chat_id, silent_fail=True):
-    """Kirim pesan berlabel persona ke SATU chat tertentu. Selalu ikut dicetak ke stdout.
-
-    `chat_id` sengaja wajib dan keyword-only: tujuan pengiriman tidak boleh datang
-    dari konstanta global/ambient. chat_id kosong -> hanya dicetak, tidak dikirim.
-
-    Kalau CONTENT_FACTORY_QUIET diset (mis. saat dijalankan lewat plugin OpenClaw),
-    pesan hanya dicetak — pengiriman ke chat diserahkan ke pemanggil supaya tidak dobel.
-    """
-    label = PERSONA.get(agent_key, agent_key)
-    text = f"{label}: {message}"
-    print(text)
-
-    if os.getenv("CONTENT_FACTORY_QUIET"):
-        return False
-
-    if not chat_id:
-        print(f"[warn] notify({agent_key}): chat tujuan tidak diketahui, pesan tidak dikirim.")
-        return False
-
-    if not telegram_configured(chat_id):
-        return False
-
-    try:
-        resp = requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-            data={"chat_id": chat_id, "text": text},
-            timeout=15,
-        )
-        return resp.status_code == 200
-    except Exception as e:
-        if not silent_fail:
-            raise
-        log_error(f"notify({agent_key})", e)
-        return False
-
-
-def _hapus_diam(path):
-    """Hapus file sementara tanpa pernah menggagalkan apa pun karenanya."""
-    if not path:
-        return
-    try:
-        os.remove(path)
-    except OSError:
-        pass
-
-
-def _post_video(caption, video_path, chat_id, thumb_path=None):
-    """Satu panggilan sendVideo. Dipisah supaya bisa diulang tanpa cover.
-
-    File dibuka di sini (bukan diterima sebagai handle) karena handle yang sudah
-    terbaca habis tidak bisa dipakai ulang di percobaan kedua.
-    """
-    terbuka = []
-    try:
-        vf = open(video_path, "rb")
-        terbuka.append(vf)
-        files = {"video": vf}
-        if thumb_path:
-            # Dilampirkan sebagai FILE multipart, bukan string: dokumentasi Bot API
-            # menyatakan thumbnail diabaikan kalau tidak diunggah lewat
-            # multipart/form-data, dan tidak bisa dipakai ulang lewat file_id.
-            tf = open(thumb_path, "rb")
-            terbuka.append(tf)
-            files["thumbnail"] = tf
-        return requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendVideo",
-            data={"chat_id": chat_id, "caption": caption},
-            files=files,
-            timeout=120,
-        )
-    finally:
-        for f in terbuka:
-            f.close()
-
-
-def send_video(caption, video_path, *, chat_id, thumb_path=None):
-    """Kirim file video ke SATU chat tertentu. Return True kalau benar-benar terkirim.
-
-    `chat_id` wajib dan keyword-only: ini jalur yang mengirim materi milik user,
-    jadi tujuannya harus disebut eksplisit oleh pemanggil, tidak pernah ditebak.
-
-    `thumb_path` opsional: JPG ukuran kanvas penuh. Yang DIKIRIM bukan file itu
-    melainkan versi kecilnya (<=320 px, <200 kB sesuai batas Bot API); file
-    besarnya tetap tersimpan sebagai artefak. Cover tidak pernah menggagalkan
-    pengiriman -- kalau request dengan cover ditolak, video dikirim ulang polos.
-
-    CATATAN TERVERIFIKASI: untuk video MP4, Telegram mengabaikan cover ini dan
-    memakai frame pertama video (lihat scripts/thumbnail.py). Jadi yang
-    menentukan preview di chat adalah frame pertama, bukan parameter ini.
-    """
-    if not chat_id:
-        print(f"[warn] chat tujuan tidak diketahui, video TIDAK dikirim: {video_path}")
-        return False
-
-    if not telegram_configured(chat_id):
-        print(f"[warn] Telegram belum dikonfigurasi, video tidak dikirim: {video_path}")
-        return False
-
-    if not os.path.exists(video_path):
-        print(f"[warn] Video tidak ditemukan: {video_path}")
-        return False
-
-    kecil = None
-    try:
-        if thumb_path and os.path.exists(thumb_path):
-            fd, kandidat = tempfile.mkstemp(prefix="tg_thumb_", suffix=".jpg")
-            os.close(fd)
-            kecil = telegram_thumb(thumb_path, kandidat)
-            if kecil is None:
-                _hapus_diam(kandidat)
-
-        resp = _post_video(caption, video_path, chat_id, kecil)
-        if resp.status_code != 200 and kecil:
-            # Cover ditolak (batas ukuran/format) -- videonya jauh lebih berharga
-            # daripada covernya, jadi coba sekali lagi tanpa cover.
-            print(f"[warn] sendVideo dengan cover ditolak, coba ulang tanpa cover: {resp.text[:200]}")
-            resp = _post_video(caption, video_path, chat_id, None)
-        if resp.status_code != 200:
-            print(f"[warn] Gagal kirim video ke Telegram: {resp.text}")
-            return False
-        return True
-    except Exception as e:
-        log_error("send_video", e)
-        return False
-    finally:
-        _hapus_diam(kecil)
+def notify(agent_key, message, *, chat_id=None):
+    """Cetak pesan berlabel persona ke log tahap. TIDAK mengirim ke mana pun: di jalur Hermes
+    agent yang menyampaikan hasil ke chat (hermes_render.py). Pengiriman langsung ke Telegram
+    dihapus bersama jalur OpenClaw -- satu-satunya pengisi chat tujuannya.
+    `chat_id` dipertahankan agar pemanggil lama tetap jalan; diabaikan."""
+    print(f"{PERSONA.get(agent_key, agent_key)}: {message}")
+    return False
 
 
 def list_raw_assets():
@@ -489,8 +320,6 @@ def chat_json(messages, *, model, label="panggilan LLM", max_attempts=None, time
     (mis. koreksi durasi di tengah render, yang harus 1 percobaan singkat dan
     boleh gagal tanpa menggagalkan render).
     """
-    import json as _json
-
     from retry import with_retry
 
     client = make_openai_client(timeout=timeout)

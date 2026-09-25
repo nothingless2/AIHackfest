@@ -169,30 +169,3 @@ def test_laporan_memisahkan_kuota_habis_dari_tanpa_ucapan(monkeypatch, tmp_path)
 
 
 # ---------- alasan sampai ke user ----------
-
-def test_caption_menyebut_penyebab_subtitle_hilang(monkeypatch, tmp_path):
-    """Yang dulu terlihat user hanya 'subtitle hilang'. Sekarang: kenapa."""
-    import run_and_deliver as rd
-
-    brief = {"judul": "Uji", "hashtags": [],
-             "transcript_coverage": {
-                 "ditranskrip": 6, "total_bahan": 10,
-                 "tanpa_subtitle": ["a", "b", "c", "d"],
-                 "alasan": {"a": "kuota_habis", "b": "kuota_habis", "c": "kuota_habis",
-                            "d": "tanpa_ucapan"}}}
-    terkirim = {}
-    monkeypatch.setattr(rd, "read_json", lambda *a, **k: brief)
-    monkeypatch.setattr(rd, "ringkasan_biaya", lambda run_id: "")
-    monkeypatch.setattr(rd, "log_event", lambda *a, **k: None)
-    monkeypatch.setattr(rd, "draft_video_path_for_run", lambda r: str(tmp_path / "v.mp4"))
-    monkeypatch.setattr(rd, "draft_thumb_path_for_run", lambda r: str(tmp_path / "v.jpg"))
-    monkeypatch.setattr(rd, "send_video",
-                        lambda c, p, *, chat_id, thumb_path=None: terkirim.setdefault("caption", c) or True)
-
-    rd.deliver_plugin("run1", "123")
-
-    assert "4 dari 10" in terkirim["caption"]
-    assert "saldo/kuota API habis (3)" in terkirim["caption"]
-    assert "tidak ada ucapan terdeteksi (1)" in terkirim["caption"]
-    # penyebab terbanyak tampil lebih dulu
-    assert terkirim["caption"].index("saldo/kuota") < terkirim["caption"].index("tidak ada ucapan")

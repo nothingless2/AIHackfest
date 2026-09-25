@@ -8,7 +8,6 @@ cadangan -- ia gratis dan tetap jalan saat kredit habis.
 import asyncio
 import subprocess
 
-import pytest
 
 import auto_render as ar
 import cost_estimate as ce

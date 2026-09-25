@@ -443,7 +443,7 @@ def render_nyata(monkeypatch, tmp_path):
         skrip = tmp_path / "s.json"
         skrip.write_text(json.dumps(data), encoding="utf-8")
         keluaran = tmp_path / "hasil.mp4"
-        ar.render_from_agent_script(str(skrip), "", str(keluaran))
+        ar.render_from_agent_script(str(skrip), str(keluaran))
         return keluaran
 
     return jalankan, aset

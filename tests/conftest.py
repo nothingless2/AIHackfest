@@ -114,10 +114,7 @@ def _telegram_selalu_mati(monkeypatch):
 
     import common
 
-    monkeypatch.setattr(common, "TELEGRAM_BOT_TOKEN", "", raising=False)
-    monkeypatch.setattr(common, "CLI_CHAT_ID", None, raising=False)
     assert common.resolve_chat_id() is None, "chat tujuan harus kosong selama test"
-    assert not common.telegram_configured(), "Telegram harus mati selama test"
     yield
 
 

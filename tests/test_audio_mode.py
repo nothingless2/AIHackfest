@@ -9,7 +9,6 @@ Aturan yang diminta user:
 
 import subprocess
 
-import pytest
 
 import audio_mode as am
 import auto_render as ar

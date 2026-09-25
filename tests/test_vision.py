@@ -8,7 +8,6 @@ dibuat ffmpeg di tmp_path — tidak menyentuh bahan user.
 import base64
 import subprocess
 
-import pytest
 
 import vision
 

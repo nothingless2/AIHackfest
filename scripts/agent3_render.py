@@ -39,7 +39,6 @@ def run():
 
     render_from_agent_script(
         json_path=BRIEF_PATH,
-        image_path="",  # tidak dipakai: bahan visual datang dari media_assets
         output_video=DRAFT_VIDEO_PATH,
     )
 

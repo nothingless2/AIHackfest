@@ -1,6 +1,5 @@
-"""Lock antar-proses berbasis flock — dipakai untuk lock render (1a) dan lock
-approval (1b), dua kunci independen lewat primitif generik yang sama.
-"""
+"""Lock antar-proses berbasis flock untuk render: hanya SATU render/draf pada satu waktu
+di seluruh mesin (berkas kerja di workspace/ dipakai bersama)."""
 
 import contextlib
 import fcntl
@@ -14,9 +13,6 @@ import uuid
 from common import STATE_DIR, ensure_dirs
 
 RENDER_LOCK_PATH = os.path.join(STATE_DIR, "pipeline.lock")
-APPROVAL_LOCK_PATH = os.path.join(STATE_DIR, "approval.lock")  # dipakai mulai 1b
-
-RUN_LOCK_STALE_SECONDS = int(os.getenv("RUN_LOCK_STALE_SECONDS", "600"))
 
 _RUN_ID_SAFE = re.compile(r"[^A-Za-z0-9_-]")
 _MAX_RUN_ID_LEN = 32
@@ -46,7 +42,7 @@ def sanitize_run_id(run_id: str) -> str:
 
     Kalau hasil lebih panjang dari _MAX_RUN_ID_LEN: JANGAN dipotong buta
     (risiko tabrakan nama file kalau 2 id beda cuma di bagian yang terpotong,
-    apalagi format toolCallId asli OpenClaw tidak didokumentasikan panjangnya)
+    apalagi id dari luar tidak dijamin panjangnya)
     — pakai prefix pendek + hash dari string LENGKAP, supaya tetap unik.
     """
     cleaned = _RUN_ID_SAFE.sub("", run_id or "")
@@ -101,7 +97,3 @@ def acquire_file_lock(lock_path, holder_id):
 
 def acquire_render_lock(run_id):
     return acquire_file_lock(RENDER_LOCK_PATH, run_id)
-
-
-def acquire_approval_lock(run_id):  # dipakai mulai 1b
-    return acquire_file_lock(APPROVAL_LOCK_PATH, run_id)

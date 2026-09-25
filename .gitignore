@@ -6,7 +6,7 @@ workspace/
 node_modules/
 __pycache__/
 *.pyc
-openclaw-plugin/dist/
+
 .pytest_cache/
 
 # venv Whisper lokal (dibuat scripts/setup_local_whisper.sh) — besar, tidak untuk di-commit

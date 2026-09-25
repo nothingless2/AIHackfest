@@ -52,13 +52,10 @@ Selalu jalankan lebih dulu:
 python3 scripts/check_locks.py
 ```
 
-`scripts/install_plugin.sh` sudah menolak restart secara otomatis kalau lock
-dipegang. Lewati hanya dengan `SKIP_LOCK_CHECK=1`, dan hanya kalau kamu memang
-bermaksud menghentikan pekerjaan itu.
-
-Render baru di-spawn lewat `systemd-run --user --scope` sehingga punya cgroup
-sendiri dan selamat dari restart — tapi jalur cadangan (kalau `systemd-run` tidak
-ada) dan approval CLI yang sedang menunggu balasan tetap rentan.
+Gateway yang aktif sekarang `hermes-gateway.service`. Draf dan render berjalan
+sebagai proses latar belakang milik gateway itu, jadi restart gateway (`systemctl --user
+restart hermes-gateway`) ikut membunuh render yang sedang berjalan. Restart
+hanya kalau `check_locks.py` menyatakan bebas.
 
 ## 4. Gagal-tertutup, bukan gagal-terbuka.
 
@@ -67,7 +64,7 @@ dari satu orang, dan tebakan yang salah berarti materi seseorang sampai ke orang
 lain.
 
 - Chat tujuan tidak diketahui → **tolak**, jangan jatuh ke chat cadangan.
-- `ALLOWED_CHAT_IDS` kosong → **tidak ada** yang diizinkan, bukan semua.
+- `inspect_id` atau draf milik chat lain, kedaluwarsa, atau bahannya berbeda → **tolak**.
 - Bahan tidak disebutkan → **gagal**, jangan pakai seluruh isi `workspace/raw/`
   (folder itu berisi materi milik run dan user lain).
 - Path lampiran dari model → wajib berada di dalam folder inbound setelah

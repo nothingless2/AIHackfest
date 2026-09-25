@@ -8,7 +8,7 @@ Dua hal berbeda yang sengaja dipisah:
    ini hanya muncul kalau render mati di tengah (timeout/killpg/SIGINT/kill -9).
    Dipanggil di AWAL render, DI DALAM lock render.
 
-2. `cleanup_run_files()` / `sweep_old_run_files()` — file HASIL per-run
+2. `sweep_old_run_files()` — file HASIL per-run
    (video_{run_id}.mp4, video_{run_id}.jpg, creative_brief_{run_id}.json) yang
    umurnya panjang. Cover sengaja diberi awalan nama yang sama dengan videonya
    supaya tidak ada pola retensi yang perlu diingat terpisah.
@@ -84,32 +84,11 @@ def clear_render_workspace():
     return jumlah
 
 
-def cleanup_run_files(run_id, *, video=True, brief=True):
-    """Hapus file HASIL milik satu run.
-
-    `video=False` dipakai setelah video dipindah ke workspace/published/ -- file
-    sudah berpindah, jadi tidak ada yang perlu dihapus.
-    """
-    if not run_id:
-        return 0
-    jumlah = 0
-    if video:
-        jumlah += _hapus(os.path.join(DRAFTS_DIR, f"video_{run_id}.mp4"), "video per-run")
-        # Cover mengikuti nasib videonya: video=False berarti keduanya sudah
-        # dipindah ke published/, jadi tidak ada yang perlu dihapus.
-        jumlah += _hapus(os.path.join(DRAFTS_DIR, f"video_{run_id}.jpg"), "cover per-run")
-    if brief:
-        jumlah += _hapus(
-            os.path.join(STATE_DIR, f"creative_brief_{run_id}.json"), "brief per-run"
-        )
-    return jumlah
-
-
 def sweep_old_run_files(max_age_days=None):
     """Jaring pengaman: buang file per-run yang lebih tua dari N hari.
 
-    Untuk kasus cleanup_run_files tidak sempat jalan (crash, kill -9), dan untuk
-    jalur plugin yang memang sengaja tidak membersihkan langsung.
+    File hasil sengaja tidak dihapus begitu terkirim (agent Hermes yang mengirimnya,
+    setelah skrip selesai), jadi retensi berdasarkan umur yang membersihkannya.
 
     Yang DILINDUNGI dan tidak pernah ikut tersapu:
     - `video_output.mp4` dan `creative_brief.json` (path kerja run berjalan)

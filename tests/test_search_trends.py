@@ -10,7 +10,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 
 import json
 
-import pytest
 
 import agent1_2_brief as brief
 import fetch_trends

@@ -13,7 +13,6 @@ import os
 import subprocess
 import sys
 import textwrap
-import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -158,7 +157,7 @@ def test_teks_agent_melarang_ask_user_dan_memuat_pesan_siap_kirim(tmp_path):
     pertanyaan dalam satu ask_user tidak bisa dijawab dengan satu balasan bebas."""
     paths, r = _inspeksi(tmp_path)
     teks = r["teks"]
-    assert "JANGAN memakai ask_user" in teks and "15 menit" in teks
+    assert "JANGAN memakai tool tanya-jawab" in teks and "15 menit" in teks
     assert "<<<PESAN" in teks and "PESAN>>>" in teks and r["pesan"] in teks
     assert "1A" in teks or "1*" in teks, "pemetaan jawaban -> parameter harus ada"
 
@@ -331,8 +330,9 @@ def test_inspeksi_menyimpan_status_dan_mengembalikan_id(tmp_path):
 def test_teks_memuat_id_path_persis_dan_perintah_akhiri_giliran(tmp_path):
     paths, r = _inspeksi(tmp_path)
     assert r["inspect_id"] in r["teks"]
-    assert json.dumps(paths, ensure_ascii=False) in r["teks"]
-    assert "AKHIRI" in r["teks"] and "JANGAN memanggil content_factory_run" in r["teks"]
+    for p in paths:
+        assert f"--media-path {json.dumps(p, ensure_ascii=False)}" in r["teks"]
+    assert "AKHIRI" in r["teks"] and "JANGAN menjalankan hermes_render.py" in r["teks"]
 
 
 def _vad_berucap(tmp_path, monkeypatch, detik=3.0):
@@ -381,7 +381,7 @@ def test_gerbang_lolos_setelah_ditanyakan(tmp_path):
 def test_gerbang_menolak_tanpa_inspect():
     r = im.cek_izin("", "111", ["/x/a.mp4"])
     assert r["ok"] is False and r["kode"] == "wajib_inspect"
-    assert "content_factory_inspect" in r["teks"], "penolakan harus menyebut langkah berikutnya"
+    assert "inspect_media.py inspect" in r["teks"], "penolakan harus menyebut langkah berikutnya"
 
 
 def test_gerbang_menolak_kalau_belum_ditanyakan(tmp_path):
@@ -460,7 +460,7 @@ def test_kegagalan_pemeriksaan_tidak_menahan_user(tmp_path, monkeypatch):
     assert im.cek_izin(r["inspect_id"], "111", paths, True)["ok"] is True
 
 
-# ---------- CLI (jalur yang dipakai plugin) ----------
+# ---------- CLI (dijalankan agent Hermes) + gerbang di hermes_render ----------
 
 def _cli(perintah, payload, env_tambahan):
     env = {**os.environ, **env_tambahan}
@@ -469,17 +469,16 @@ def _cli(perintah, payload, env_tambahan):
     return o.returncode, json.loads(o.stdout)
 
 
-def test_cli_inspect_lalu_check_satu_objek_json(tmp_path):
+def test_cli_inspect_lalu_gerbang_render(tmp_path, monkeypatch):
+    """CLI sungguhan (subprocess) menulis status; gerbang cek_izin -- yang dipanggil
+    hermes_render -- membacanya. Pengganti tes integrasi plugin OpenClaw yang dihapus."""
     v = _video(tmp_path / "v.mp4", w=640, h=360)
     env = {"INSPECT_DIR": str(tmp_path / "st"), "WHISPER_PYTHON": "/tidak/ada"}
     kode, r = _cli("inspect", {"paths": [v], "konteks": "edit", "chat_id": "555"}, env)
     assert kode == 0 and r["ok"] and r["inspect_id"]
-    kode, g = _cli("check", {"inspect_id": r["inspect_id"], "chat_id": "555", "paths": [v],
-                             "user_answered": True}, env)
-    assert kode == 0 and g["ok"] is True
-    kode, g2 = _cli("check", {"inspect_id": r["inspect_id"], "chat_id": "999", "paths": [v],
-                              "user_answered": True}, env)
-    assert g2["kode"] == "milik_chat_lain"
+    monkeypatch.setattr(im, "INSPECT_DIR", str(tmp_path / "st"))
+    assert im.cek_izin(r["inspect_id"], "555", [v], True)["ok"] is True
+    assert im.cek_izin(r["inspect_id"], "999", [v], True)["kode"] == "milik_chat_lain"
 
 
 def test_cli_masukan_rusak_dan_perintah_salah():
@@ -522,7 +521,7 @@ def test_jalur_darurat_tetap_berpilihan_dan_menghasilkan_pesan(tmp_path, monkeyp
     for p in r["pertanyaan"]:
         assert len(p["opsi"]) >= 2 and sum(o["rekomendasi"] for o in p["opsi"]) == 1
     assert "A. " in r["pesan"] and "★" in r["pesan"]
-    assert "JANGAN memakai ask_user" in r["teks"] and r["inspect_id"] in r["teks"]
+    assert "JANGAN memakai tool tanya-jawab" in r["teks"] and r["inspect_id"] in r["teks"]
 
 
 # ---------- jawaban user harus SAMPAI ke pipeline (celah 19 Sep 23:36) ----------
@@ -539,7 +538,7 @@ def test_konteks_tanpa_jawaban_ditolak_meski_userAnswered_true(tmp_path):
     paths, r = _inspeksi_topik(tmp_path)
     g = im.cek_izin(r["inspect_id"], "111", paths, user_answered=True, konteks="edit ya")
     assert g["ok"] is False and g["kode"] == "jawaban_tidak_di_konteks"
-    assert "userContext" in g["teks"]
+    assert "--user-context" in g["teks"]
 
 
 def test_konteks_dengan_jawaban_lolos(tmp_path):
@@ -580,15 +579,14 @@ def test_tanpa_pertanyaan_topik_konteks_tidak_dipersoalkan(tmp_path, monkeypatch
 _SEMUA_ASLI = im.susun_pertanyaan
 
 
-def test_konteks_user_masuk_cli_check(tmp_path):
+def test_konteks_user_wajib_memuat_jawaban(tmp_path, monkeypatch):
     v = _video(tmp_path / "v.mp4", w=640, h=360)
     env = {"INSPECT_DIR": str(tmp_path / "st"), "WHISPER_PYTHON": "/tidak/ada"}
     _, r = _cli("inspect", {"paths": [v], "konteks": "edit ya", "chat_id": "555"}, env)
-    _, g = _cli("check", {"inspect_id": r["inspect_id"], "chat_id": "555", "paths": [v],
-                          "user_answered": True, "konteks": "edit ya"}, env)
+    monkeypatch.setattr(im, "INSPECT_DIR", str(tmp_path / "st"))
+    g = im.cek_izin(r["inspect_id"], "555", [v], True, "edit ya")
     assert g["kode"] == "jawaban_tidak_di_konteks"
-    _, g2 = _cli("check", {"inspect_id": r["inspect_id"], "chat_id": "555", "paths": [v],
-                           "user_answered": True, "konteks": "edit ya. Ini acara donor darah Aksi Merah"}, env)
+    g2 = im.cek_izin(r["inspect_id"], "555", [v], True, "edit ya. Ini acara donor darah Aksi Merah")
     assert g2["ok"] is True
 
 

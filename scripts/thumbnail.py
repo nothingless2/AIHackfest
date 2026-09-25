@@ -1,55 +1,16 @@
-"""Cover/thumbnail video: satu frame dari hasil akhir + versi kecil untuk Telegram.
+"""Cover/thumbnail video: satu frame dari hasil akhir (JPG ukuran kanvas penuh).
 
-Modul terpisah dan ringan (hanya stdlib) karena dipakai dari dua sisi yang tidak
-boleh saling mengimpor: `auto_render` (membuat coverny) dan `common.send_video`
-(mengirimkannya).
+Cover disimpan sebagai artefak di samping videonya. Pengiriman ke Telegram dilakukan agent
+Hermes; untuk video MP4, Telegram membuat preview sendiri dari FRAME PERTAMA video (temuan
+pengiriman nyata 19 Sep 2026). Karena itu `fade_filters()` tidak memasang fade masuk di segmen
+pertama: frame 0 hitam berarti preview hitam untuk setiap video.
 
-BATAS TELEGRAM — DIVERIFIKASI dari dokumentasi resmi Bot API
-(https://core.telegram.org/bots/api, diambil 2026-09-19), bukan dari ingatan:
-
-    "The thumbnail should be in JPEG format and less than 200 kB in size.
-     A thumbnail's width and height should not exceed 320. Ignored if the file
-     is not uploaded using multipart/form-data. Thumbnails can't be reused and
-     can be only uploaded as a new file..."
-
-Empat kalimat itu langsung jadi empat keputusan di kode ini dan di send_video():
-- JPEG          -> ekstraksi menulis .jpg, bukan .png
-- < 200 kB      -> telegram_thumb() MENGUKUR hasilnya, tidak sekadar berharap
-- sisi <= 320   -> diperkecil, sementara JPG ukuran kanvas disimpan sebagai artefak
-- multipart     -> dilampirkan sebagai file di `files=`, bukan string di `data=`
-
-TEMUAN DARI PENGIRIMAN NYATA (19 Sep 2026, bukan dari membaca kode):
-untuk video MP4 kita, Telegram MENGABAIKAN thumbnail yang dikirim dan membuat
-sendiri dari FRAME PERTAMA video. Diuji dua bentuk request -- field multipart
-bernama `thumbnail` dan bentuk `attach://` yang didokumentasikan -- keduanya
-menghasilkan thumbnail server 644 byte yang hitam, sementara cover kita 11 kB
-dan berisi gambar yang benar. Itu cocok dengan kalimat pertama dokumentasi:
-"can be ignored if thumbnail generation for the file is supported server-side".
-
-Dua konsekuensi:
-1. Yang benar-benar menentukan preview di Telegram adalah frame pertama video.
-   Karena itu `fade_filters()` tidak lagi memasang fade masuk di segmen pertama
-   (dulu frame 0 hitam, YAVG 16 -> preview hitam polos untuk SETIAP video).
-   Setelah diperbaiki, thumbnail server berisi gambar asli (7.739 byte).
-2. Cover tetap dibuat dan tetap dilampirkan: ia disimpan sebagai artefak di
-   published/ (dipakai saat publikasi ke platform lain) dan lampirannya tidak
-   merugikan kalau suatu saat Telegram menghormatinya.
-
-Cover TIDAK PERNAH menggagalkan render atau pengiriman: semua fungsi di sini
-mengembalikan None saat gagal, dan pemanggil melanjutkan tanpa cover.
+Cover TIDAK PERNAH menggagalkan render: semua fungsi di sini mengembalikan None saat gagal, dan
+pemanggil melanjutkan tanpa cover.
 """
 
 import os
 import subprocess
-
-# Angka dari kutipan dokumentasi di atas. "less than 200 kB" ditafsirkan ketat
-# sebagai < 200*1024 byte, dan kita menyisakan sedikit ruang di bawahnya.
-THUMB_MAX_SIDE = 320
-THUMB_MAX_BYTES = 200 * 1024
-
-# Kualitas JPEG ffmpeg (-q:v): 2 = terbaik, makin besar makin kecil filenya.
-# Dicoba berurutan sampai hasilnya muat di bawah batas.
-_QUALITY_LADDER = (2, 5, 10, 20)
 
 THUMBNAIL_ENABLED = (os.getenv("THUMBNAIL_ENABLED") or "1").strip().lower() not in (
     "0", "false", "no", "off",
@@ -119,30 +80,3 @@ def extract_thumbnail(video_path, out_path, at_seconds=0.0):
         return out_path
     return None
 
-
-def telegram_thumb(src_path, out_path, max_side=THUMB_MAX_SIDE, max_bytes=THUMB_MAX_BYTES):
-    """Versi kecil yang memenuhi batas sendVideo. Return out_path atau None.
-
-    `force_original_aspect_ratio=decrease` memuat gambar ke dalam kotak
-    max_side x max_side, jadi KEDUA sisi dijamin <= 320 apa pun rasio kanvasnya.
-
-    Ukuran file diperiksa sungguhan, dan kalau masih terlalu besar kualitas
-    diturunkan bertahap. Kalau bahkan kualitas terendah masih melewati batas,
-    return None -- lebih baik mengirim video tanpa cover daripada request yang
-    ditolak Telegram.
-    """
-    if not src_path or not os.path.exists(src_path):
-        return None
-    for q in _QUALITY_LADDER:
-        ok = _ffmpeg(
-            ["-i", src_path,
-             "-vf", f"scale={max_side}:{max_side}:force_original_aspect_ratio=decrease",
-             "-frames:v", "1", "-q:v", str(q), out_path],
-            f"perkecil cover (q={q})",
-        )
-        if not ok or not os.path.exists(out_path):
-            return None
-        if os.path.getsize(out_path) < max_bytes:
-            return out_path
-    print(f"[warn] thumbnail: cover masih >= {max_bytes} byte, dikirim tanpa cover.")
-    return None

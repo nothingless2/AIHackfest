@@ -1,6 +1,6 @@
 """Validasi lampiran untuk jalur Hermes (hermes_render.py).
 
-Sama seperti verifyInbound() di openclaw-plugin: path dari luar root yang
+Path dari luar root yang
 diizinkan harus ditolak lewat realpath, termasuk lewat symlink -- bukan
 sekadar dicek prefix string.
 """
@@ -100,7 +100,6 @@ def test_label_chat_non_numerik_tidak_ditolak_allowlist(monkeypatch, capsys):
 
 
 def _main_tanpa_render(monkeypatch, capsys, argv, tmp_path):
-    import json
     root = tmp_path / "cache"
     root.mkdir(exist_ok=True)
     monkeypatch.setattr(hr, "MEDIA_ROOTS", [str(root)])

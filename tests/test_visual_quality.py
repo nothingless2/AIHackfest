@@ -4,7 +4,6 @@ Guncangan SINTETIS dengan posisi diketahui: sumber bertekstur (testsrc2) di-crop
 offset acak per frame hanya di detik 2-3. Kalibrasi pada klip nyata user (24 Sep): klip
 stabil <= 20 %lebar/dtk; kamera mengayun ke lantai 170-317 %lebar/dtk."""
 
-import json
 import subprocess
 
 import pytest

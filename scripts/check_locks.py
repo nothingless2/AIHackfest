@@ -1,16 +1,11 @@
-"""Periksa apakah lock render/approval sedang dipegang.
+"""Periksa apakah lock render sedang dipegang, SEBELUM me-restart gateway Hermes.
 
-Keluar 0 kalau SEMUA bebas, 1 kalau ada yang dipegang (dengan detail pemegangnya).
+Keluar 0 kalau bebas, 1 kalau dipegang (dengan detail pemegangnya).
 
-Dipakai install_plugin.sh sebelum me-restart gateway. Alasannya konkret dan mahal:
-gateway berjalan sebagai service systemd dengan KillMode=mixed, jadi restart
-mengirim SIGKILL ke seluruh cgroup-nya. Sebelum perbaikan spawn-scope, itu
-membunuh render yang sedang berjalan — satu render nyata hilang persis begitu,
-satu langkah sebelum selesai, tanpa run_finished dan tanpa pesan ke user.
-
-Tetap berguna setelah perbaikan itu: render yang berjalan lewat spawn cadangan
-(kalau systemd-run tidak tersedia) masih rentan, dan approval CLI yang sedang
-menunggu balasan user tetap akan terputus oleh restart.
+Render/draf berjalan sebagai proses latar belakang milik gateway (hermes-gateway.service).
+Restart service mengirim sinyal ke seluruh cgroup-nya, jadi render yang sedang berjalan ikut
+mati -- pernah terjadi: satu render hilang satu langkah sebelum selesai, tanpa run_finished dan
+tanpa pesan ke user.
 """
 
 import fcntl
@@ -19,7 +14,7 @@ import os
 import sys
 import time
 
-from run_lock import APPROVAL_LOCK_PATH, RENDER_LOCK_PATH
+from run_lock import RENDER_LOCK_PATH
 
 
 def lock_holder(path):
@@ -47,7 +42,7 @@ def lock_holder(path):
 
 def main():
     sibuk = []
-    for nama, path in (("render", RENDER_LOCK_PATH), ("approval", APPROVAL_LOCK_PATH)):
+    for nama, path in (("render", RENDER_LOCK_PATH),):
         dipegang, info = lock_holder(path)
         if not dipegang:
             continue
@@ -61,15 +56,14 @@ def main():
         )
 
     if not sibuk:
-        print("Lock render & approval bebas.")
+        print("Lock render bebas.")
         return 0
 
     print("DITOLAK: ada pekerjaan yang sedang berjalan.")
     print("\n".join(sibuk))
     print(
-        "\nRestart gateway sekarang berisiko membunuhnya (systemd KillMode=mixed\n"
-        "mengirim SIGKILL ke seluruh cgroup service). Tunggu sampai selesai, atau\n"
-        "paksa dengan SKIP_LOCK_CHECK=1 kalau kamu memang bermaksud menghentikannya."
+        "\nRestart gateway sekarang berisiko membunuhnya (restart service mengirim\n"
+        "sinyal ke seluruh cgroup-nya). Tunggu sampai render selesai."
     )
     return 1
 

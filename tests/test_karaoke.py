@@ -12,7 +12,6 @@ import subprocess
 
 import numpy as np
 import pytest
-from PIL import Image
 
 import auto_render as ar
 import subtitle_layout as lay
@@ -305,24 +304,6 @@ def test_prompt_tanpa_ucapan_melarang_menebak_jenis_acara():
 
 # ---------- caption jujur soal batas ----------
 
-def test_caption_mengingatkan_teks_dibuat_dari_tampilan_saja(monkeypatch, tmp_path):
-    import run_and_deliver as rd
-    brief = {"judul": "Uji", "hashtags": [], "audio_mode": "original",
-             "transcript_coverage": {"ditranskrip": 0, "total_bahan": 3,
-                                     "tanpa_subtitle": ["a", "b", "c"],
-                                     "alasan": {"a": "tanpa_ucapan", "b": "tanpa_ucapan", "c": "tanpa_ucapan"}}}
-    terkirim = {}
-    monkeypatch.setattr(rd, "read_json", lambda *a, **k: brief)
-    monkeypatch.setattr(rd, "ringkasan_biaya", lambda run_id: "")
-    monkeypatch.setattr(rd, "log_event", lambda *a, **k: None)
-    monkeypatch.setattr(rd, "draft_video_path_for_run", lambda r: str(tmp_path / "v.mp4"))
-    monkeypatch.setattr(rd, "draft_thumb_path_for_run", lambda r: str(tmp_path / "v.jpg"))
-    monkeypatch.setattr(rd, "send_video",
-                        lambda c, p, *, chat_id, thumb_path=None: terkirim.setdefault("caption", c) or True)
-    rd.deliver_plugin("run1", "123")
-    assert "TAMPILAN saja" in terkirim["caption"]
-
-
 # ---------- teks STATIS sepanjang video ----------
 
 def test_teks_statis_tetap_satu_tampilan_dengan_font_mengecil():
@@ -387,7 +368,7 @@ def _render_statis(tmp_path, monkeypatch, data_tambahan, scenes, words_per_klip=
             data["transcript_words"] = {"a.mp4": words_per_klip}
         s = tmp_path / "s.json"
         s.write_text(_j.dumps(data), encoding="utf-8")
-        ar.render_from_agent_script(str(s), "", str(tmp_path / "h.mp4"))
+        ar.render_from_agent_script(str(s), str(tmp_path / "h.mp4"))
     finally:
         ar.apply_text_overlay = asli
     return diambil["scenes"]

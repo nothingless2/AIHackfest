@@ -8,7 +8,6 @@ import time
 
 import pytest
 
-import common
 import retention
 
 
@@ -85,33 +84,6 @@ def test_aman_dipanggil_saat_folder_kosong(dirs):
     assert retention.clear_render_workspace() == 0
 
 
-# ---------- cleanup_run_files ----------
-
-def test_cleanup_menghapus_video_dan_brief_run(dirs):
-    v = tulis(dirs["drafts"] / "video_run1.mp4")
-    b = tulis(dirs["state"] / "creative_brief_run1.json")
-
-    retention.cleanup_run_files("run1")
-
-    assert not v.exists() and not b.exists()
-
-
-def test_cleanup_video_false_hanya_buang_brief(dirs):
-    """Dipakai setelah video dipindah ke published/ — video tidak boleh dihapus."""
-    v = tulis(dirs["drafts"] / "video_run1.mp4")
-    b = tulis(dirs["state"] / "creative_brief_run1.json")
-
-    retention.cleanup_run_files("run1", video=False)
-
-    assert v.exists(), "video sudah dipindah, jangan dihapus"
-    assert not b.exists()
-
-
-def test_cleanup_idempotent(dirs):
-    retention.cleanup_run_files("tidak-ada")
-    retention.cleanup_run_files("tidak-ada")  # tidak boleh melempar
-
-
 # ---------- sweep_old_run_files ----------
 
 def test_sweep_membuang_yang_tua_menyisakan_yang_baru(dirs):
@@ -166,22 +138,6 @@ def test_clear_membuang_cover_lama(dirs):
     lama = tulis(dirs["drafts"] / "video_output.jpg")
     retention.clear_render_workspace()
     assert not lama.exists()
-
-
-def test_cleanup_menghapus_cover_per_run(dirs):
-    v = tulis(dirs["drafts"] / "video_run1.mp4")
-    c = tulis(dirs["drafts"] / "video_run1.jpg")
-
-    retention.cleanup_run_files("run1")
-
-    assert not v.exists() and not c.exists()
-
-
-def test_cleanup_video_false_TIDAK_menghapus_cover(dirs):
-    """video=False berarti keduanya sudah dipindah ke published/."""
-    c = tulis(dirs["drafts"] / "video_run1.jpg")
-    retention.cleanup_run_files("run1", video=False)
-    assert c.exists()
 
 
 def test_sweep_membuang_cover_per_run_yang_tua(dirs):

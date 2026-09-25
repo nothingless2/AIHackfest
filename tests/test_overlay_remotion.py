@@ -8,7 +8,6 @@ Tiga lapis:
    akhir animasi (tidak ada lompatan).
 """
 
-import json
 import os
 import subprocess
 

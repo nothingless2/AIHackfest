@@ -1,7 +1,6 @@
 """Orkestrasi bersama pipeline: jalankan tahap sebagai subprocess dengan batas
 waktu proses-grup (killpg saat timeout/sinyal), lock render eksklusif, dan
-event log siklus-hidup run. Dipakai scripts/pipeline.py dan
-scripts/run_and_deliver.py.
+event log siklus-hidup run. Dipakai scripts/hermes_render.py.
 """
 
 import os
@@ -99,8 +98,7 @@ def run_stage(script_name, *, run_id, capture_output, timeout=None):
     """Jalankan satu tahap sebagai subprocess dalam process group baru sendiri
     (start_new_session=True), kembalikan (exit_code, output).
 
-    timeout=None: tunggu sampai selesai tanpa batas (dipakai untuk
-    agent4_approval.py -- lock/timeout approval sendiri ada di 1b).
+    timeout=None: tunggu sampai selesai tanpa batas.
     timeout=N: proses DAN SELURUH process group-nya (termasuk ffmpeg/edge-tts
     yang di-spawn di dalamnya) dibunuh paksa kalau melebihi N detik --
     diverifikasi langsung bahwa os.killpg benar-benar menjangkau proses cucu.
@@ -131,8 +129,7 @@ def run_stages(stages, *, run_id, capture_output, on_noncritical_failure, on_sta
     berurutan.
 
     on_stage_start(label), kalau diberikan, dipanggil TEPAT SEBELUM tiap tahap
-    dijalankan (perlu untuk pipeline.py: cetak "> {label}" interleaved dengan
-    output live tahap itu, bukan semua header dicetak di depan).
+    dijalankan (untuk mencetak "> {label}" di antara output live tahapnya).
 
     Tahap non-kritis yang gagal memanggil on_noncritical_failure(label, code)
     lalu lanjut -- pesan persis pemanggilan ini sengaja diserahkan ke caller.
@@ -159,7 +156,7 @@ def run_core_stages_locked(
 ):
     """Jalankan CORE_STAGES di dalam lock render. Kalau sukses, salin
     DRAFT_VIDEO_PATH/BRIEF_PATH ke path ber-run_id SEBELUM lock dilepas --
-    supaya apa pun yang membaca setelah lock lepas (delivery, approval-wait)
+    supaya apa pun yang membaca setelah lock lepas (hermes_render menyusun hasil)
     tidak pernah membaca file yang bisa tertimpa run berikutnya.
 
     Return ("SUCCESS", None) atau ("FAILED", (code, (label, output))).

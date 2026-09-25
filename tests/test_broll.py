@@ -239,7 +239,7 @@ def test_broll_muncul_di_slot_yang_benar_dan_bahan_user_tidak_terbuang(render_ai
     monkeypatch.setenv("BROLL_COUNT", "2")
     monkeypatch.setenv("BROLL_QUERY", "kopi")
     hasil = tmp_path / "hasil.mp4"
-    ar.render_from_agent_script(str(skrip), "", str(hasil))
+    ar.render_from_agent_script(str(skrip), str(hasil))
 
     # 12 dtk, 4 slot x 3 dtk: foto1, biru, foto2, biru
     slot = [_rgb(hasil, 1.5 + 3 * i) for i in range(4)]
@@ -257,7 +257,7 @@ def test_broll_muncul_di_slot_yang_benar_dan_bahan_user_tidak_terbuang(render_ai
 def test_tanpa_broll_render_tidak_berubah(render_ai):
     skrip, tmp_path = render_ai
     hasil = tmp_path / "hasil.mp4"
-    ar.render_from_agent_script(str(skrip), "", str(hasil))
+    ar.render_from_agent_script(str(skrip), str(hasil))
     slot = [_rgb(hasil, 3 + 6 * i) for i in range(2)]
     assert slot[0][0] > 150 and slot[1][1] > 150
     assert json.load(open(tmp_path / "status.json"))["broll"] is None
@@ -269,7 +269,7 @@ def test_kegagalan_broll_tidak_menggagalkan_video_tapi_dilaporkan(render_ai, mon
     monkeypatch.setenv("BROLL", "1")
     monkeypatch.setattr(b, "_http_get_json", lambda u, h: (_ for _ in ()).throw(_http_error(429)))
     hasil = tmp_path / "hasil.mp4"
-    ar.render_from_agent_script(str(skrip), "", str(hasil))
+    ar.render_from_agent_script(str(skrip), str(hasil))
     assert hasil.exists()
     status = json.load(open(tmp_path / "status.json"))
     assert status["broll"]["dipakai"] == [] and "kuota" in status["broll"]["gagal"]
@@ -283,7 +283,7 @@ def test_durasi_terlalu_pendek_broll_dilewati_bukan_membuang_bahan(render_ai, mo
     monkeypatch.setenv("BROLL", "1")
     monkeypatch.setattr(b, "jatah", lambda *a, **k: 0)
     hasil = tmp_path / "hasil.mp4"
-    ar.render_from_agent_script(str(skrip), "", str(hasil))
+    ar.render_from_agent_script(str(skrip), str(hasil))
     status = json.load(open(tmp_path / "status.json"))
     assert "terlalu pendek" in status["broll"]["gagal"]
 
@@ -357,7 +357,7 @@ def test_render_dengan_broll_diminta_tanpa_key_tidak_crash_dan_dilaporkan(render
     skrip, tmp_path = render_ai
     monkeypatch.setenv("BROLL", "1")
     hasil = tmp_path / "hasil.mp4"
-    ar.render_from_agent_script(str(skrip), "", str(hasil))
+    ar.render_from_agent_script(str(skrip), str(hasil))
     assert hasil.exists()
     status = json.load(open(tmp_path / "status.json"))
     assert status["broll"]["dipakai"] == [] and "PEXELS_API_KEY" in status["broll"]["gagal"]

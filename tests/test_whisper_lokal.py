@@ -12,7 +12,6 @@ baris di stdout.
 
 import json
 import os
-import stat
 import sys
 import textwrap
 

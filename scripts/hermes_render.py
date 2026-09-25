@@ -1,13 +1,7 @@
-"""Entry point render untuk Hermes (menggantikan openclaw-plugin/run_and_deliver.py
-sebagai jalur pengiriman Telegram).
+"""Titik masuk draf & render untuk agent Hermes (satu-satunya jalur aktif).
 
-BEDA UTAMA dari run_and_deliver.py: skrip ini TIDAK mengirim apa pun ke Telegram
-sendiri. Alasannya arsitektural, bukan sekadar pilihan gaya -- lihat AGENTS.md/
-HERMES.md di repo ini untuk detail penelusurannya:
+Skrip ini TIDAK mengirim apa pun ke Telegram sendiri. Alasannya arsitektural:
 
-- OpenClaw memberi tool-call sebuah `nativeChannelId` yang diambil KODE (closure
-  server-side), bukan argumen yang diisi model -- itu yang membuat routing lewat
-  CONTENT_FACTORY_CHAT_ID di run_and_deliver.py aman dipercaya.
 - Hermes TIDAK memberi identitas chat yang setara ke tool MCP/terminal biasa;
   `HERMES_SESSION_CHAT_ID` cs. adalah contextvar INTERNAL Hermes (dipakai
   gateway-nya sendiri untuk notifikasi background), bukan sesuatu yang
@@ -40,7 +34,6 @@ from common import (
     draft_video_path_for_run,
     ensure_dirs,
     log_error,
-    PROJECT_ROOT,
     RAW_DIR,
     STATE_DIR,
     read_json,
@@ -64,8 +57,7 @@ from style import (
 
 # Root folder tempat Hermes benar-benar menyimpan lampiran yang diunduh dari
 # Telegram (dilihat langsung di server: ~/.hermes/cache/{videos,images,...}).
-# Sama seperti verifyInbound() di openclaw-plugin: path dari model WAJIB
-# realpath-nya berada di dalam salah satu root ini, bukan sekadar berawalan
+# Path dari model WAJIB realpath-nya berada di dalam salah satu root ini, bukan sekadar berawalan
 # string yang sama -- symlink harus ikut ketahuan.
 DEFAULT_MEDIA_ROOTS = os.path.expanduser("~/.hermes/cache")
 MEDIA_ROOTS = [
@@ -100,8 +92,8 @@ def _validate_media_paths(paths):
 
 
 def _stage_assets(paths, run_prefix):
-    """Salin lampiran tervalidasi ke workspace/raw/{prefix}_{nama}, sama seperti
-    yang dilakukan openclaw-plugin/src/index.ts untuk run OpenClaw."""
+    """Salin lampiran tervalidasi ke workspace/raw/{prefix}_{nama}: bahan milik run ini
+    saja (select_assets menolak nama tanpa prefix run)."""
     os.makedirs(RAW_DIR, exist_ok=True)
     names = []
     for src in paths:
@@ -236,6 +228,44 @@ def _apply_env(args):
         args.music_file = validated
 
 
+def _sebab_subtitle(alasan):
+    """" — saldo/kuota API habis (3), tidak ada ucapan terdeteksi (1)" atau "".
+    Dikelompokkan per penyebab, terbanyak lebih dulu."""
+    if not alasan:
+        return ""
+    from transcribe import ALASAN_TEKS
+    hitung = {}
+    for kode in alasan.values():
+        hitung[kode] = hitung.get(kode, 0) + 1
+    return " — " + ", ".join(f"{ALASAN_TEKS.get(k, k)} ({n})"
+                             for k, n in sorted(hitung.items(), key=lambda kv: -kv[1]))
+
+
+def catatan_bahan(brief):
+    """Hal yang WAJIB diketahui user tentang hasil ini, disusun kode dari brief (dulu hanya
+    ada di caption jalur OpenClaw yang sudah dihapus):
+    - bahan tanpa subtitle BESERTA penyebabnya (saldo habis = isi ulang, waktu habis = coba
+      lagi, tanpa ucapan = tidak perlu apa-apa) -- aturan #7;
+    - bahan tanpa ucapan di mode suara asli: judul & teks ditebak dari tampilan saja;
+    - ringkasan seleksi potongan (angkanya dihitung kode).
+    Mode voice-over AI tidak memakai subtitle ucapan, jadi cakupannya tidak dilaporkan."""
+    catatan = []
+    cakupan = brief.get("transcript_coverage") or {}
+    alasan = cakupan.get("alasan") or {}
+    if (brief.get("audio_mode") == "original" and alasan
+            and all(k == "tanpa_ucapan" for k in alasan.values())):
+        catatan.append("Bahan tidak berisi ucapan (hanya suara suasana), jadi judul dan teks dibuat "
+                       "dari TAMPILAN saja dan bisa meleset dari maksudmu. Beri tahu konteks acaranya "
+                       "kalau mau disesuaikan.")
+    if brief.get("edit_summary"):
+        catatan.append(brief["edit_summary"])
+    kurang = len(cakupan.get("tanpa_subtitle") or [])
+    if kurang and brief.get("audio_mode") != "ai":
+        catatan.append(f"{kurang} dari {cakupan.get('total_bahan')} bahan tampil tanpa subtitle"
+                       f"{_sebab_subtitle(alasan)}.")
+    return catatan
+
+
 def _selesai_draf(run_id, chat_id, run_prefix, nama_bahan, args, media_paths):
     """Simpan draf dari brief run ini, cetak pesan siap kirim. Belum ada video."""
     brief = read_json(brief_path_for_run(run_id), {}) or {}
@@ -316,7 +346,7 @@ def main(argv=None):
         if args.varian or args.naskah:
             return gagal("argumen_invalid", "--varian/--naskah hanya bersama --draft-id.")
         # Berkas AUDIO yang terkirim sebagai --media-path adalah musik user, bukan bahan visual
-        # (setara pisahMusik di plugin OpenClaw). Dipindah ke --music-file, bukan ditolak.
+        # Dipindah ke --music-file, bukan ditolak.
         audio = [p for p in args.media_paths if os.path.splitext(p)[1].lower() in AUDIO_EXT]
         if audio:
             if len(audio) > 1 or args.music_file:
@@ -445,6 +475,7 @@ def main(argv=None):
         "musik": status.get("music"),
         "musik_suasana": (mood or {}).get("mood"),
         "musik_tempo_bpm": (mood or {}).get("tempo_bpm") if (mood or {}).get("tempo_yakin") else None,
+        "catatan_bahan": catatan_bahan(brief),
         "draf": brief.get("draf"),
         "catatan_naskah": ((brief.get("naskah_status") or {}).get("catatan") or None)
         if (brief.get("draf") or {}).get("diedit") else None,

@@ -1,167 +1,101 @@
 # Arsitektur & Alur Pipeline
 
-Lihat [STATUS.md](STATUS.md) untuk daftar fitur yang sudah/belum berfungsi.
+Lihat [STATUS.md](STATUS.md) untuk riwayat fitur dan hasil uji nyata.
 
-## Gambaran besar: 2 lapis + 1 jembatan
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│  LAPIS 1: OpenClaw Gateway (produk pihak lain, sudah dipakai)│
-│  - Menangani koneksi Telegram, autentikasi, LLM reasoning    │
-│  - Agent "main" (model openai/gpt-5.6-sol) baca chat user    │
-│  - Memilih tool yang tepat berdasarkan permintaan user        │
-└───────────────────────┬────────────────────────────────────────┘
-                         │ satu titik sambung:
-                         │ tool "content_factory_run"
-┌───────────────────────▼────────────────────────────────────────┐
-│  JEMBATAN: openclaw-plugin/ (TypeScript, plugin resmi OpenClaw)│
-│  - Terima path file dari OpenClaw                              │
-│  - Copy ke workspace/raw/, validasi projectRoot & format        │
-│  - Spawn proses Python DETACHED, balas ke chat dalam <1 detik  │
-└───────────────────────┬────────────────────────────────────────┘
-                         │ subprocess.spawn(detached: true)
-┌───────────────────────▼────────────────────────────────────────┐
-│  LAPIS 2: Pipeline 5-Agent (Python murni, tidak tahu OpenClaw) │
-│  - Baca/tulis file JSON sebagai state antar-tahap               │
-│  - Kirim progress & hasil ke Telegram lewat HTTP langsung       │
-└──────────────────────────────────────────────────────────────┘
-```
-
-**Kenapa dipisah begini?** Render video butuh 2-4 menit, jauh melebihi batas
-waktu eksekusi tool OpenClaw (~90 detik). Kalau pipeline dijalankan di dalam
-eksekusi tool dan ditunggu, prosesnya dibunuh di tengah jalan — video jadi
-rusak. Solusinya: plugin cuma menyalakan proses lalu lepas tangan
-(`detached: true`, `child.unref()`); proses Python itu sendiri yang mengirim
-hasil ke Telegram lewat Bot API, sepenuhnya independen dari siklus hidup tool.
-
-## Alur selangkah demi selangkah
+## Gambaran besar
 
 ```
-User upload foto/video + teks permintaan
-        │
-        ▼
-[OpenClaw] Model baca chat, putuskan panggil content_factory_run(mediaPaths=[...])
-        │
-        ▼
-[Plugin] Validasi projectRoot & format file → copy ke workspace/raw/
-         → spawn scripts/run_and_deliver.py (detached) → balas "sedang diproses"
-        │
-        ▼  (proses Python berjalan independen mulai di sini)
-┌────────────────────────────────────────────────────────────────┐
-│ [Fase 0] 📊 ContentInsight  (agent5_insight.py)   — non-kritis  │
-│ [Fase 1] 🔍 TrendAnalysts + 💡 BrainIdea  (agent1_2_brief.py)   │
-│ [Fase 2] ✍️ ContentMakers  (agent3_render.py → auto_render.py) │
-│ [Fase 3] ✅ ApprovalPost  (kirim ke Telegram, dari run_and_deliver.py)│
-└────────────────────────────────────────────────────────────────┘
-        │
-        ▼
-Video + caption terkirim ke chat asal via Bot API langsung
+Telegram ──► Hermes gateway (hermes-gateway.service, model gratis OpenRouter)
+               │  agent membaca hermes-skill/content-factory/SKILL.md
+               │  (salinan terpasang: ~/.hermes/skills/content-factory/SKILL.md)
+               ▼
+      scripts/inspect_media.py inspect     (sinkron, ~1-2 dtk, tanpa LLM)
+               │  pesan pertanyaan berpilihan -> user menjawab
+               ▼
+      scripts/hermes_render.py --draft     (latar belakang, ~1-2 menit)
+               │  pesan draf: pemahaman per klip + naskah A/B + rencana grafik
+               ▼  user memilih / mengubah naskah
+      scripts/hermes_render.py --draft-id X --varian A [--naskah ...]
+               │  (latar belakang, render saja)
+               ▼
+      JSON hasil (video_path, judul, catatan...) -> agent Hermes mengirim video ke chat
 ```
 
-`pipeline.py` (dijalankan lewat CLI) memakai urutan tahap yang sama, tapi
-memanggil `agent4_approval.py` di Fase 3 (dengan polling `getUpdates` untuk
-APPROVE/REVISI) — bukan `run_and_deliver.py`. **Dua jalur ini punya perilaku
-approval yang berbeda**, lihat bagian "Dua jalur eksekusi" di bawah.
+Pipeline Python **tidak pernah mengirim apa pun ke Telegram**. Hermes tidak memberi identitas
+chat yang tepercaya ke proses anak, jadi skrip hanya mengembalikan path hasil lewat stdout.
+Agent Hermes yang mengirimnya, di sesi chat yang sama.
 
-## Input → Proses → Output per komponen
+## Titik masuk
 
-### 1. Plugin (`openclaw-plugin/src/index.ts`)
-
-| | Detail |
-|---|---|
-| **Input** | `mediaPaths: string[]` (path lokal, disuntik OpenClaw dari attachment chat), `toolContext.nativeChannelId` (ID chat asal), `api.pluginConfig.projectRoot` (config plugin) |
-| **Proses** | 1) Validasi `projectRoot` (harus absolut, `scripts/pipeline.py` harus ada). 2) Validasi tiap `mediaPaths` ada & ekstensinya didukung. 3) Copy tiap file ke `workspace/raw/<prefix-toolCallId>_<nama-asli>` (prefix mencegah tabrakan nama antar-run). 4) Spawn `run_and_deliver.py` sebagai proses detached, teruskan `CONTENT_FACTORY_ASSETS` (nama file yang baru dicopy) dan `CONTENT_FACTORY_CHAT_ID` (chat asal) lewat environment variable. |
-| **Output** | Balasan tool **synchronous** (<1 detik): teks "pipeline dimulai" + `pid` proses. **Tidak** menunggu render selesai. |
-
-### 2. `common.py` — fondasi bersama
-
-Bukan sebuah tahap, tapi dipakai semua tahap:
-- **Path**: dihitung dari `os.path.abspath(__file__)`, bukan `cwd` — supaya aman dipanggil dari proses mana pun (plugin, CLI, cron).
-- **State**: `read_json`/`write_json` ke `workspace/state/*.json`.
-- **`notify(agent_key, message)`**: cetak ke stdout + kirim ke Telegram (kecuali `CONTENT_FACTORY_QUIET` diset).
-- **`resolve_assets(names)`**: ubah nama file jadi path absolut, **gagal eksplisit** kalau ada yang tidak ada di disk (Zero Hallucination on Assets).
-- **`TELEGRAM_CHAT_ID`**: `CONTENT_FACTORY_CHAT_ID` (dari plugin) diutamakan atas `.env` (dipakai CLI).
-
-### 3. Fase 0 — 📊 ContentInsight (`agent5_insight.py`)
-
-| | Detail |
-|---|---|
-| **Input** | `workspace/state/publish_history.json` (riwayat publish sebelumnya, kalau ada) |
-| **Proses** | Cari post terakhir berstatus `PUBLISHED`. Coba `fetch_real_analytics()` (**stub**, selalu `None`) → fallback ke estimasi acak (`views`, `likes`, `comments`, `shares` dalam rentang wajar, **tidak selalu positif**). Klasifikasi `HIGH`/`MODERATE`/`LOW_PERFORMING` dari `engagement_rate`. |
-| **Output** | `workspace/state/performance_summary.json` — jadi konteks untuk Fase 1. Non-kritis: kalau gagal, pipeline tetap lanjut. |
-
-### 4. Fase 1 — 🔍 TrendAnalysts + 💡 BrainIdea (`agent1_2_brief.py`)
-
-| | Detail |
-|---|---|
-| **Input** | `CONTENT_FACTORY_ASSETS` (env, daftar nama file dari plugin) atau semua file di `workspace/raw/` kalau env kosong (jalur CLI). `performance_summary.json` dari Fase 0. |
-| **Proses** | 1) `select_assets()`: validasi semua nama file ada di `workspace/raw/`. 2) Bangun prompt teks (**cuma nama file**, bukan isi gambar — lihat gap di STATUS.md) + data performa, kirim ke **GPT-4o** (`response_format: json_object`). 3) Model kembalikan `trend_report` + `creative_brief` (judul, naskah voice-over, daftar scene bertimestamp, hashtag). 4) **Paksa** `media_assets`/`asset_names` dari daftar Python asli (bukan dari output LLM) — Zero Hallucination on Assets. |
-| **Output** | `workspace/state/trend_report.json`, `workspace/state/creative_brief.json`. Kritis: gagal → pipeline berhenti. |
-
-### 5. Fase 2 — ✍️ ContentMakers (`agent3_render.py` → `auto_render.py`)
-
-| | Detail |
-|---|---|
-| **Input** | `creative_brief.json` (naskah, scene, `media_assets` — path absolut ke bahan mentah) |
-| **Proses** | Lihat detail di bawah ("Render engine"). Ringkas: TTS → hitung durasi total → tiap bahan diproses jadi segmen 9:16 lewat ffmpeg → digabung (hard-cut) → teks per-scene dibakar (`drawtext`) → audio voice-over dimux. |
-| **Output** | `workspace/drafts/video_output.mp4`, `workspace/state/render_status.json` (`SUCCESS`/`FAILED`). Kritis: gagal → pipeline berhenti, file rusak (kalau ada) tidak terkirim. |
-
-#### Render engine (`skills/video_generator/auto_render.py`) — detail
-
-```
-full_voice_over (teks) ──► edge-tts ──► temp_vo.mp3 ──► durasi total (detik)
-                                                              │
-media_assets[] ──► per-asset: ffmpeg scale+crop+loop/trim ──► segmen_0.mp4, segmen_1.mp4, ...
-                    (durasi tiap segmen = durasi_total / jumlah_aset)
-                                                              │
-                                          ffmpeg concat (hard-cut) ──► _combined_silent.mp4
-                                                              │
-scenes[] ──────────────────────► ffmpeg drawtext berantai ──► _combined_text.mp4
-                                                              │
-                                          ffmpeg mux (+ temp_vo.mp3) ──► video_output.mp4
-```
-
-Poin desain penting:
-- **Gambar** → `ffmpeg -loop 1 -i foto.jpg -t <durasi>` (statis, ditampilkan sepanjang durasi slotnya).
-- **Video** → `ffmpeg -stream_loop -1 -i klip.mp4 -t <durasi>` (diulang kalau lebih pendek dari slot, dipotong kalau lebih panjang).
-- Semua segmen di-scale+crop ke `1080x1920` lewat filter `scale=...,crop=...` (isi kanvas tanpa distorsi, crop tengah).
-- Penggabungan pakai **hard-cut** (`ffmpeg concat demuxer`), bukan crossfade — crossfade (`compose`) terbukti 11x lebih lambat saat diprofilkan.
-- Teks dibakar via filter `drawtext` berantai, satu per scene, dengan `enable='between(t,start,end)'` supaya tiap teks cuma tampil di rentang waktunya.
-- Posisi teks: `y = min(SAFE_TOP_MARGIN_PX, TARGET_H - SAFE_BOTTOM_MARGIN_PX - tinggi_teks)` — menjauhi zona UI atas/bawah platform (Reels/TikTok/Shorts biasanya menutup ~300px dari tiap tepi).
-- moviepy **hanya** dipakai untuk `AudioFileClip(...).duration` (baca durasi file audio) — operasi ringan yang tidak melalui pipeline per-frame.
-
-### 6. Fase 3 — ✅ ApprovalPost
-
-**Ada 2 implementasi berbeda** untuk fase ini — lihat "Dua jalur eksekusi" di bawah.
-
-## Dua jalur eksekusi — penting untuk dipahami
-
-| | Jalur Plugin (Telegram, dipakai sekarang) | Jalur CLI (`pipeline.py`) |
+| Berkas | Dipanggil oleh | Tugas |
 |---|---|---|
-| Dipicu oleh | Plugin OpenClaw → `run_and_deliver.py` | `python3 scripts/pipeline.py` manual |
-| Fase 3 dieksekusi oleh | Kode di dalam `run_and_deliver.py` sendiri (kirim video + caption, **tidak menunggu balasan**) | `agent4_approval.py` (kirim video + **polling `getUpdates` sampai 10 menit** menunggu APPROVE/REVISI) |
-| Menangkap balasan APPROVE/REVISI? | **Tidak** — gap yang tercatat di STATUS.md | Ya, lalu tulis `publish_history.json` |
-| Risiko | Approval tidak benar-benar ditegakkan (tapi juga tidak ada auto-publish, jadi aman) | Kalau dijalankan bersamaan dengan gateway OpenClaw yang jalan, **rebutan `getUpdates`** karena token bot sama (`agent4_approval.py` mendeteksi & memperingatkan ini otomatis) |
+| `scripts/inspect_media.py inspect` | agent (JSON di stdin) | Mengukur fakta bahan (durasi, suara, ucapan lewat VAD lokal, mood musik), menyusun pertanyaan yang benar-benar kurang, lalu menyimpan status `inspect_id` (24 jam). |
+| `scripts/hermes_render.py` | agent (latar belakang) | Memvalidasi path lampiran (harus di `~/.hermes/cache/` setelah `realpath`), menjalankan gerbang `cek_izin`, menyalin bahan ke `workspace/raw/{prefix}_`, menyetel env pengaturan, lalu menjalankan tahap di dalam lock render. |
+| `scripts/check_locks.py` | operator | Memastikan lock render bebas sebelum restart gateway. |
 
-## Zero Hallucination on Assets — bagaimana ditegakkan di kode
+## Tahap (scripts/orchestrator.py)
 
-Prinsip: LLM tidak pernah dipercaya untuk menentukan file mana yang "dipakai" —
-Python yang memutuskan, LLM cuma diberi tahu hasilnya.
+Tiap tahap adalah subprocess dengan process group sendiri dan batas waktu keras (`killpg`).
+Semuanya berjalan di dalam SATU lock render (`flock`), karena berkas kerja di `workspace/`
+dipakai bersama.
 
-1. `select_assets()` di `agent1_2_brief.py` menyusun daftar nama file **sebelum** memanggil LLM, dan memvalidasi semuanya ada di `workspace/raw/`.
-2. Daftar itu dikirim ke LLM sebagai instruksi ("bahan yang harus dipakai: [...]").
-3. Setelah LLM membalas, `brief["media_assets"]` **ditimpa paksa** dengan daftar asli dari langkah 1 — bukan dipercaya dari output LLM.
-4. `common.resolve_assets()` dipanggil lagi di `agent3_render.py` sebelum render — kalau ada file yang hilang di antara Fase 1 dan Fase 2, gagal eksplisit dengan `FileNotFoundError`, bukan diam-diam lanjut dengan bahan yang salah.
+| Mode | Tahap |
+|---|---|
+| `--draft` | `agent5_insight.py` (ContentInsight, non-kritis), lalu `agent1_2_brief.py` (mode draf, 2 varian) |
+| `--draft-id` | `agent3_render.py` saja. Brief = varian pilihan user dari `workspace/state/draf_naskah/{id}.json` |
+| tanpa draf | ketiganya berurutan (dipakai tes & pemakaian manual) |
 
-## State yang mengalir antar-tahap
+1. **ContentInsight** (`agent5_insight.py`):
+   - Laporan performa: `NO_DATA` sampai ada API analitik platform.
+   - Kata kunci dari isi bahan (1 panggilan LLM), lalu tren nyata dari YouTube dan Google Trends
+     (`skills/search_trends/fetch_trends.py`), ditulis ke `trend_pool.json`.
+2. **TrendAnalysts + BrainIdea** (`agent1_2_brief.py`):
+   - Transkripsi (`transcribe.py`: Whisper lokal atau API; alasan gagal per bahan dicatat).
+   - Mode audio (`audio_mode.py`).
+   - Lembar kontak 4 momen per klip (`vision.py`, bagian goyang dilewati lewat
+     `visual_quality.py`), plus fakta per klip dan contoh gaya kreator (`config/gaya_naskah/`).
+   - Satu panggilan LLM menghasilkan `trend_report` + brief (atau 2 varian di mode draf) +
+     `motion_plan`. Tren dipilih hanya lewat NOMOR dari kolam yang benar-benar diambil.
+   - Naskah diperiksa `naskah.py` (frasa deskriptif, kalimat panjang, huruf non-Latin) dan
+     ditulis ulang maksimal sekali.
+   - Mode suara asli: seleksi potongan ucapan terbaik (`edit_plan.py`).
+3. **ContentMakers** (`agent3_render.py` -> `skills/video_generator/auto_render.py`):
+   - TTS: ElevenLabs dengan waktu per karakter, cadangan edge-tts dengan WordBoundary.
+   - Segmen 9:16 per bahan lewat ffmpeg: kanvas, filter warna, zoom foto, speed ramp,
+     pemotongan bagian goyang, B-roll Pexels opsional (`broll.py`).
+   - Concat dengan fade di pergantian topik.
+   - Teks: karaoke dari ucapan, teks narasi satu kata mengikuti suara, dan teks tulisan
+     beranimasi lewat Remotion (`overlay_remotion.py` + `remotion/src/TextOverlay.jsx`).
+   - Motion graphic: `motion_plan.py` memvalidasi dan menjadwalkan ke waktu kata narasi,
+     `remotion/src/MotionOverlay.jsx` merender. Ditempel dalam encode yang sama dengan teks.
+   - Musik latar dengan ducking (`music.py`, `music_mood.py`) dan cover JPG (`thumbnail.py`).
+
+## Prinsip yang ditegakkan di kode (lihat CLAUDE.md)
+
+- **Gagal-tertutup**:
+  - Path lampiran di luar cache Hermes ditolak.
+  - Bahan tanpa prefix run ditolak (`select_assets`).
+  - `inspect_id` dan draf wajib milik chat yang sama, belum kedaluwarsa, bahannya sama. Draf
+    hanya bisa dirender sekali (klaim `O_EXCL`).
+- **LLM mengusulkan, kode mengukur**:
+  - Tren hanya lewat nomor dari kolam.
+  - Daftar bahan dipaksa dari Python.
+  - Angka di motion graphic harus ada di permintaan user atau ucapan asli.
+  - Waktu elemen diambil dari kata yang diucapkan.
+  - Biaya dari token nyata × `config/pricing.json`.
+- **Kegagalan bukan ketiadaan**: transkripsi yang gagal dibedakan dari "tanpa ucapan", dan
+  dilaporkan ke user lewat `catatan_bahan` di hasil `hermes_render`.
+
+## State
 
 ```
-workspace/raw/*                        (input: bahan mentah user)
-workspace/state/performance_summary.json   (Fase 0 → konteks Fase 1)
-workspace/state/trend_report.json          (Fase 1, referensi)
-workspace/state/creative_brief.json        (Fase 1 → input Fase 2)
-workspace/state/render_status.json         (Fase 2 → dicek Fase 2 & 3)
-workspace/drafts/video_output.mp4          (Fase 2 → dikirim Fase 3)
-workspace/state/publish_history.json       (Fase 3, jalur CLI saja → konteks Fase 0 run berikutnya)
-workspace/state/error.log                  (semua fase, append-only)
+workspace/raw/{prefix}_*                 bahan mentah per run (tidak pernah dihapus retensi)
+workspace/state/inspect/{id}.json        status pemeriksaan (24 jam)
+workspace/state/draf_naskah/{id}.json    draf naskah (24 jam; .dipakai = sudah dirender)
+workspace/state/trend_pool.json          tren nyata dari ContentInsight
+workspace/state/creative_brief.json      brief kerja (di dalam lock)
+workspace/state/creative_brief_{run}.json, workspace/drafts/video_{run}.mp4/.jpg   hasil per run (7 hari)
+workspace/state/render_status.json       status render + catatan (motion, potong_visual, suara, ...)
+workspace/state/run_log.jsonl            event siklus hidup, panggilan LLM/TTS/transkripsi + biaya
+workspace/state/*_cache.json             cache analisis goyang & mood musik
 ```

@@ -4,7 +4,6 @@ Asal: user menilai naskah hambar dan meminta teks seperti video referensi (kreat
 satu kata per tampilan, berganti tepat mengikuti ucapan."""
 
 import json
-import re
 import shutil
 import subprocess
 
@@ -138,7 +137,7 @@ def test_teks_narasi_muncul_tepat_saat_diucapkan(render_ai, monkeypatch):
     monkeypatch.setenv("TEXT_ANIMATION", "none")
     skrip, tmp_path, W, H = render_ai
     out = tmp_path / "o.mp4"
-    ar.render_from_agent_script(str(skrip), "", str(out))
+    ar.render_from_agent_script(str(skrip), str(out))
     assert _terang_bawah(out, 0.2, W, H) < 20, "sebelum kata pertama diucapkan: belum ada teks"
     for t in (0.7, 1.3, 2.7):
         assert _terang_bawah(out, t, W, H) > 150, f"detik {t}: kata yang diucapkan harus tampil"
@@ -156,7 +155,7 @@ def test_tanpa_waktu_kata_teks_lama_tetap_dipakai(render_ai, monkeypatch):
 
     monkeypatch.setattr(ar, "generate_voice", tanpa_waktu)
     out = tmp_path / "o2.mp4"
-    ar.render_from_agent_script(str(skrip), "", str(out))
+    ar.render_from_agent_script(str(skrip), str(out))
     assert out.exists()
 
 

@@ -30,11 +30,6 @@ def spoken_text(data):
     return (data.get("voice_over_spoken") or "").strip() or tulis
 
 
-def written_text(data):
-    """Naskah yang DITULIS (subtitle, caption, deskripsi)."""
-    return (data.get("full_voice_over") or "").strip()
-
-
 def prompt_rule():
     """Aturan lafal untuk prompt brief; kosong kalau mekanismenya dimatikan."""
     if not SPOKEN_REWRITE:
