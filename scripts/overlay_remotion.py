@@ -173,10 +173,14 @@ def komposit(video_masuk, pekerjaan, fps, video_keluar, filter_akhir=None):
     for i, p in enumerate(pekerjaan, 1):
         t = p["mulai"] / fps
         pudar = ""
+        if p.get("pudar_masuk"):
+            # Cutaway B-roll (klip opak): muncul dengan pudar alpha, bukan potongan kasar.
+            pudar += f",fade=t=in:st=0:d={p['pudar_masuk'] / fps:.4f}:alpha=1"
         if p.get("pudar"):
-            # Animasi keluar = pudar alpha di ujung gambar diam (lihat rencana_motion).
-            pudar = (f",fade=t=out:st={(p['tahan'] - p['pudar']) / fps:.4f}"
-                     f":d={p['pudar'] / fps:.4f}:alpha=1")
+            # Animasi keluar = pudar alpha di ujung potongan (gambar diam motion / klip cutaway).
+            lama = p.get("tahan") or p.get("lama")
+            pudar += (f",fade=t=out:st={(lama - p['pudar']) / fps:.4f}"
+                      f":d={p['pudar'] / fps:.4f}:alpha=1")
         rantai.append(f"[{i}:v]format=yuva420p{pudar},setpts=PTS-STARTPTS+{t:.4f}/TB[o{i}]")
         rantai.append(f"[{label}][o{i}]overlay=eof_action=pass:format=yuv420[v{i}]")
         label = f"v{i}"

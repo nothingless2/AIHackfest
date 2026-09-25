@@ -191,3 +191,65 @@ def jadwal(bersih, kata_waktu, durasi, *, ada_teks_statis=False):
         items.append({"jenis": "kartu_cta", "mulai": round(mulai_cta, 3), "selesai": round(durasi, 3),
                       **bersih["cta"]})
     return items, catatan
+
+
+# ---------------------------------------------------------------- B-roll cutaway
+# Mode suara asli: klip stok DITIMPA di atas video sementara suara asli tetap berjalan
+# (cutaway). Timeline tidak bergeser, jadi subtitle & ucapan tetap sinkron.
+CUT_SEBELUM = 0.2        # cutaway mulai sedikit sebelum kata jangkar diucapkan
+CUT_LAMA = (2.0, 2.8)    # (minimal, bawaan) detik -- pendek: sering tapi tidak menenggelamkan pembicara
+CUT_JARAK = 1.5          # jeda minimal antar-cutaway
+CUT_MAKS = 3
+
+
+CUT_GESER_MAKS = 0.6     # boleh mundur sedikit dari jangkar demi jarak antar-cutaway
+
+
+def jadwal_broll(usulan, kata_waktu, durasi, *, sibuk=()):
+    """(jadwal, catatan). usulan: [{"query", "saat_kata"}] (broll.usulan_bersih).
+    kata_waktu: kata yang DIUCAPKAN dalam detik keluaran [{word, start, end}].
+    sibuk: [(a, b)] jendela yang tidak boleh ditimpa (kartu pembuka/ajakan, elemen motion).
+    jadwal: [{"query", "saat_kata", "mulai", "selesai"}] berurutan waktu."""
+    catatan, jadwal = [], []
+    waktu = [(norm(w.get("word")), float(w["start"])) for w in (kata_waktu or [])]
+    batas_akhir = durasi - CTA_DETIK if durasi >= DURASI_MIN_CTA else durasi
+    # 1) Jangkar -> waktu ucapan (kemunculan pertama yang belum dipakai; usulan LLM tidak
+    #    dijamin urut waktu), lalu diproses urut WAKTU.
+    dipakai, berjangkar = set(), []
+    for u in usulan or []:
+        jangkar = norm(u.get("saat_kata"))
+        j = next((k for k in range(len(waktu)) if jangkar and k not in dipakai
+                  and waktu[k][0] == jangkar), None)
+        if j is None:
+            catatan.append(f"B-roll '{u['query']}' dibuang: kata \"{u.get('saat_kata')}\" tidak "
+                           "ditemukan di ucapan")
+            continue
+        dipakai.add(j)
+        berjangkar.append((waktu[j][1], u))
+    terpakai = list(sibuk)
+    for t, u in sorted(berjangkar, key=lambda x: x[0]):
+        if len(jadwal) >= CUT_MAKS:
+            catatan.append(f"B-roll '{u['query']}' dibuang: batas {CUT_MAKS} klip")
+            continue
+        a0 = t - CUT_SEBELUM
+        a = a0
+        for x, y in terpakai:                  # jatuh di jendela sibuk: mulai sesudahnya
+            if x - CELAH < a < y + CELAH:
+                a = y + CELAH
+        if jadwal:
+            a = max(a, jadwal[-1]["selesai"] + CUT_JARAK)
+        if a - a0 > CUT_GESER_MAKS:
+            catatan.append(f"B-roll '{u['query']}' dibuang: terlalu dekat dengan elemen sebelumnya")
+            continue
+        b = min(a + CUT_LAMA[1], batas_akhir)
+        for x, _ in sorted(terpakai):          # berhenti sebelum jendela sibuk berikutnya
+            if a < x < b:
+                b = x - CELAH
+        if b - a < CUT_LAMA[0]:
+            catatan.append(f"B-roll '{u['query']}' dibuang: tidak ada ruang {CUT_LAMA[0]:.0f} dtk "
+                           "di sekitar kata jangkarnya")
+            continue
+        jadwal.append({"query": u["query"], "saat_kata": u.get("saat_kata"),
+                       "mulai": round(a, 3), "selesai": round(b, 3)})
+        terpakai.append((a, b))
+    return jadwal, catatan

@@ -18,6 +18,7 @@ import visual_quality as _vq
 
 from naskah import ATURAN_GAYA, rapikan as rapikan_naskah
 from draf_naskah import FIELD_VARIAN
+from broll import aktif as broll_aktif, usulan_bersih
 from common import (
     LLM_MODEL,
     BRIEF_PATH,
@@ -256,6 +257,22 @@ MOTION GRAPHIC (elemen penjelas di layar, gaya kartu gelap berpendar) di "motion
 - "cta" = kartu ajakan di 2 detik terakhir, sejalan dengan ajakan penutup naskah.
 - DILARANG angka, harga, tanggal, atau statistik yang tidak ada di permintaan user."""
 
+MOTION_NOTE_UCAPAN = """
+MOTION GRAPHIC (elemen penjelas di layar, gaya kartu gelap berpendar) di "motion_plan":
+- "hook" = kartu pembuka di 2 detik pertama, maks 6 kata, merangkum inti ucapan.
+- "elemen" = 2-4 elemen yang MEMPERJELAS apa yang DIUCAPKAN orang di video; tiap elemen muncul
+  saat kata "saat_kata" DIUCAPKAN -- kata itu WAJIB persis ada di UCAPAN ASLI. Jenis: "sorot" =
+  kata kunci penting; "ikon" = benda/aksi + emoji; "langkah" = tahap/cara; "label" = nama
+  acara/tempat/brand PERSIS dari ucapan atau permintaan user. Sebar dari tengah sampai akhir.
+- "cta" = kartu ajakan di 2 detik terakhir.
+- DILARANG angka, harga, tanggal, atau statistik yang tidak ada di ucapan atau permintaan user."""
+
+BROLL_NOTE = """
+B-ROLL (klip video stok penjelas konteks) di "broll": 0-3 usulan, masing-masing kata kunci
+BAHASA INGGRIS yang konkret dan mudah dicari (mis. "blood donation", "volunteers smiling",
+"hospital hallway"), dan "saat_kata" = kata yang terdengar saat klip itu tampil. Pilih momen
+yang lebih jelas dengan gambar pendukung; kosongkan [] bila bahan user sudah cukup jelas."""
+
 MOTION_NOTE_TANPA_NARASI = """
 MOTION GRAPHIC di "motion_plan": hanya "hook" (kartu pembuka, maks 6 kata) dan "cta" (kartu
 ajakan penutup, maks 6 kata); "elemen" dibiarkan []. DILARANG angka, harga, tanggal, atau
@@ -345,7 +362,7 @@ def build_teks_statis_note():
 def build_prompt(asset_names, performance, *, jumlah_gambar, pool=None, konteks="",
                  transkrip=None, target_duration=None, durasi_bahan=None, teks_statis=False,
                  audio_bisu=False, klip_fakta="", gaya_contoh="", kontak=False, draf=False,
-                 mode_audio="ai", bahan_layak=None):
+                 mode_audio="ai", bahan_layak=None, broll_diminta=False):
     # Durasi & aturan lafal disuntikkan, bukan hardcode: tanpa permintaan user,
     # duration_text() mengembalikan kalimat lama kata per kata sehingga brief
     # untuk run yang tidak meminta durasi tidak berubah sama sekali.
@@ -394,12 +411,27 @@ def build_prompt(asset_names, performance, *, jumlah_gambar, pool=None, konteks=
         "tempat, merek, atau aktivitas spesifik apa pun."
     )
 
+    # Jangkar = kata yang TERDENGAR: naskah narasi AI, atau ucapan asli (transkrip) di mode
+    # suara asli. Tanpa keduanya tidak ada yang bisa dijangkarkan -> hanya kartu pembuka/ajakan.
+    ai = mode_audio == "ai"
+    sumber_kata = ("PERSIS ada di full_voice_over" if ai
+                   else "PERSIS DIUCAPKAN di video (lihat UCAPAN ASLI)")
+    berjangkar = ai or bool(transkrip)
     elemen_skema = (
         '\n        {{"jenis": "sorot|ikon|langkah|label", "teks": "maks 4 kata", '
         '"sub": "keterangan kecil maks 5 kata, boleh kosong", "emoji": "satu emoji (wajib untuk ikon)", '
-        '"saat_kata": "SATU kata yang PERSIS ada di full_voice_over"}}\n      '
-        if mode_audio == "ai" else "")
-    motion_note = MOTION_NOTE if mode_audio == "ai" else MOTION_NOTE_TANPA_NARASI
+        f'"saat_kata": "SATU kata yang {sumber_kata}"}}}}\n      '
+        if berjangkar else "")
+    broll_skema = (
+        '\n      {{"query": "2-4 kata BAHASA INGGRIS benda/suasana konkret untuk mencari video stok", '
+        f'"saat_kata": "SATU kata yang {sumber_kata}"}}}}\n    '
+        if berjangkar else "")
+    motion_note = (MOTION_NOTE if ai else MOTION_NOTE_UCAPAN if berjangkar
+                   else MOTION_NOTE_TANPA_NARASI)
+    broll_note = BROLL_NOTE if berjangkar else ""
+    if broll_note and broll_diminta:
+        broll_note += ("\n- User MEMINTA B-roll untuk video ini: WAJIB isi 2-3 usulan \"broll\" "
+                       "yang relevan dengan isi ucapan/naskah.")
     isi_brief = f"""{{{{
     "judul": "string",
     "deskripsi": "deskripsi konten MAKSIMAL 30 kata untuk kolom caption platform. Harus singkat dan padat.",
@@ -417,7 +449,8 @@ def build_prompt(asset_names, performance, *, jumlah_gambar, pool=None, konteks=
       "cta": "teks kartu ajakan, maks 6 kata",
       "cta_sub": "keterangan kecil, boleh kosong",
       "cta_emoji": "satu emoji atau kosong"
-    }}}}
+    }}}},
+    "broll": [{broll_skema}]
   }}}}"""
     if draf:
         bagian_brief = (
@@ -480,6 +513,7 @@ Aturan keras:
 - "scenes" adalah teks on-screen singkat (maksimal 6 kata per scene), bukan salinan
   penuh voice-over. Waktu mulai/selesai tiap scene harus berurutan dan tidak tumpang tindih.
 {motion_note}
+{broll_note}
 {draf_note}
 
 Balas HANYA JSON murni dengan struktur persis berikut:
@@ -564,6 +598,7 @@ def run():
         durasi_bahan=durasi_bahan, teks_statis=teks_statis, audio_bisu=(mode_audio == "mute"),
         klip_fakta=klip_fakta, gaya_contoh=contoh_gaya() if mode_audio == "ai" else "",
         kontak=True, draf=mode_draf(), mode_audio=mode_audio, bahan_layak=bahan_layak,
+        broll_diminta=broll_aktif(),
     )
     result = chat_json(
         [{"role": "user",
@@ -691,6 +726,10 @@ def run():
             if st.get("masalah"):
                 print(f"[info] naskah{' varian ' + 'AB'[i] if varian else ''}: {len(st['masalah'])} ciri hambar -> "
                       + ("ditulis ulang" if st.get("ditulis_ulang") else f"TIDAK ditulis ulang ({st.get('gagal')})"))
+    # Usulan B-roll dari LLM -> kata kunci aman, maksimal 3 (broll.usulan_bersih). Jangkarnya
+    # divalidasi saat render terhadap kata yang benar-benar terdengar.
+    for target in (varian or [brief]):
+        target["broll"] = usulan_bersih(target.get("broll"))
     if varian:
         # Brief dasar = varian A (renderer lama tetap bisa membacanya); daftar varian ikut
         # disimpan untuk draf.

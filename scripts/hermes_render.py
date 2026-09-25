@@ -128,7 +128,8 @@ def _parser():
     p.add_argument("--color-filter", default=None)
     p.add_argument("--speed-factor", type=float, default=None)
     p.add_argument("--auto-zoom", action="store_true")
-    p.add_argument("--broll", action="store_true", help="Sisipkan B-roll stok Pexels (hanya --audio-mode ai; butuh PEXELS_API_KEY).")
+    p.add_argument("--broll", action="store_true",
+                   help="B-roll stok Pexels (butuh PEXELS_API_KEY): disisipkan di mode ai, cutaway di mode asli/mute.")
     p.add_argument("--broll-query", default=None, help="Kata kunci B-roll, dipisah koma.")
     p.add_argument("--broll-count", type=int, default=None)
     p.add_argument("--voice", choices=["pria", "wanita"], default=None,
@@ -138,6 +139,8 @@ def _parser():
     p.add_argument("--text-animation", default=None, help="pop|loncat|geser|fade|none (teks tulisan di layar).")
     p.add_argument("--text-position", default=None, help="atas|tengah|bawah (teks on-screen, bukan subtitle ucapan).")
     p.add_argument("--text-font", default=None, help="standar|tegas|modern|elegan|santai|bersih.")
+    p.add_argument("--montase", choices=["on", "off"], default=None,
+                   help="Bahan tanpa ucapan + musik: potongan mengikuti ketukan (bawaan on).")
     p.add_argument("--motion", default=None,
                    help="Motion graphic penjelas: sedang (bawaan) | mati.")
     p.add_argument("--draft", action="store_true",
@@ -205,6 +208,7 @@ def _apply_env(args):
         "TEXT_POSITION": args.text_position,
         "TEXT_FONT": args.text_font,
         "MOTION_GRAPHIC": args.motion,
+        "MONTASE": {"on": "1", "off": "0", None: None}[args.montase],
         "CONTENT_FACTORY_USER_CONTEXT": args.user_context or None,
     }
     for key, value in mapping.items():
@@ -389,12 +393,9 @@ def main(argv=None):
     except MusicError as e:
         return gagal("musik_invalid", str(e))
     if args.broll:
-        # Ditolak SEBELUM lock dan LLM: tanpa key, atau di luar mode voice-over AI, B-roll
-        # tidak mungkin berhasil -- jangan render dulu lalu bilang "tanpa B-roll".
-        if args.audio_mode != "ai":
-            return gagal("broll_butuh_voiceover",
-                         "B-roll hanya untuk mode voice-over AI (--audio-mode ai): di mode audio "
-                         "asli/mute klip sisipan menggeser subtitle dari ucapan.")
+        # Ditolak SEBELUM lock dan LLM bila tanpa key: B-roll pasti gagal -- jangan render
+        # dulu lalu bilang "tanpa B-roll". Mode voice-over AI: klip disisipkan di antara bahan;
+        # mode suara asli/mute: klip DITIMPA sebentar (cutaway), suara & subtitle tidak bergeser.
         try:
             resolve_broll()
         except BrollError as e:
@@ -477,6 +478,8 @@ def main(argv=None):
         "musik_tempo_bpm": (mood or {}).get("tempo_bpm") if (mood or {}).get("tempo_yakin") else None,
         "catatan_bahan": catatan_bahan(brief),
         "pengisian": status.get("pengisian"),
+        "qa": status.get("qa"),
+        "montase": status.get("montase"),
         "draf": brief.get("draf"),
         "catatan_naskah": ((brief.get("naskah_status") or {}).get("catatan") or None)
         if (brief.get("draf") or {}).get("diedit") else None,

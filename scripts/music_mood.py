@@ -124,6 +124,41 @@ def tempo(mag):
     return round(float(bpms[terbaik]), 1), yakin
 
 
+def ketukan(path, maks_detik=MAKS_DETIK):
+    """Grid ketukan musik: {"bpm", "yakin", "periode", "fase"} -- ketukan ke-k jatuh di
+    fase + k * periode (detik). Dipakai montase (potongan jatuh tepat di ketukan).
+
+    Tempo dari tempo() yang sudah dikalibrasi; FASE dicari sendiri: geser grid berperiode itu
+    dan ambil posisi yang paling banyak menumpuk energi onset (spectral flux). Tanpa tempo yang
+    yakin tidak ada grid -- montase dilewati, tidak menebak."""
+    x = _decode(path, maks_detik)
+    mag = _spektrum(x)
+    bpm, yakin = tempo(mag)
+    if not bpm or not yakin:
+        return {"bpm": bpm, "yakin": False, "periode": None, "fase": None}
+    log = np.log1p(mag * 10)
+    flux = np.maximum(np.diff(log, axis=0), 0).sum(axis=1)
+    fps = SR / HOP
+    per = fps * 60 / bpm                       # periode dalam frame STFT
+    idx = np.arange(len(flux))
+    terbaik, skor = 0.0, -1.0
+    for geser in np.arange(0.0, per, 0.25):
+        pos = geser + per * np.arange(int((len(flux) - 1 - geser) // per) + 1)
+        s = float(np.interp(pos, idx, flux).sum())
+        if s > skor:
+            terbaik, skor = geser, s
+    # flux[i] = perubahan frame i -> i+1; onset terlihat di frame i+1 (awal jendela).
+    fase = ((terbaik + 1) * HOP) / SR + FASE_KOREKSI
+    periode = 60.0 / bpm
+    return {"bpm": bpm, "yakin": True, "periode": round(periode, 5),
+            "fase": round(float(fase % periode), 4)}
+
+
+# Onset terbaca ±1 hop STFT (23 ms) lebih awal: terukur -24,5..-27,2 ms pada klik sintetis
+# 90/120/140 BPM dengan fase 0,1 & 0,3 dtk (tests/test_montase.py). Dikoreksi tetap.
+FASE_KOREKSI = 0.025
+
+
 def label_mood(bpm, yakin, energi_db, terang_hz):
     if yakin and bpm is not None:
         if bpm >= AMBANG["energik_tempo_min"] and energi_db >= AMBANG["energik_energi_min"]:

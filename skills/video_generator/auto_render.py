@@ -1397,6 +1397,57 @@ def build_drawtext_chain(scenes, video_height, video_width=None):
 TEKS_ANIMASI = {}
 MOTION = {}
 PENGISIAN = {}      # alokasi.susun_potongan: narasi vs bahan layak, gerak lambat, dipakai ulang
+MONTASE = {}        # potongan mengikuti ketukan musik (bahan tanpa ucapan)
+MONTASE_MIN_DETIK = 1.2
+
+
+def montase_aktif():
+    return (os.getenv("MONTASE") or "1").strip().lower() not in ("0", "off", "mati", "false")
+
+
+def terapkan_montase(rencana):
+    """Bahan TANPA ucapan + musik: panjang tiap rentang dibulatkan ke bawah menjadi kelipatan
+    satu unit ketukan (2 ketukan, atau 4 bila tempo cepat; minimal MONTASE_MIN_DETIK), semua
+    sambungan hard cut. Dengan musik mulai dari ketukan pertama (MONTASE["offset"]), setiap
+    pergantian gambar jatuh tepat di ketukan. Tempo tidak pasti -> dilewati & dicatat."""
+    MONTASE.clear()
+    try:
+        track = pick_track(requested_mood(), run_id=os.getenv("CONTENT_FACTORY_RUN_ID") or "")
+    except MusicError as e:
+        MONTASE.update(dipakai=False, alasan=str(e))
+        return rencana
+    if not track:
+        MONTASE.update(dipakai=False, alasan="tidak ada musik")
+        return rencana
+    try:
+        from music_mood import ketukan
+        k = ketukan(track)
+    except Exception as e:
+        MONTASE.update(dipakai=False, alasan=f"ketukan tidak terukur ({type(e).__name__})")
+        return rencana
+    if not k.get("yakin"):
+        MONTASE.update(dipakai=False, alasan="tempo musik tidak pasti", bpm=k.get("bpm"))
+        return rencana
+    per = k["periode"]
+    kelipatan = 2
+    while kelipatan * per < MONTASE_MIN_DETIK:
+        kelipatan += 2
+    unit = kelipatan * per
+    baru = []
+    for item in rencana:
+        ranges = [(a, a + int((b - a) / unit + 1e-9) * unit) for a, b in item["ranges"] if b - a >= unit]
+        if ranges:
+            baru.append({**item, "ranges": ranges, "durasi": sum(b - a for a, b in ranges),
+                         "fade_masuk": False, "fade_setelah": set()})
+    if not baru:
+        MONTASE.update(dipakai=False, alasan="semua potongan lebih pendek dari satu unit ketukan")
+        return rencana
+    MONTASE.update(dipakai=True, bpm=k["bpm"], ketukan_per_potongan=kelipatan,
+                   unit_detik=round(unit, 3), offset=k["fase"], track=track,
+                   potongan=sum(len(i["ranges"]) for i in baru))
+    print(f"🥁 Montase ketukan: {k['bpm']} BPM, potongan kelipatan {kelipatan} ketukan "
+          f"({unit:.2f} dtk), musik mulai di ketukan pertama ({k['fase']:.2f} dtk).")
+    return baru
 
 
 def _sumber_fakta(data):
@@ -1406,7 +1457,7 @@ def _sumber_fakta(data):
     return " ".join([data.get("konteks_user") or ""] + ucapan)
 
 
-def siapkan_motion(data, durasi, kata_waktu, ada_teks_statis, folder):
+def siapkan_motion(data, durasi, kata_waktu, ada_teks_statis, folder, naskah=None):
     """Rencana motion graphic dari brief -> divalidasi & dijadwalkan kode (motion_plan) ->
     potongan dirender Remotion ke `folder`. Return pekerjaan (ditempel bersama encode teks)
     atau None; alasannya SELALU dicatat di MOTION (dilaporkan ke user)."""
@@ -1423,7 +1474,8 @@ def siapkan_motion(data, durasi, kata_waktu, ada_teks_statis, folder):
     if not plan:
         MOTION.update(dipakai=False, alasan="brief tanpa rencana grafik")
         return None
-    bersih, c1 = _mp.bersihkan(plan, naskah=data.get("full_voice_over"),
+    # naskah = teks yang BENAR-BENAR terdengar: narasi AI, atau ucapan asli (mode suara asli).
+    bersih, c1 = _mp.bersihkan(plan, naskah=naskah if naskah is not None else data.get("full_voice_over"),
                                sumber_fakta=_sumber_fakta(data), pakai_jangkar=bool(kata_waktu))
     items, c2 = _mp.jadwal(bersih, kata_waktu, durasi, ada_teks_statis=ada_teks_statis)
     catatan = c1 + c2
@@ -1438,11 +1490,91 @@ def siapkan_motion(data, durasi, kata_waktu, ada_teks_statis, folder):
         print(f"[warn] motion graphic gagal dirender ({e}) — video tanpa grafik.")
         return None
     MOTION.update(dipakai=True, gagal=None, tingkat=tingkat, catatan=catatan,
-                  elemen=[{"jenis": i["jenis"], "teks": i["teks"], "mulai": i["mulai"]} for i in items],
+                  elemen=[{"jenis": i["jenis"], "teks": i["teks"], "mulai": i["mulai"],
+                           "selesai": i["selesai"]} for i in items],
                   **info)
     print(f"🎬 Motion graphic: {len(items)} elemen ({', '.join(i['jenis'] for i in items)}), "
           f"{info['frame_chromium']} frame Chromium" + (f"; {len(catatan)} dibuang" if catatan else ""))
     return pekerjaan
+
+
+CUTAWAY_PUDAR = 0.15      # detik pudar masuk/keluar klip cutaway
+
+
+def _usulan_broll(data, kata_waktu, durasi, sibuk=()):
+    """Usulan cutaway: --broll-query user (menang) dipasangkan ke jangkar usulan brief secara
+    berurutan; tanpa jangkar, dipakai kata yang diucapkan di tengah CELAH KOSONG terlebar
+    (di luar kartu pembuka/ajakan dan elemen motion) -- titik merata sempat jatuh tepat di
+    elemen motion sehingga semua cutaway terbuang (render nyata 25 Sep)."""
+    usulan = _broll.usulan_bersih(data.get("broll"))
+    user = [q for q in (_broll._bersihkan_query(x) for x in (os.getenv("BROLL_QUERY") or "").split(","))
+            if q]
+    if user:
+        usulan = [{"query": q, "saat_kata": (usulan[i]["saat_kata"] if i < len(usulan) else "")}
+                  for i, q in enumerate(user[:_broll.MAKS_USULAN])]
+    if not usulan and data.get("judul"):
+        usulan = [{"query": _broll._bersihkan_query(data["judul"])[:60], "saat_kata": ""}]
+    kosong = [u for u in usulan if not u["saat_kata"]]
+    if kosong:
+        awal, akhir = _mp.HOOK_DETIK, durasi - _mp.CTA_DETIK
+        tepi = sorted([(a, b) for a, b in sibuk if b > awal and a < akhir])
+        celah, t = [], awal
+        for a, b in tepi:
+            if a > t:
+                celah.append((t, a))
+            t = max(t, b)
+        if akhir > t:
+            celah.append((t, akhir))
+        celah.sort(key=lambda c: c[1] - c[0], reverse=True)
+        for u, (a, b) in zip(kosong, celah):
+            tengah = a + min(1.0, (b - a) / 3)       # awal celah: cutaway muat sesudahnya
+            dekat = min(kata_waktu, key=lambda w: abs(float(w["start"]) - tengah), default=None)
+            u["saat_kata"] = dekat["word"] if dekat else ""
+    return usulan
+
+
+def siapkan_cutaway(data, kata_waktu, durasi, sibuk, folder):
+    """Mode suara asli: B-roll stok DITIMPA di atas video (cutaway) saat kata jangkarnya
+    diucapkan; suara asli & subtitle tidak bergeser. Return (pekerjaan_komposit, info)."""
+    try:
+        cfg = _broll.resolve_broll()
+    except BrollError as e:
+        print(f"[warn] {e}")
+        return [], {"dipakai": [], "gagal": str(e)}
+    if not cfg:
+        return [], None
+    if not kata_waktu:
+        return [], {"dipakai": [], "gagal": "tidak ada ucapan bertimestamp untuk menjangkarkan B-roll"}
+    jadwal, catatan = _mp.jadwal_broll(_usulan_broll(data, kata_waktu, durasi, sibuk), kata_waktu,
+                                       durasi, sibuk=sibuk)
+    kerja, dipakai, gagal = [], [], list(catatan)
+    orientasi = _broll.orientasi_untuk(TARGET_W, TARGET_H)
+    for k, c in enumerate(jadwal):
+        klip, alasan = _broll.ambil([c["query"]], 1, orientasi, folder,
+                                    os.getenv("CONTENT_FACTORY_RUN_ID") or "", awalan=f"_broll_c{k}_")
+        if not klip:
+            gagal.append(f"'{c['query']}': {alasan}")
+            continue
+        lama = c["selesai"] - c["mulai"]
+        seg = os.path.join(folder, f"_broll_c{k}_seg.mp4")
+        try:
+            build_segment(klip[0]["path"], lama, seg, keep_audio=False,
+                          potong=(0.0, min(lama, float(klip[0].get("durasi") or lama))),
+                          fade_in=False, fade_out=False)
+        except Exception as e:
+            gagal.append(f"'{c['query']}': gagal disiapkan ({type(e).__name__})")
+            continue
+        n = max(1, int(round(lama * FPS)))
+        pud = max(1, int(round(CUTAWAY_PUDAR * FPS)))
+        kerja.append({"jenis": "klip", "out": seg, "mulai": int(round(c["mulai"] * FPS)),
+                      "lama": n, "pudar_masuk": pud, "pudar": pud})
+        dipakai.append({"id": klip[0]["id"], "kredit": klip[0]["kredit"], "halaman": klip[0]["halaman"],
+                        "query": c["query"], "saat_kata": c["saat_kata"], "mulai": c["mulai"],
+                        "selesai": c["selesai"]})
+    if dipakai:
+        print(f"🎞️ {len(dipakai)} cutaway B-roll: " + ", ".join(
+            f"'{d['query']}' @{d['mulai']:.1f}s" for d in dipakai))
+    return kerja, {"dipakai": dipakai, "gagal": "; ".join(gagal) or None, "cara": "cutaway"}
 
 
 def _motion_gagal(e):
@@ -1775,7 +1907,7 @@ def perbaiki_durasi(data, aktual, target):
 
 
 
-def tambah_musik(video_path, track, out_path, durasi, ada_ucapan=True):
+def tambah_musik(video_path, track, out_path, durasi, ada_ucapan=True, offset=0.0):
     """Campur musik latar ke audio video, dengan ducking otomatis.
 
     Musik di-loop kalau lebih pendek dari video, dan `-shortest` memastikan
@@ -1801,7 +1933,10 @@ def tambah_musik(video_path, track, out_path, durasi, ada_ucapan=True):
         vol = auto_volume(video_path, track,
                           below_db=None if ada_ucapan else MUSIC_BELOW_AMBIENT_DB)
     run_ffmpeg(
-        ["-i", video_path, "-stream_loop", "-1", "-i", track,
+        ["-i", video_path, "-stream_loop", "-1",
+         # offset: montase -- musik mulai di ketukan pertamanya supaya grid ketukan berimpit
+         # dengan sambungan potongan.
+         *(["-ss", f"{offset:.3f}"] if offset else []), "-i", track,
          "-filter_complex", music_filter(durasi, punya_ucapan=punya and ada_ucapan, volume=vol),
          "-map", "0:v", "-map", "[aout]",
          "-c:v", "copy", "-c:a", "aac", "-ar", AUDIO_RATE, "-ac", AUDIO_CHANNELS,
@@ -1823,6 +1958,7 @@ def render_from_agent_script(
 
     POTONG_VISUAL.clear()
     PENGISIAN.clear()
+    MONTASE.clear()
     audio_mode = (data.get("audio_mode") or "ai").strip().lower()
     bisu = audio_mode == "mute"
     # `pakai_audio_asli` = jalur berbasis durasi klip + transkrip (seleksi, subtitle kata).
@@ -1856,12 +1992,6 @@ def render_from_agent_script(
 
     broll_info, broll_tmp = None, []
     ada_ucapan = True          # voice-over AI = ucapan; cabang audio asli menghitungnya sendiri
-    if pakai_audio_asli and _broll.aktif():
-        # Diberi tahu, bukan diabaikan diam-diam: user memintanya.
-        broll_info = {"dipakai": [], "gagal": "B-roll hanya untuk mode voice-over AI; mode audio asli/mute "
-                      "menampilkan orang yang bicara sehingga klip sisipan menggeser subtitle."}
-        print(f"[warn] {broll_info['gagal']}")
-
     if pakai_audio_asli:
         # Durasi ditentukan bahan, bukan TTS: tiap klip main sepanjang aslinya
         # supaya ucapan user tidak terpotong di tengah kalimat.
@@ -1894,6 +2024,12 @@ def render_from_agent_script(
         # Ada ucapan = ada subtitle dari timestamp kata. Tanpa itu, audio asli hanyalah
         # suasana/keramaian dan TIDAK boleh menekan musik (lihat tambah_musik).
         ada_ucapan = any(s.get("words") for s in scenes)
+        MONTASE.clear()
+        if not ada_ucapan and music_wanted() and montase_aktif():
+            rencana = terapkan_montase(rencana)
+            if MONTASE.get("dipakai"):
+                durasi_klip = [r["durasi"] for r in rencana]
+                total_duration = sum(durasi_klip)
         print(f"⏱️ Durasi total dari {len(existing_assets)} bahan: {total_duration:.1f} detik")
     else:
         # Yang DIBACAKAN adalah voice_over_spoken (ejaan fonetis), yang DITULIS
@@ -1937,8 +2073,10 @@ def render_from_agent_script(
                               "B-roll tanpa membuang bahanmu"}
                 print(f"[warn] B-roll dilewati: {broll_info['gagal']}")
             else:
+                # Kata kunci: --broll-query user, lalu usulan BrainIdea, lalu judul.
+                usul = [u["query"] for u in _broll.usulan_bersih(data.get("broll"))]
                 klip, gagal = _broll.ambil(
-                    cfg_broll["queries"] or [data.get("judul") or "b-roll"], kuota,
+                    cfg_broll["queries"] or usul or [data.get("judul") or "b-roll"], kuota,
                     _broll.orientasi_untuk(TARGET_W, TARGET_H), output_dir,
                     os.getenv("CONTENT_FACTORY_RUN_ID") or "")
                 broll_tmp = [k["path"] for k in klip]
@@ -2027,18 +2165,38 @@ def render_from_agent_script(
     else:
         os.replace(segment_paths[0], silent_combined)
 
-    # Motion graphic: dijangkarkan ke waktu kata NARASI (hanya mode voice-over AI; mode suara
-    # asli hanya kartu pembuka & ajakan). Dirender dulu, ditempel bersama encode teks.
-    kata_waktu = petakan_kata(full_vo, TTS_KATA) if (not pakai_audio_asli and TTS_KATA) else []
+    # Motion graphic & cutaway B-roll dijangkarkan ke kata yang TERDENGAR: narasi TTS (mode AI)
+    # atau ucapan asli dari subtitle (sudah dalam detik keluaran). Dirender dulu, lalu ditempel
+    # bersama encode teks: cutaway di bawah, motion di tengah, teks paling atas.
+    if pakai_audio_asli:
+        kata_waktu = [w for s in scenes for w in (s.get("words") or [])]
+        naskah_terdengar = " ".join(str(w.get("word", "")) for w in kata_waktu)
+    else:
+        kata_waktu = petakan_kata(full_vo, TTS_KATA) if TTS_KATA else []
+        naskah_terdengar = None
     folder_motion = tempfile.mkdtemp(prefix="_overlay_motion_", dir=output_dir)
     try:
         motion = siapkan_motion(data, float(total_duration), kata_waktu,
-                                any(s.get("statis") for s in scenes), folder_motion)
+                                any(s.get("statis") for s in scenes), folder_motion,
+                                naskah=naskah_terdengar)
+        if pakai_audio_asli:
+            sibuk = [(e["mulai"], e["selesai"]) for e in (MOTION.get("elemen") or [])]
+            cutaway, info_cut = siapkan_cutaway(data, kata_waktu, float(total_duration), sibuk,
+                                                folder_motion)
+            if info_cut is not None:
+                broll_info = info_cut
+            if cutaway:
+                motion = cutaway + list(motion or [])
         if pakai_audio_asli:
             # Audio sudah menyatu di segmen; tidak ada yang perlu di-mux.
             print("🎨 Menambahkan subtitle dari ucapan asli...")
             apply_text_overlay(silent_combined, scenes, output_video, motion=motion)
             with_text = None
+            gagal_tempel = str(MOTION.get("gagal") or "")
+            if broll_info and broll_info.get("dipakai") and gagal_tempel.startswith("penempelan"):
+                # Cutaway ikut dalam komposit yang gagal: video jadi TANPA B-roll -- laporkan.
+                broll_info = {"dipakai": [], "gagal": f"B-roll gagal ditempel: {gagal_tempel}",
+                              "cara": "cutaway"}
         else:
             with_text = os.path.join(output_dir, "_combined_text.mp4")
             print("🎨 Menambahkan teks per-scene...")
@@ -2055,8 +2213,8 @@ def render_from_agent_script(
     musik_mood = None
     if music_wanted():
         try:
-            track = pick_track(requested_mood(),
-                               run_id=os.getenv("CONTENT_FACTORY_RUN_ID") or "")
+            track = MONTASE.get("track") if MONTASE.get("dipakai") else pick_track(
+                requested_mood(), run_id=os.getenv("CONTENT_FACTORY_RUN_ID") or "")
         except MusicError as e:
             print(f"[warn] {e} — video dibuat TANPA musik.")
             track = None
@@ -2064,7 +2222,8 @@ def render_from_agent_script(
             sementara = os.path.join(output_dir, "_with_music.mp4")
             solo = not has_audio_stream(output_video)      # dibisukan: musik satu-satunya suara
             try:
-                tambah_musik(output_video, track, sementara, total_duration, ada_ucapan=ada_ucapan)
+                tambah_musik(output_video, track, sementara, total_duration, ada_ucapan=ada_ucapan,
+                             offset=MONTASE.get("offset") or 0.0 if MONTASE.get("dipakai") else 0.0)
                 os.replace(sementara, output_video)
                 musik_dipakai = os.path.basename(track)
                 try:
@@ -2085,6 +2244,28 @@ def render_from_agent_script(
         else:
             print("[info] belum ada track di assets/music/ — video dibuat tanpa musik."
                   + (" Karena suara asli dibisukan, video ini TANPA SUARA sama sekali." if bisu else ""))
+
+    # Pemeriksa mutu SEBELUM cover & kirim: kenyaringan (diperbaiki otomatis), frame hitam/beku,
+    # teks terpotong / masuk zona UI platform (dibanding video SEBELUM overlay pada waktu yang
+    # sama), durasi audio. Gagal berjalan = peringatan, tidak pernah dianggap lolos.
+    qa = None
+    if (os.getenv("QA_VIDEO") or "1").strip().lower() not in ("0", "off", "false", "mati"):
+        try:
+            import qa_video as _qa
+            cut = [(d["mulai"], d.get("selesai", d["mulai"] + 3.0))
+                   for d in ((broll_info or {}).get("dipakai") or []) if "mulai" in d]
+            qa = _qa.periksa(
+                output_video, dasar=silent_combined,
+                ada_foto=any(os.path.splitext(p)[1].lower() in IMAGE_EXTENSIONS for p in existing_assets),
+                harus_bersuara=not (bisu and not musik_dipakai), lewati=cut)
+            print("🔎 Pemeriksa mutu: " + ("lolos" if qa["lolos"] else "; ".join(qa["masalah"]))
+                  + (f" | diperbaiki: {'; '.join(qa['diperbaiki'])}" if qa["diperbaiki"] else "")
+                  + (f" | peringatan: {'; '.join(qa['peringatan'])}" if qa["peringatan"] else ""))
+        except Exception as e:
+            qa = {"lolos": False, "masalah": [], "peringatan": [f"pemeriksa mutu gagal berjalan: "
+                                                              f"{type(e).__name__}: {e}"[:200]],
+                  "diperbaiki": [], "ukur": {}}
+            print(f"[warn] {qa['peringatan'][0]}")
 
     # Cover diambil SETELAH mux dan SEBELUM cleanup: hanya `output_video` yang
     # sudah punya teks terbakar, rasio kanvas, dan encoding final. Mengambilnya
@@ -2119,6 +2300,8 @@ def render_from_agent_script(
         teks_animasi=dict(TEKS_ANIMASI) or None,
         motion=dict(MOTION) or None,
         pengisian=dict(PENGISIAN) if audio_mode == "ai" and PENGISIAN else None,
+        qa=qa,
+        montase={k: v for k, v in MONTASE.items() if k != "track"} or None,
         potong_visual={k: v for k, v in POTONG_VISUAL.items()} or None,
         suara=dict(TTS_CATATAN) if audio_mode == "ai" else None,
         audio_mode=audio_mode,

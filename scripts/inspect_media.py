@@ -243,7 +243,7 @@ _POSISI_TEKS = re.compile(r"(teks|tulisan|judul)[^.\n]{0,40}\b(tengah|atas|bawah
 _FONT_TEKS = re.compile(r"\b(font|huruf|tipografi)\b", re.I)
 _GAYA = re.compile(r"\b(capcut|filter|warna|vivid|sinematik|cinematic|hitam\s*putih|grayscale|"
                    r"hangat|sejuk)\b", re.I)
-_BROLL = re.compile(r"\b(b-?\s?roll|klip\s+stok|footage|video\s+stok)\b", re.I)
+_BROLL = re.compile(r"\b(b-?\s?roll|klip\s+stok|footage|video\s+stok|ilustrasi)\b", re.I)
 _MUSIK = re.compile(r"\b(musik|lagu|backsound|bgm|music|soundtrack)\b", re.I)
 _POTONG = re.compile(r"\b(buang|potong|pilih|semua|utuh|apa adanya|jangan dibuang|singkat|"
                      r"padat)\b", re.I)
@@ -453,20 +453,21 @@ def susun_pertanyaan(ringk, tahu):
             "alasan": f"{ringk['n_berucap']} video berucapan; pemilihan otomatis bisa membuang "
                       "bagian yang penting bagimu",
         })
-    if q and tanpa_ucapan and not tahu.get("broll"):
+    if q and not tahu.get("broll"):
         from broll import tersedia as broll_tersedia
         if broll_tersedia():        # jangan menawarkan yang pasti gagal (tanpa key Pexels)
             q.append({
                 "kode": "broll",
-                "tanya": "Mau disisipi B-roll (klip video stok gratis dari Pexels) di sela videomu?",
-                "opsi": _opsi("Tidak, hanya bahanku", "Ya, sisipkan B-roll (suara jadi voice-over AI)",
-                              rekomendasi=0),
-                "catatan": "B-roll hanya untuk mode voice-over AI, jadi menggantikan suara suasana. "
-                           "Tulis kata kunci klipnya, mis. \"makanan, restoran\" (kata kunci bahasa "
-                           "Inggris biasanya lebih banyak hasilnya).",
-                "param": {"B": {"broll": True, "audioMode": "ai"}},
+                "tanya": "Mau ditambah B-roll (klip video stok gratis dari Pexels) untuk memperjelas "
+                         "konteks?",
+                "opsi": _opsi("Tidak, hanya bahanku", "Ya, tambahkan B-roll yang sesuai", rekomendasi=0),
+                "catatan": ("Suaramu tetap utuh: klip stok tampil sebentar di momen yang pas "
+                            "(subtitle tidak bergeser). " if not tanpa_ucapan else "")
+                           + "Mau kata kunci tertentu? Tulis saja, mis. \"blood donation, volunteers\" "
+                           "(bahasa Inggris biasanya lebih banyak hasilnya).",
+                "param": {"B": {"broll": True}},
                 "default": "tanpa B-roll",
-                "alasan": "bahan tanpa ucapan; klip stok bisa memperkaya tampilan",
+                "alasan": "klip stok yang relevan memperjelas konteks",
             })
     if q and not tahu.get("gaya"):
         # Tawaran proaktif: fitur gaya yang memang ada tapi tidak akan ditemukan user

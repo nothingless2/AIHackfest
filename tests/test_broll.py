@@ -311,11 +311,32 @@ def test_hermes_broll_tanpa_key_ditolak_sebelum_render(monkeypatch, tmp_path, ca
     assert rc == 1 and out["kode"] == "broll_tidak_siap" and "PEXELS_API_KEY" in out["alasan"]
 
 
-def test_hermes_broll_di_luar_mode_voiceover_ditolak_bukan_diabaikan(monkeypatch, tmp_path, capsys):
+def test_hermes_broll_mode_suara_asli_diterima_sebagai_cutaway(monkeypatch, tmp_path, capsys):
+    """25 Sep: B-roll di mode suara asli/mute kini cutaway (ditimpa, tidak menggeser subtitle),
+    jadi tidak lagi ditolak -- sampai ke tahap render dengan BROLL=1."""
+    import hermes_render as hr
     monkeypatch.setenv("PEXELS_API_KEY", "k")
-    for argv in (["--broll"], ["--broll", "--audio-mode", "original"], ["--broll", "--audio-mode", "mute"]):
-        rc, out = _hermes(monkeypatch, tmp_path, argv, capsys)
-        assert rc == 1 and out["kode"] == "broll_butuh_voiceover", argv
+    sampai = []
+
+    def render(*a, **k):
+        import os
+        sampai.append(os.environ.get("BROLL"))
+        return "FAILED", (1, ("uji", "berhenti di sini"))
+
+    for argv in (["--broll", "--audio-mode", "original"], ["--broll", "--audio-mode", "mute"]):
+        root = tmp_path / "cache"
+        root.mkdir(exist_ok=True)
+        v = root / "k.mp4"
+        _video_uji(v)
+        monkeypatch.setattr(hr, "MEDIA_ROOTS", [str(root)])
+        for nama in ("install_signal_handlers", "sweep_old_run_files", "ensure_dirs"):
+            monkeypatch.setattr(hr, nama, lambda *a, **k: None)
+        monkeypatch.setattr(hr, "log_event", lambda *a, **k: None)
+        monkeypatch.setattr(hr, "run_core_stages_locked", render)
+        hr.main(["--media-path", str(v), "--no-require-inspect", "--music", "off", *argv])
+        out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+        assert out["kode"] == "render_gagal", (argv, out)
+    assert sampai == ["1", "1"]
 
 
 # ------------------------------------------------------------------ tawaran di inspect
@@ -333,7 +354,17 @@ def test_broll_ditawarkan_hanya_bila_key_ada(monkeypatch):
     assert "broll" not in [x["kode"] for x in _q(monkeypatch, "edit ya", key=False)]
     q = _q(monkeypatch, "edit ya", key=True)
     tawaran = next(x for x in q if x["kode"] == "broll")
-    assert tawaran["param"]["B"] == {"broll": True, "audioMode": "ai"}
+    assert tawaran["param"]["B"] == {"broll": True}, "B-roll tidak lagi memaksa voice-over AI"
+
+
+def test_broll_ditawarkan_juga_untuk_bahan_berucap(monkeypatch):
+    import inspect_media as im
+    monkeypatch.setenv("PEXELS_API_KEY", "k")
+    ringk = {"n_video": 2, "n_gambar": 0, "n_berucap": 2, "n_suasana": 0, "n_tanpa_suara": 0,
+             "n_horizontal": 0, "n_musik": 0, "total_detik": 40}
+    q = im.susun_pertanyaan(ringk, im.dari_konteks("edit ya"))
+    tawaran = next(x for x in q if x["kode"] == "broll")
+    assert "Suaramu tetap utuh" in tawaran["catatan"]
 
 
 def test_broll_yang_sudah_disebut_tidak_ditawarkan_lagi(monkeypatch):

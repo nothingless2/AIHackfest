@@ -41,7 +41,7 @@ def bahan_kurang(teks, brief):
 
 # Field yang BERBEDA antar-varian; sisanya (transkrip, rencana edit, mode audio, bahan) sama.
 FIELD_VARIAN = ("gaya", "judul", "deskripsi", "full_voice_over", "voice_over_spoken", "scenes",
-                "hashtags", "target_trend", "motion_plan", "naskah_status")
+                "hashtags", "target_trend", "motion_plan", "naskah_status", "broll")
 
 
 class DrafError(ValueError):
@@ -187,16 +187,27 @@ def susun_pesan(d):
             if bahan_kurang(v.get("full_voice_over"), brief):
                 kurang_varian.append(HURUF[i])
         else:
-            teks = [s.get("text", "") for s in (v.get("scenes") or []) if isinstance(s, dict)]
-            if teks:
-                baris.append("Teks di layar: " + " / ".join(t for t in teks if t))
+            ucapan = teks_ucapan(brief)
+            if ucapan:
+                # Mode suara asli: subtitle = ucapanmu sendiri (bukan tulisan AI).
+                baris.append(f"Subtitle dari ucapanmu: \"{_potong(ucapan, 160)}\"")
+            else:
+                teks = [s.get("text", "") for s in (v.get("scenes") or []) if isinstance(s, dict)]
+                if teks:
+                    baris.append("Teks di layar: " + " / ".join(t for t in teks if t))
             baris.append(f"Caption: {_potong(v.get('deskripsi'), 200)}")
+        broll = [b for b in (v.get("broll") or []) if isinstance(b, dict) and b.get("query")]
+        if broll:
+            baris.append("B-roll (bila diminta): " + " · ".join(
+                f"'{b['query']}'" + (f" saat \"{b['saat_kata']}\"" if b.get("saat_kata") else "")
+                for b in broll))
         st = v.get("naskah_status") or {}
         sisa = st.get("sisa") if st.get("ditulis_ulang") else st.get("masalah")
         if ai and sisa:
             # Pemeriksa gaya tidak berhasil membereskannya: user yang memutuskan.
             baris.append("Catatan pemeriksa: " + "; ".join(sisa[:2]))
-        grafik = ringkas_grafik(v.get("motion_plan"), naskah=v.get("full_voice_over"), brief=brief)
+        grafik = ringkas_grafik(v.get("motion_plan"),
+                                naskah=v.get("full_voice_over") if ai else teks_ucapan(brief), brief=brief)
         if grafik:
             baris.append(f"Grafik: {grafik}")
         baris.append("")
@@ -215,6 +226,13 @@ def susun_pesan(d):
     return "\n".join(baris).strip()
 
 
+def teks_ucapan(brief):
+    """Seluruh ucapan asli (transkrip) sebagai satu teks: yang terdengar di mode suara asli."""
+    return " ".join(str(seg.get("text") or "").strip()
+                    for segs in (brief.get("transcript_segments") or {}).values()
+                    for seg in (segs or []) if isinstance(seg, dict)).strip()
+
+
 def ringkas_grafik(plan, *, naskah="", brief=None):
     """Ringkasan rencana motion graphic untuk pesan draf -- HANYA yang lolos pemeriksaan kode
     (katalog, angka, kata jangkar; motion_plan.bersihkan), supaya user tidak dijanjikan elemen
@@ -226,7 +244,7 @@ def ringkas_grafik(plan, *, naskah="", brief=None):
     ucapan = [str(seg.get("text") or "") for segs in (brief.get("transcript_segments") or {}).values()
               for seg in (segs or []) if isinstance(seg, dict)]
     bersih, _ = mp.bersihkan(plan, naskah=naskah, sumber_fakta=" ".join([brief.get("konteks_user") or ""] + ucapan),
-                             pakai_jangkar=brief.get("audio_mode") == "ai")
+                             pakai_jangkar=brief.get("audio_mode") == "ai" or bool(naskah))
     bagian = []
     if bersih["hook"]:
         bagian.append(f"kartu pembuka \"{bersih['hook']['teks']}\"")

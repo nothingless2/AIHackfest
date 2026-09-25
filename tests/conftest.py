@@ -55,6 +55,10 @@ os.environ["PEXELS_API_KEY"] = ""
 os.environ["TEXT_ANIMATION"] = "none"
 # Motion graphic juga lewat Chromium: dimatikan; tests/test_motion_render.py menyalakannya.
 os.environ["MOTION_GRAPHIC"] = "mati"
+# Pemeriksa mutu menambah beberapa pass ffmpeg per render; tests/test_qa_video.py menyalakannya.
+os.environ["QA_VIDEO"] = "0"
+# Montase ketukan menganalisis musik; tests/test_montase.py menyalakannya.
+os.environ["MONTASE"] = "0"
 # Pemotongan bagian goyang menganalisis tiap video; test lama memakai sumber sintetis dan
 # tidak menguji ini. Test-nya sendiri menyalakan (tests/test_visual_quality.py).
 os.environ["VISUAL_CUT"] = "0"

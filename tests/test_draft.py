@@ -419,3 +419,18 @@ def test_hitung_bahan_layak_sama_dengan_renderer():
                                   {"/v1.mp4": 5.5, "/v2.mp4": 3.6},
                                   {"/v2.mp4": [(1.75, 3.6, "goyang")]})
     assert total == pytest.approx(5.5 + 1.75 + ab.FOTO_DETIK, abs=0.06)   # dibulatkan 0,1
+
+
+def test_pesan_draf_mode_suara_asli_menampilkan_ucapan_broll_dan_grafik():
+    brief = {"audio_mode": "original", "konteks_user": "",
+             "transcript_segments": {"a.mp4": [{"text": "Halo semua, hari ini kita donor darah di aula."}]}}
+    plan = {"hook": "Ayo donor", "elemen": [{"jenis": "sorot", "teks": "Aula", "saat_kata": "aula"},
+                                            {"jenis": "sorot", "teks": "Pizza", "saat_kata": "pizza"}]}
+    d = {"draft_id": "0123456789ab", "bahan": ["a"], "brief": brief,
+         "varian": [{**VARIAN[0], "motion_plan": plan,
+                     "broll": [{"query": "blood donation", "saat_kata": "donor"}]}, VARIAN[1]]}
+    pesan = dn.susun_pesan(d)
+    assert 'Subtitle dari ucapanmu: "Halo semua, hari ini kita donor darah di aula."' in pesan
+    assert "'blood donation' saat \"donor\"" in pesan
+    assert 'sorot "Aula"' in pesan and "Pizza" not in pesan, "jangkar dicek terhadap UCAPAN"
+    assert "Teks di layar" not in pesan

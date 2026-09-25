@@ -82,6 +82,22 @@ def resolve_broll(aktif_=None, query=None, jumlah=None):
     return {"queries": queries, "jumlah": n}
 
 
+MAKS_USULAN = 3
+
+
+def usulan_bersih(usulan, maks=MAKS_USULAN):
+    """Usulan B-roll dari BrainIdea -> [{"query", "saat_kata"}] yang aman dipakai.
+    Kata kunci dibersihkan sama seperti --broll-query; usulan tanpa kata kunci dibuang."""
+    hasil = []
+    for u in usulan if isinstance(usulan, list) else []:
+        if not isinstance(u, dict):
+            continue
+        q = _bersihkan_query(u.get("query"))[:60]
+        if q:
+            hasil.append({"query": q, "saat_kata": str(u.get("saat_kata") or "").strip()[:40]})
+    return hasil[:maks]
+
+
 def orientasi_untuk(lebar, tinggi):
     if tinggi > lebar * 1.1:
         return "portrait"
@@ -141,9 +157,11 @@ def cari(query, orientasi, per_page=15):
         if not berkas:
             continue
         u = v.get("user") or {}
+        gambar = str(v.get("image") or "")
         hasil.append({"id": v["id"], "durasi": d, "berkas": berkas,
                       "halaman": v.get("url") or "", "kreator": u.get("name") or "",
-                      "kreator_url": u.get("url") or ""})
+                      "kreator_url": u.get("url") or "",
+                      "gambar": gambar if host_sah(gambar) else ""})
     return hasil
 
 
@@ -184,7 +202,7 @@ def _sah_video(path):
         return False
 
 
-def ambil(queries, jumlah, orientasi, folder, run_id):
+def ambil(queries, jumlah, orientasi, folder, run_id, awalan="_broll_"):
     """(daftar_klip, catatan_gagal). Tiap klip: {path, id, durasi, kredit}.
 
     Tidak pernah melempar karena jaringan: alasan kegagalan dikembalikan sebagai teks
@@ -212,7 +230,7 @@ def ambil(queries, jumlah, orientasi, folder, run_id):
     for c in _urutan_variasi(kandidat, run_id):
         if len(klip) >= jumlah:
             break
-        tujuan = os.path.join(folder, f"_broll_{len(klip)}.mp4")
+        tujuan = os.path.join(folder, f"{awalan}{len(klip)}.mp4")
         try:
             _unduh_ke(c["berkas"]["link"], tujuan, MAKS_UNDUH_MB * 1048576)
             if not _sah_video(tujuan):
@@ -227,6 +245,25 @@ def ambil(queries, jumlah, orientasi, folder, run_id):
                      "halaman": c["halaman"]})
     gagal = "; ".join(catatan) if not klip else None
     return klip, gagal
+
+
+MAKS_GAMBAR_MB = 3
+
+
+def pratinjau(query, orientasi, tujuan):
+    """Gambar pratinjau (JPG) klip teratas untuk `query` -- untuk storyboard draf, tanpa
+    mengunduh videonya. Return (path, None) atau (None, alasan). Tidak pernah melempar."""
+    try:
+        kandidat = [c for c in cari(query, orientasi, per_page=5) if c.get("gambar")]
+    except Exception as e:
+        return None, f"pencarian gagal ({type(e).__name__})"
+    if not kandidat:
+        return None, "tidak ada klip yang cocok"
+    try:
+        _unduh_ke(kandidat[0]["gambar"], tujuan, MAKS_GAMBAR_MB * 1048576)
+        return tujuan, None
+    except Exception as e:
+        return None, f"gambar gagal diunduh ({type(e).__name__})"
 
 
 def susun_urutan(aset_user, klip_broll):
