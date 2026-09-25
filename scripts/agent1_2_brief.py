@@ -269,8 +269,10 @@ MOTION GRAPHIC (elemen penjelas di layar, gaya kartu gelap berpendar) di "motion
 
 BROLL_NOTE = """
 B-ROLL (klip video stok penjelas konteks) di "broll": 0-3 usulan, masing-masing kata kunci
-BAHASA INGGRIS yang konkret dan mudah dicari (mis. "blood donation", "volunteers smiling",
-"hospital hallway"), dan "saat_kata" = kata yang terdengar saat klip itu tampil. Pilih momen
+BAHASA INGGRIS PENDEK (2-3 kata) berupa benda/kegiatan UMUM yang pasti ada di stok video
+(mis. "blood donation", "coding laptop", "crowd event") -- bukan kalimat panjang yang spesifik
+seperti "young people registering blood donation" (hasil stoknya melenceng). "saat_kata" = kata
+yang terdengar saat klip itu tampil. Pilih momen
 yang lebih jelas dengan gambar pendukung; kosongkan [] bila bahan user sudah cukup jelas."""
 
 MOTION_NOTE_TANPA_NARASI = """

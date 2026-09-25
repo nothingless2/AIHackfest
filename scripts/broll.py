@@ -183,6 +183,7 @@ def pilih_berkas(berkas, tinggi_min=720, tinggi_maks=2200):
 
 
 VARIASI_TERATAS = 3
+PERINGKAT_MAKS = 5        # hanya hasil teratas Pexels: ekor daftar terukur tak relevan (25 Sep)
 # Kata yang terlalu umum untuk membuktikan relevansi (ada di hampir semua judul klip).
 KATA_UMUM = {"a", "an", "the", "of", "in", "on", "at", "with", "and", "for", "to", "by", "from",
              "people", "person", "man", "woman", "men", "women", "young", "old", "group", "close",
@@ -197,8 +198,9 @@ def _kata_kunci(teks):
 
 def relevan(query, kandidat):
     """Judul klip (slug halaman Pexels) berbagi minimal satu kata bermakna dengan kata kunci.
-    Terukur 25 Sep: 'young people registering blood donation' -> klip 'people-holding-dog',
-    'blood donation process' -> 'test-tubes-in-a-machine' -- lebih baik tanpa B-roll."""
+    Dipakai sebagai PREFERENSI urutan, bukan syarat: Pexels mencari secara semantik dan judulnya
+    memakai sinonim ('command line terminal' -> 'coding-on-screen'); syarat keras terukur
+    menghabisi 8 dari 10 kata kunci nyata (0 klip)."""
     kunci = _kata_kunci(query)
     if not kunci:              # kata kunci tanpa kata bermakna: tidak bisa dinilai, tidak ditolak
         return True
@@ -215,7 +217,11 @@ def _urutan_variasi(per_query, run_id):
     h = int(hashlib.sha1(str(run_id).encode()).hexdigest(), 16)
     urut = []
     for daftar in per_query:
-        n = min(VARIASI_TERATAS, len(daftar))
+        # Variasi hanya di antara kandidat teratas yang relevansinya SAMA dengan yang pertama:
+        # klip yang judulnya cocok tidak boleh terputar ke belakang oleh variasi antar run.
+        n = 0
+        while n < min(VARIASI_TERATAS, len(daftar)) and daftar[n].get("_relevan") == daftar[0].get("_relevan"):
+            n += 1
         g = h % n if n else 0
         urut.append(daftar[:n][g:] + daftar[:n][:g] + daftar[n:])
     hasil, r = [], 0
@@ -246,17 +252,13 @@ def ambil(queries, jumlah, orientasi, folder, run_id, awalan="_broll_", saring=T
     per_query, terlihat, catatan = [], set(), []
     for q in queries:
         try:
-            daftar, tak_relevan = [], 0
-            for c in cari(q, orientasi):
-                if c["id"] in terlihat:
-                    continue
-                if saring and not relevan(q, c):
-                    tak_relevan += 1
-                    continue
-                terlihat.add(c["id"])
-                daftar.append(c)
-            if not daftar and tak_relevan:
-                catatan.append(f"'{q}': {tak_relevan} klip ditemukan tapi tidak ada yang relevan")
+            daftar = [c for c in cari(q, orientasi) if c["id"] not in terlihat][:PERINGKAT_MAKS]
+            if saring:
+                # Yang judulnya berbagi kata dengan kata kunci lebih dulu (urutan stabil).
+                for c in daftar:
+                    c["_relevan"] = relevan(q, c)
+                daftar.sort(key=lambda c: not c["_relevan"])
+            terlihat.update(c["id"] for c in daftar)
             per_query.append(daftar)
         except urllib.error.HTTPError as e:
             if e.code in (401, 403):
@@ -297,7 +299,8 @@ def pratinjau(query, orientasi, tujuan):
     """Gambar pratinjau (JPG) klip teratas untuk `query` -- untuk storyboard draf, tanpa
     mengunduh videonya. Return (path, None) atau (None, alasan). Tidak pernah melempar."""
     try:
-        kandidat = [c for c in cari(query, orientasi, per_page=5) if c.get("gambar") and relevan(query, c)]
+        kandidat = sorted((c for c in cari(query, orientasi, per_page=5) if c.get("gambar")),
+                          key=lambda c: not relevan(query, c))
     except Exception as e:
         return None, f"pencarian gagal ({type(e).__name__})"
     if not kandidat:

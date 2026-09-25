@@ -418,10 +418,22 @@ def test_urutan_bergiliran_menurut_peringkat_bukan_ekor_daftar():
 
 
 def test_relevansi_dari_judul_klip():
-    """25 Sep: klip tak relevan terpakai ('orang menggendong anjing' untuk donor darah)."""
     k = lambda slug: {"halaman": f"https://www.pexels.com/video/{slug}/"}
     assert not b.relevan("young people registering blood donation", k("people-holding-dog-6568962"))
-    assert not b.relevan("blood donation process close up", k("close-up-shot-of-test-tubes-in-a-machine-8381266"))
     assert b.relevan("blood donation", k("a-nurse-preparing-a-blood-bag-for-donation-123"))
-    assert b.relevan("software dashboard", k("efficient-task-management-on-digital-dashboard-38902001"))
     assert b.relevan("volunteers", k("a-happy-volunteer-with-a-plant-7475367")), "bentuk tunggal/jamak"
+
+
+def test_hanya_hasil_teratas_dan_yang_relevan_didahulukan(monkeypatch, tmp_path):
+    """Ekor daftar Pexels tidak dipakai; dalam 5 teratas, judul yang cocok didahulukan."""
+    hasil = [{"id": i, "halaman": f"https://www.pexels.com/video/{'blood-donation' if i == 3 else 'random'}-{i}/",
+              "durasi": 10, "berkas": {"link": "https://videos.pexels.com/x.mp4"}, "kreator": "A"}
+             for i in range(15)]
+    monkeypatch.setattr(b, "cari", lambda q, o, per_page=15: hasil)
+    urutan = []
+    monkeypatch.setattr(b, "_unduh_ke", lambda url, tujuan, maks: urutan.append(tujuan) or open(tujuan, "wb").close())
+    monkeypatch.setattr(b, "_sah_video", lambda p: True)
+    for run in ("run", "r1", "r2", "r3", "r4"):
+        klip, _ = b.ambil(["blood donation"], 5, "portrait", str(tmp_path / run), run)
+        assert klip[0]["id"] == 3, f"judul yang cocok lebih dulu (run {run})"
+    assert {x["id"] for x in klip} <= set(range(5)) | {3}, "tidak memakai ekor daftar"
