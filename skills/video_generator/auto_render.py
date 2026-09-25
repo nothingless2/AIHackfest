@@ -1499,6 +1499,24 @@ def siapkan_motion(data, durasi, kata_waktu, ada_teks_statis, folder, naskah=Non
 
 
 CUTAWAY_PUDAR = 0.15      # detik pudar masuk/keluar klip cutaway
+CUTAWAY_KANDIDAT = 2      # klip per kata kunci; yang gambarnya datar dilewati
+DETAIL_MIN = 12.0         # simpangan baku luma (0-255) rata-rata; layar polos ±2-5
+
+
+def detail_klip(path, lama, titik=3):
+    """Rata-rata simpangan baku luma pada beberapa titik di rentang [0, lama). Klip stok bisa
+    berupa layar warna polos (terukur 25 Sep: 'error message' -> animasi teks di latar merah,
+    tampil merah polos saat cutaway)."""
+    import numpy as np
+    nilai = []
+    for k in range(titik):
+        t = lama * (k + 0.5) / titik
+        r = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{t:.2f}", "-i", path, "-frames:v", "1",
+                            "-vf", "scale=64:64,format=gray", "-f", "rawvideo", "-"],
+                           capture_output=True, timeout=60)
+        if len(r.stdout) >= 4096:
+            nilai.append(float(np.frombuffer(r.stdout[:4096], np.uint8).std()))
+    return sum(nilai) / len(nilai) if nilai else 0.0
 
 
 def _usulan_broll(data, kata_waktu, durasi, sibuk=()):
@@ -1550,12 +1568,17 @@ def siapkan_cutaway(data, kata_waktu, durasi, sibuk, folder):
     kerja, dipakai, gagal = [], [], list(catatan)
     orientasi = _broll.orientasi_untuk(TARGET_W, TARGET_H)
     for k, c in enumerate(jadwal):
-        klip, alasan = _broll.ambil([c["query"]], 1, orientasi, folder,
+        klip, alasan = _broll.ambil([c["query"]], CUTAWAY_KANDIDAT, orientasi, folder,
                                     os.getenv("CONTENT_FACTORY_RUN_ID") or "", awalan=f"_broll_c{k}_")
+        lama = c["selesai"] - c["mulai"]
+        layak = [x for x in klip if detail_klip(x["path"], min(lama, float(x.get("durasi") or lama))) >= DETAIL_MIN]
+        if klip and not layak:
+            gagal.append(f"'{c['query']}': klip stok hanya berisi layar polos")
+            continue
+        klip = layak
         if not klip:
             gagal.append(f"'{c['query']}': {alasan}")
             continue
-        lama = c["selesai"] - c["mulai"]
         seg = os.path.join(folder, f"_broll_c{k}_seg.mp4")
         try:
             build_segment(klip[0]["path"], lama, seg, keep_audio=False,

@@ -219,6 +219,12 @@ def susun_pesan(d):
             baris.append("B-roll (bila diminta): " + " · ".join(
                 f"'{b['query']}'" + (f" saat \"{b['saat_kata']}\"" if b.get("saat_kata") else "")
                 for b in broll))
+        # Huruf non-Latin juga bisa bocor ke judul/caption (terukur 25 Sep: caption "... yang
+        # 报错"), bukan hanya naskah: tampilkan supaya user bisa mengoreksi sebelum render.
+        from naskah import HURUF_ASING
+        asing = HURUF_ASING.findall(" ".join(str(v.get(k) or "") for k in ("judul", "deskripsi")))
+        if asing:
+            baris.append(f"Catatan pemeriksa: huruf asing \"{' '.join(asing[:3])}\" di judul/caption")
         st = v.get("naskah_status") or {}
         sisa = st.get("sisa") if st.get("ditulis_ulang") else st.get("masalah")
         if ai and sisa:

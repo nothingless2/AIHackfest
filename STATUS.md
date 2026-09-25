@@ -589,3 +589,13 @@ pro 23,6 dtk. `EDIT_MODEL` berbayar dijadikan komentar sehingga memakai model gr
 - **Kendala 25 Sep**: key OpenRouter (dipakai Hermes & pipeline) **kedaluwarsa** ("API key
   expired"). Draf baru dan bot Telegram berhenti sampai key diganti. Uji nyata render memakai brief
   draf yang sudah ada.
+- **Uji nyata ujung ke ujung dengan key baru (25 Sep sore)**:
+  - Draf 122 dtk. Pemahaman 6 klip akurat; B-roll diusulkan 3 per varian; storyboard A/B
+    terkirim.
+  - Render 188 dtk: 2 cutaway Pexels, 4 elemen grafik, dan musik. Pemeriksa mutu lolos (-24,2 →
+    -17,1 LUFS).
+  - Temuan 1: klip stok 'error message' tampil sebagai layar merah polos. Klip dengan detail
+    luma < 12 kini ditolak (klip merah terukur 8,2; kandidat lain 42,9 dipakai), dari 2 kandidat
+    per kata kunci.
+  - Temuan 2: huruf Mandarin "报错" bocor ke caption varian B. Pesan draf kini menandai huruf
+    asing di judul/caption juga.

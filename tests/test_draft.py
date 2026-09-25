@@ -434,3 +434,10 @@ def test_pesan_draf_mode_suara_asli_menampilkan_ucapan_broll_dan_grafik():
     assert "'blood donation' saat \"donor\"" in pesan
     assert 'sorot "Aula"' in pesan and "Pizza" not in pesan, "jangkar dicek terhadap UCAPAN"
     assert "Teks di layar" not in pesan
+
+
+def test_huruf_asing_di_caption_ditandai():
+    d = {"draft_id": "0123456789ab", "bahan": ["a"], "brief": {"audio_mode": "original"},
+         "varian": [{**VARIAN[0], "deskripsi": "OpenClaw yang报错 lalu Hermes"}, VARIAN[1]]}
+    pesan = dn.susun_pesan(d)
+    assert pesan.count("huruf asing") == 1 and "报错" in pesan

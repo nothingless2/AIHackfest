@@ -109,16 +109,18 @@ def render(monkeypatch, tmp_path):
     monkeypatch.setattr(ar, "TRIM_SILENCE", False)
     monkeypatch.setenv("CONTENT_FACTORY_MUSIC", "off")
     video = _video_bersuara(tmp_path / "v.mp4")
-    merah = tmp_path / "merah.mp4"
+    # Klip stok palsu: MERAH bertekstur (klip polos kini ditolak sebagai "layar polos").
+    bertekstur = tmp_path / "merah.mp4"
     subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i",
-                    "color=c=red:size=360x640:rate=24:duration=6", "-c:v", "libx264", "-pix_fmt",
-                    "yuv420p", str(merah)], check=True, capture_output=True)
+                    "color=c=red:size=360x640:rate=24:duration=6", "-vf",
+                    "drawgrid=w=30:h=30:t=3:c=black", "-c:v", "libx264", "-pix_fmt",
+                    "yuv420p", str(bertekstur)], check=True, capture_output=True)
     diambil = []
 
     def palsu(queries, jumlah, orientasi, folder, run_id, awalan="_broll_"):
         import shutil
         tujuan = f"{folder}/{awalan}0.mp4"
-        shutil.copy2(merah, tujuan)
+        shutil.copy2(bertekstur, tujuan)
         diambil.append(queries)
         return [{"path": tujuan, "id": 1, "durasi": 6, "kredit": "Video oleh X di Pexels",
                  "halaman": "https://pexels.com/x"}], None
@@ -207,3 +209,12 @@ def test_prompt_mewajibkan_usulan_broll_bila_user_meminta():
     diminta = ab.build_prompt(["a.mp4"], {}, jumlah_gambar=1, mode_audio="original",
                               transkrip={"a.mp4": "halo"}, broll_diminta=True)
     assert "MEMINTA B-roll" in diminta and "MEMINTA B-roll" not in biasa
+
+
+def test_klip_stok_polos_ditolak(tmp_path):
+    polos, tekstur = tmp_path / "p.mp4", tmp_path / "t.mp4"
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=red:size=200x356:duration=4",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", str(polos)], check=True, capture_output=True)
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=200x356:duration=4",
+                    "-c:v", "libx264", "-pix_fmt", "yuv420p", str(tekstur)], check=True, capture_output=True)
+    assert ar.detail_klip(str(polos), 3.0) < ar.DETAIL_MIN <= ar.detail_klip(str(tekstur), 3.0)
