@@ -68,6 +68,27 @@ lain (mis. "buatkan video animasi dari teks" — itu bukan tool ini).
 - Proses render makan waktu 2-5 menit — SELALU jalankan sebagai proses latar
   belakang (langkah 3 dan 5), jangan sinkron.
 
+## Status kuota/error: cek SEKARANG, jangan dari ingatan
+
+**JANGAN PERNAH** bilang "kuota habis", "model error", atau "coba lagi besok" berdasarkan
+riwayat obrolan atau error yang pernah kamu lihat sebelumnya. Kuota direset tiap hari, key bisa
+diganti, dan model yang penuh sering pulih dalam hitungan menit. (26 Sep: bot dua kali menolak
+membuat konten dengan error 24 Sep dari key lama — padahal kuota key baru terpakai 1 dari 50.)
+
+- Kalau user bertanya "bisa buat konten sekarang?" atau semacamnya, jalankan:
+  ```bash
+  cd /root/AIHackfest && python3 scripts/cek_kuota.py
+  ```
+  Tidak memakai kuota. `bisa_jalan: true` → jawab bisa, lalu lanjut Langkah 1. `bisa_jalan:
+  false` → sebut `kuota_gratis` dan `reset` apa adanya. `ok: false` → pemeriksaannya yang gagal
+  (`alasan`), BUKAN berarti kuota habis: tetap coba Langkah 1.
+- Error hanya boleh dilaporkan dari hasil perintah yang BARU SAJA kamu jalankan di giliran ini,
+  dikutip apa adanya dengan jamnya. Waktu reset dari header harus diubah ke tanggal & jam WIB;
+  kalau sudah lewat, jangan disebut "besok".
+- "Model percakapan jalan tapi pipeline tidak" bukan kesimpulan yang boleh ditarik tanpa
+  menjalankan pipeline. Pipeline punya rantai model cadangan sendiri; kalau model yang bisa melihat
+  gambar sedang penuh, draf tetap jadi dan menyebutnya sendiri.
+
 ## Langkah 1 — Periksa bahan (cepat, sinkron)
 
 **Album Telegram tiba sebagai BEBERAPA pesan terpisah.** Kumpulkan path dari SEMUA pesan
