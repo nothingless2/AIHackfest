@@ -15,7 +15,9 @@ from common import (
     DRAFT_THUMB_PATH,
     DRAFT_VIDEO_PATH,
     PROJECT_ROOT,
+    RENDER_STATUS_PATH,
     brief_path_for_run,
+    status_path_for_run,
     draft_thumb_path_for_run,
     draft_video_path_for_run,
 )
@@ -201,6 +203,8 @@ def run_core_stages_locked(
                 # video, supaya tidak pernah tertimpa run berikutnya.
                 if salin_video and os.path.exists(DRAFT_THUMB_PATH):
                     shutil.copy2(DRAFT_THUMB_PATH, draft_thumb_path_for_run(run_id))
+                if salin_video and os.path.exists(RENDER_STATUS_PATH):
+                    shutil.copy2(RENDER_STATUS_PATH, status_path_for_run(run_id))
                 status = "SUCCESS"
                 return status, None
             status = "FAILED"

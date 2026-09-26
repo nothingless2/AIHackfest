@@ -37,17 +37,20 @@ from common import (
     RAW_DIR,
     STATE_DIR,
     read_json,
+    status_path_for_run,
 )
 from cost_estimate import ringkasan_biaya
 from duration import requested_duration
 import draf_naskah
 from draf_naskah import DrafError
 from inspect_media import cek_izin, sidik_bahan
-from music import MusicError, music_wanted, pick_track, requested_mood
+from music import MusicError, list_tracks, music_wanted, pick_track, requested_mood
 from orchestrator import (
     DRAFT_STAGES, RENDER_STAGES, install_signal_handlers, run_core_stages_locked,
 )
 from retention import sweep_old_run_files
+import revisi
+from revisi import RevisiError
 from run_lock import FileLockBusyError, generate_run_id, sanitize_run_id
 from run_log import log_event
 from style import (
@@ -153,6 +156,12 @@ def _parser():
     p.add_argument("--varian", default=None, help="Varian draf pilihan user: A atau B.")
     p.add_argument("--naskah", default=None,
                    help="Naskah LENGKAP hasil ubahan user (menggantikan naskah varian).")
+    p.add_argument("--revisi", default=None, metavar="RUN_ID",
+                   help="Revisi cepat video yang sudah jadi (run_id dari hasil render): render ulang "
+                        "tanpa LLM, hanya flag yang ditulis yang berubah.")
+    p.add_argument("--hapus-broll", default=None, help="Revisi: nomor B-roll yang dihapus, mis. '2' atau '1,3'.")
+    p.add_argument("--ganti-broll", default=None, help="Revisi: nomor B-roll yang diganti klip lain.")
+    p.add_argument("--ganti-musik", action="store_true", help="Revisi: pakai lagu lain dari pustaka.")
     return p
 
 
@@ -166,7 +175,19 @@ DIKUNCI_DRAF = {"audio_mode", "duration_seconds", "static_text", "edit_mode", "u
                 "jumlah_short"}
 # Tidak relevan saat render dari draf: gerbang inspect sudah dilewati saat draf dibuat.
 DIABAIKAN_DRAF = {"media_paths", "inspect_id", "user_answered", "require_inspect", "chat_id",
-                  "draft", "draft_id", "varian", "naskah", "short", "help"}
+                  "draft", "draft_id", "varian", "naskah", "short", "help",
+                  "revisi", "hapus_broll", "ganti_broll", "ganti_musik"}
+
+# Label perubahan gaya yang dilaporkan ke user saat revisi (flag -> nama yang dimengerti user).
+LABEL_REVISI = {"music": "musik", "music_mood": "suasana musik", "music_file": "lagu kirimanmu",
+                "subtitle_style": "gaya subtitle", "color_filter": "filter warna",
+                "text_font": "font teks tulisan", "text_position": "posisi teks tulisan",
+                "text_animation": "animasi teks tulisan", "motion": "grafik penjelas",
+                "aspect_ratio": "rasio", "fit_mode": "mode bingkai", "voice": "suara narasi",
+                "voice_persona": "persona suara", "speed_factor": "kecepatan",
+                "visual_cut": "buang bagian goyang", "montase": "montase ketukan",
+                "broll": "B-roll", "broll_query": "kata kunci B-roll", "broll_count": "jumlah B-roll",
+                "auto_zoom": "zoom otomatis"}
 
 
 def _flag_eksplisit(parser, argv):
@@ -317,10 +338,31 @@ def _selesai_draf(run_id, chat_id, run_prefix, nama_bahan, args, media_paths):
     return 0
 
 
+def _status_run(run_id):
+    """render_status milik run ini (salinan per run dari dalam lock), bukan berkas global yang
+    bisa sudah ditimpa render berikutnya."""
+    return (read_json(status_path_for_run(run_id), None)
+            or read_json(os.path.join(STATE_DIR, "render_status.json"), {}) or {})
+
+
+def _catat_revisi(run_id, chat_id, run_prefix, nama_bahan, args, revisi_dari=None):
+    """Simpan bahan revisi cepat video ini. Gagal menyimpan TIDAK menggagalkan video yang sudah
+    jadi, tapi dilaporkan: revisi berikutnya akan ditolak dengan alasan yang jelas."""
+    try:
+        revisi.simpan(run_id, chat_id=chat_id, prefix=run_prefix, bahan=nama_bahan,
+                      args=_args_draf(args),
+                      brief=read_json(brief_path_for_run(run_id), {}) or {},
+                      status=_status_run(run_id), revisi_dari=revisi_dari)
+        return None
+    except Exception as e:
+        log_error("simpan catatan revisi", e)
+        return f"catatan revisi gagal disimpan ({type(e).__name__}); revisi cepat video ini tidak bisa"
+
+
 def _hasil_render(run_id, pesan_durasi):
     """JSON hasil satu render (dibaca dari berkas hasil per run)."""
     brief = read_json(brief_path_for_run(run_id), {}) or {}
-    status = read_json(os.path.join(STATE_DIR, "render_status.json"), {}) or {}
+    status = _status_run(run_id)
     mood = status.get("music_mood")
     return {
         "ok": True,
@@ -353,7 +395,7 @@ def _hasil_render(run_id, pesan_durasi):
     }
 
 
-def _render_beberapa_short(run_id, chat_id, draf, target, pesan_durasi, gagal):
+def _render_beberapa_short(run_id, chat_id, draf, target, pesan_durasi, gagal, args):
     """Render beberapa short dari satu draf, berurutan (satu lock per short). Draf diklaim
     sekali (short pertama); short yang gagal tidak menggagalkan yang lain dan dilaporkan.
     Semua gagal -> klaim dilepas (draf boleh dicoba lagi)."""
@@ -384,6 +426,7 @@ def _render_beberapa_short(run_id, chat_id, draf, target, pesan_durasi, gagal):
             continue
         item = _hasil_render(rid, pesan_durasi)
         item["short"] = huruf
+        item["revisi_gagal"] = _catat_revisi(rid, chat_id, draf["prefix"], draf["bahan"], args)
         hasil.append(item)
         log_event("delivered", rid, chat_id=chat_id)
     if not hasil:
@@ -421,7 +464,47 @@ def main(argv=None):
     # hanya user yang di-approve admin yang bisa memanggil terminal.
 
     draf = None
-    if args.draft_id:
+    rec = None
+    perubahan = []
+    if args.revisi:
+        if args.draft or args.draft_id or args.media_paths or args.short or args.varian:
+            return gagal("argumen_invalid", "--revisi tidak boleh bersama --draft/--draft-id/"
+                         "--media-path/--short/--varian.")
+        try:
+            rec = revisi.muat(args.revisi, chat_id or "")
+            eksplisit = _flag_eksplisit(parser, argv)
+            args = _gabung_args_draf(parser, args, argv, rec.get("args") or {})
+            if args.ganti_musik:
+                if "music_file" not in eksplisit:
+                    args.music_file = None          # lagu kiriman lama ikut diganti
+                sisa = [t for t in list_tracks() if os.path.basename(t) != (rec["status"].get("music") or "")]
+                if not args.music_file and not sisa:
+                    raise RevisiError("musik_tidak_ada_pilihan",
+                                      "Pustaka musik belum punya lagu lain. Kirim lagu yang kamu mau "
+                                      "(berkas audio), nanti aku pasang.")
+                args.music = "on"
+            brief_pilihan, perubahan = revisi.brief_revisi(
+                rec, hapus_broll=args.hapus_broll, ganti_broll=args.ganti_broll, naskah=args.naskah,
+                broll_bebas="broll_count" in eksplisit)
+        except (RevisiError, DrafError) as e:
+            return gagal(e.kode, str(e))
+        perubahan = [f"{LABEL_REVISI[d]}: " + (os.path.basename(str(getattr(args, d)))
+                                                if d == "music_file" else str(getattr(args, d)))
+                     for d in sorted(eksplisit) if d in LABEL_REVISI] + perubahan
+        if args.ganti_musik:
+            perubahan.append("musik diganti")
+            os.environ["MUSIC_TRACK_HINDARI"] = rec["status"].get("music") or ""
+        elif not ({"music_mood", "music_file"} & eksplisit) and rec["status"].get("music"):
+            # Lagu lama dikunci: run_id baru tidak boleh memilih lagu lain diam-diam.
+            os.environ["MUSIC_TRACK_TETAP"] = rec["status"]["music"]
+        if not perubahan:
+            return gagal("revisi_kosong", "Tidak ada perubahan yang diminta untuk revisi ini.")
+        run_prefix, nama_bahan = rec["prefix"], rec["bahan"]
+        if any(not os.path.isfile(os.path.join(RAW_DIR, n)) for n in nama_bahan):
+            return gagal("revisi_bahan_hilang", "Bahan video itu sudah tidak ada di server. Kirim ulang bahannya.")
+    elif args.hapus_broll or args.ganti_broll or args.ganti_musik:
+        return gagal("argumen_invalid", "--hapus-broll/--ganti-broll/--ganti-musik hanya bersama --revisi.")
+    elif args.draft_id:
         if args.draft:
             return gagal("argumen_invalid", "--draft dan --draft-id tidak boleh bersamaan.")
         try:
@@ -526,11 +609,15 @@ def main(argv=None):
         os.environ["CONTENT_FACTORY_DURATION"] = str(target_durasi)
 
     if draf and len(target) > 1:
-        return _render_beberapa_short(run_id, chat_id, draf, target, pesan_durasi, gagal)
+        return _render_beberapa_short(run_id, chat_id, draf, target, pesan_durasi, gagal, args)
 
     opsi = {}
     diklaim = []
-    if draf:
+    if rec:
+        def sebelum_tahap():
+            write_json(BRIEF_PATH, {**brief_pilihan, "brief_id": f"brief_revisi_{run_id}"})
+        opsi = {"stages": RENDER_STAGES, "sebelum_tahap": sebelum_tahap}
+    elif draf:
         def sebelum_tahap():
             # DI DALAM lock: klaim atomik dulu (dari dua render draf yang sama hanya satu
             # lolos), baru brief pilihan user ditulis ke path kerja render.
@@ -567,6 +654,15 @@ def main(argv=None):
         return _selesai_draf(run_id, chat_id, run_prefix, nama_bahan, args, media_paths)
 
     hasil = _hasil_render(run_id, pesan_durasi)
+    hasil["revisi_gagal"] = _catat_revisi(run_id, chat_id, run_prefix, nama_bahan, args,
+                                          revisi_dari=args.revisi)
+    if rec:
+        hasil["revisi_dari"] = args.revisi
+        hasil["perubahan"] = perubahan
+        lama, baru = rec["status"].get("music"), (_status_run(run_id).get("music"))
+        if args.ganti_musik and lama and baru == lama:
+            hasil["perubahan"] = [p for p in perubahan if p != "musik diganti"] + [
+                "musik TIDAK berubah (tidak ada lagu lain yang cocok)"]
     print(json.dumps(hasil, ensure_ascii=False))
     log_event("delivered", run_id, chat_id=chat_id)
     return 0

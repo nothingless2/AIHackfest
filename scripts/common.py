@@ -61,6 +61,13 @@ def brief_path_for_run(run_id):
         return BRIEF_PATH
     return os.path.join(STATE_DIR, f"creative_brief_{run_id}.json")
 
+
+def status_path_for_run(run_id):
+    """Salinan render_status.json milik satu run (disalin DI DALAM lock): render berikutnya
+    menimpa berkas global, sedangkan revisi cepat butuh klip B-roll & lagu yang benar-benar
+    dipakai run ini."""
+    return os.path.join(STATE_DIR, f"render_status_{run_id}.json")
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # Label chat run ini untuk LOG (CONTENT_FACTORY_CHAT_ID), atau None. Bukan tujuan kirim:

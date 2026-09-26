@@ -103,6 +103,11 @@ def sweep_old_run_files(max_age_days=None):
         glob.glob(os.path.join(DRAFTS_DIR, "video_*.mp4"))
         + glob.glob(os.path.join(DRAFTS_DIR, "video_*.jpg"))
         + glob.glob(os.path.join(STATE_DIR, "creative_brief_*.json"))
+        + glob.glob(os.path.join(STATE_DIR, "render_status_*.json"))
+        # Catatan revisi cepat (scripts/revisi.py): umurnya mengikuti video yang direvisi.
+        + glob.glob(os.path.join(STATE_DIR, "revisi", "*.json"))
+        # Cache voice-over (auto_render.generate_voice): dipakai ulang oleh revisi cepat.
+        + glob.glob(os.path.join(STATE_DIR, "tts_cache", "*"))
         # Status pemeriksaan bahan (scripts/inspect_media.py). Valid hanya 24 jam
         # (INSPECT_TTL_HOURS); sisanya sampah -- dan memuat cuplikan permintaan user.
         + glob.glob(os.path.join(STATE_DIR, "inspect", "*.json"))

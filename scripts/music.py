@@ -127,6 +127,15 @@ def pick_track(mood=None, folder=None, run_id=""):
                 f"Tidak ada musik bernuansa {mood!r} di {folder or MUSIC_DIR}. "
                 f"Tersedia: {', '.join(os.path.basename(t) for t in tracks[:8])}")
         tracks = cocok
+    # Revisi cepat: lagu render sebelumnya dipertahankan (MUSIC_TRACK_TETAP), atau dihindari saat
+    # user minta ganti lagu (MUSIC_TRACK_HINDARI) -- tanpa ini run_id baru memilih lagu acak lain.
+    tetap = (os.getenv("MUSIC_TRACK_TETAP") or "").strip()
+    sama = [t for t in tracks if os.path.basename(t) == tetap]
+    if sama:
+        return sama[0]
+    hindari = (os.getenv("MUSIC_TRACK_HINDARI") or "").strip()
+    if hindari and len(tracks) > 1:
+        tracks = [t for t in tracks if os.path.basename(t) != hindari] or tracks
     # Deterministik per run: run yang sama selalu memilih track yang sama
     # (bisa diulang kalau hasilnya perlu diperiksa), run berbeda bervariasi.
     return tracks[sum(ord(c) for c in str(run_id)) % len(tracks)]

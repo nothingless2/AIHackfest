@@ -150,25 +150,31 @@ def brief_terpilih(d, huruf, naskah=None):
             brief[k] = v[k]
     info = {"id": d["draft_id"], "varian": HURUF[i], "diedit": False}
     if naskah is not None:
-        teks = " ".join(str(naskah).split())
-        if not teks:
-            raise DrafError("naskah_kosong", "Naskah ubahan kosong.")
-        if len(teks) > MAKS_NASKAH_USER:
-            raise DrafError("naskah_terlalu_panjang",
-                            f"Naskah ubahan lebih dari {MAKS_NASKAH_USER} karakter.")
-        brief["full_voice_over"] = teks
-        brief["voice_over_spoken"] = teks
+        brief = pakai_naskah_user(brief, naskah)
         info["diedit"] = True
-        catatan = periksa(teks)
-        kurang = bahan_kurang(teks, d["brief"])
-        if kurang:
-            catatan.append(f"naskah ±{kurang[0]:.0f} dtk, bahan video layak ±{kurang[1]:.0f} dtk: "
-                           "sebagian gambar akan diperlambat atau dipakai ulang")
-        brief["naskah_status"] = {"sumber": "user", "catatan": catatan}
-        # Naskah user dipakai APA ADANYA: koreksi durasi otomatis saat render (yang menulis
-        # ulang naskah bila meleset dari target) tidak boleh menyentuhnya.
-        brief["target_duration"] = None
     brief["draf"] = info
+    return brief
+
+
+def pakai_naskah_user(brief, naskah):
+    """Naskah ubahan user dipasang ke brief (draf dan revisi cepat). Pemeriksa gaya hanya memberi
+    catatan, tidak pernah menimpa kalimat user."""
+    teks = " ".join(str(naskah).split())
+    if not teks:
+        raise DrafError("naskah_kosong", "Naskah ubahan kosong.")
+    if len(teks) > MAKS_NASKAH_USER:
+        raise DrafError("naskah_terlalu_panjang",
+                        f"Naskah ubahan lebih dari {MAKS_NASKAH_USER} karakter.")
+    brief = {**brief, "full_voice_over": teks, "voice_over_spoken": teks}
+    catatan = periksa(teks)
+    kurang = bahan_kurang(teks, brief)
+    if kurang:
+        catatan.append(f"naskah ±{kurang[0]:.0f} dtk, bahan video layak ±{kurang[1]:.0f} dtk: "
+                       "sebagian gambar akan diperlambat atau dipakai ulang")
+    brief["naskah_status"] = {"sumber": "user", "catatan": catatan}
+    # Naskah user dipakai APA ADANYA: koreksi durasi otomatis saat render (yang menulis
+    # ulang naskah bila meleset dari target) tidak boleh menyentuhnya.
+    brief["target_duration"] = None
     return brief
 
 

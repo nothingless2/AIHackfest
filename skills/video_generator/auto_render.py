@@ -432,7 +432,55 @@ async def _voice_elevenlabs(text, output_audio):
                label="voice-over ElevenLabs")
 
 
+TTS_CACHE_DIR = os.path.join(STATE_DIR, "tts_cache")
+
+
+def _kunci_tts(text):
+    """Sidik SEMUA yang menentukan bunyi narasi: mesin, model, suara, gaya, kecepatan, teks. Env
+    TTS/ElevenLabs/edge ikut (kecuali kunci API) supaya pengaturan baru tidak memakai cache lama."""
+    import hashlib
+    env = sorted((k, v) for k, v in os.environ.items()
+                 if k.startswith(("TTS_", "ELEVENLABS_", "EDGE_TTS_")) and "KEY" not in k)
+    bahan = [TTS_PROVIDER, TTS_MODEL, TTS_VOICE, TTS_INSTRUCTIONS, EDGE_VOICE, EDGE_RATE,
+             ELEVENLABS_MODEL, list(suara_elevenlabs()), env, text]
+    return hashlib.sha1(json.dumps(bahan, ensure_ascii=False, default=str).encode()).hexdigest()
+
+
 async def generate_voice(text, output_audio):
+    """Voice-over + cache. Asal (26 Sep, revisi cepat): narasi yang SAMA dibuat ulang ElevenLabs di
+    tiap revisi -- kuota karakter terpakai lagi dan tempo bergeser, jadi teks & grafik yang
+    dijangkarkan ke kata ikut bergeser padahal user tidak meminta apa pun soal suara. Hasil mesin
+    CADANGAN tidak disimpan: revisi tidak boleh terkunci ke suara darurat."""
+    pakai_cache = (os.getenv("TTS_CACHE") or "1").strip().lower() not in ("0", "off", "mati")
+    if pakai_cache:
+        kunci = _kunci_tts(text)
+        dasar = os.path.join(TTS_CACHE_DIR, kunci)
+        try:
+            with open(dasar + ".json", encoding="utf-8") as f:
+                simpan = json.load(f)
+            shutil.copyfile(dasar + ".mp3", output_audio)
+            TTS_KATA[:] = simpan.get("kata") or []
+            TTS_CATATAN.clear()
+            TTS_CATATAN.update(simpan.get("catatan") or {}, dari_cache=True)
+            print("🎙️ Voice-over dipakai ulang dari render sebelumnya (naskah & suara sama).")
+            return
+        except (OSError, ValueError):
+            pass
+    await _generate_voice_langsung(text, output_audio)
+    cadangan = TTS_CATATAN.get("cadangan") or (
+        TTS_PROVIDER in ("elevenlabs", "openai") and TTS_CATATAN.get("mesin") == "edge-tts")
+    if pakai_cache and not cadangan:
+        try:
+            os.makedirs(TTS_CACHE_DIR, exist_ok=True)
+            shutil.copyfile(output_audio, dasar + ".mp3")
+            with open(dasar + ".json.tmp", "w", encoding="utf-8") as f:
+                json.dump({"kata": list(TTS_KATA), "catatan": dict(TTS_CATATAN)}, f, ensure_ascii=False)
+            os.replace(dasar + ".json.tmp", dasar + ".json")      # .json terakhir: tanda lengkap
+        except OSError as e:
+            print(f"[warn] cache voice-over gagal disimpan ({e}); tidak memengaruhi video.")
+
+
+async def _generate_voice_langsung(text, output_audio):
     """Voice-over dgn penyedia yang bisa dipilih.
 
     Kegagalan OpenAI JATUH ke edge-tts, bukan menggagalkan render: kredit habis
@@ -1567,12 +1615,22 @@ def siapkan_cutaway(data, kata_waktu, durasi, sibuk, folder):
         return [], {"dipakai": [], "gagal": "tidak ada ucapan bertimestamp untuk menjangkarkan B-roll"}
     jadwal, catatan = _mp.jadwal_broll(_usulan_broll(data, kata_waktu, durasi, sibuk), kata_waktu,
                                        durasi, sibuk=sibuk)
+    # Revisi cepat: cutaway yang dihapus user dibuang dari jadwal SETELAH dijadwalkan (jadwal
+    # lainnya tetap persis sama), yang dipertahankan memakai klip yang sama.
+    rev = data.get("revisi") or {}
+    kunci = lambda c: (c.get("query"), c.get("saat_kata"))    # noqa: E731
+    dihapus = {kunci(c) for c in rev.get("broll_hapus") or []}
+    if dihapus:
+        jadwal = [c for c in jadwal if kunci(c) not in dihapus]
+    pakai_per = {kunci(c): c["id"] for c in rev.get("broll_pakai") or []}
     kerja, dipakai, gagal = [], [], list(catatan)
     orientasi = _broll.orientasi_untuk(TARGET_W, TARGET_H)
     for k, c in enumerate(jadwal):
         klip, alasan = _broll.ambil([c["query"]], CUTAWAY_KANDIDAT, orientasi, folder,
                                     os.getenv("CONTENT_FACTORY_RUN_ID") or "", awalan=f"_broll_c{k}_",
-                                    saring=not c.get("dari_user"))
+                                    saring=not c.get("dari_user"),
+                                    pakai=[pakai_per[kunci(c)]] if kunci(c) in pakai_per else (),
+                                    tolak=rev.get("broll_tolak") or ())
         lama = c["selesai"] - c["mulai"]
         layak = [x for x in klip if detail_klip(x["path"], min(lama, float(x.get("durasi") or lama))) >= DETAIL_MIN]
         if klip and not layak:
@@ -1600,7 +1658,10 @@ def siapkan_cutaway(data, kata_waktu, durasi, sibuk, folder):
     if dipakai:
         print(f"🎞️ {len(dipakai)} cutaway B-roll: " + ", ".join(
             f"'{d['query']}' @{d['mulai']:.1f}s" for d in dipakai))
-    return kerja, {"dipakai": dipakai, "gagal": "; ".join(gagal) or None, "cara": "cutaway"}
+    info = {"dipakai": dipakai, "gagal": "; ".join(gagal) or None, "cara": "cutaway"}
+    if dihapus and not dipakai and not gagal:
+        info["dihapus"] = True
+    return kerja, info
 
 
 def _motion_gagal(e):
@@ -2092,7 +2153,14 @@ def render_from_agent_script(
         if cfg_broll:
             kuota = _broll.jatah(cfg_broll["jumlah"], len(existing_assets), total_duration,
                                  MIN_CLIP_DURATION)
-            if kuota <= 0:
+            rev = data.get("revisi") or {}
+            if "broll_jumlah" in rev:
+                # Revisi cepat: jumlah klip = sisa klip lama + penggantinya, bukan jatah baru.
+                kuota = min(kuota, int(rev["broll_jumlah"]))
+            if kuota <= 0 and "broll_jumlah" in rev:
+                broll_info = {"dipakai": [], "gagal": None, "dihapus": True}
+                print("🎞️ Semua B-roll dihapus atas permintaan revisi.")
+            elif kuota <= 0:
                 broll_info = {"dipakai": [], "gagal": "durasi terlalu pendek untuk menyisipkan "
                               "B-roll tanpa membuang bahanmu"}
                 print(f"[warn] B-roll dilewati: {broll_info['gagal']}")
@@ -2104,7 +2172,9 @@ def render_from_agent_script(
                     _broll.orientasi_untuk(TARGET_W, TARGET_H), output_dir,
                     os.getenv("CONTENT_FACTORY_RUN_ID") or "",
                     # Usulan BrainIdea (Inggris) disaring relevansi; kata kunci user tidak.
-                    saring=not cfg_broll["queries"] and bool(usul))
+                    saring=not cfg_broll["queries"] and bool(usul),
+                    pakai=[b["id"] for b in rev.get("broll_pakai") or []],
+                    tolak=rev.get("broll_tolak") or ())
                 broll_tmp = [k["path"] for k in klip]
                 broll_info = {"dipakai": [{"id": k["id"], "kredit": k["kredit"],
                                            "halaman": k["halaman"]} for k in klip],
@@ -2322,6 +2392,10 @@ def render_from_agent_script(
         target_duration=target_duration,
         actual_duration=round(total_duration, 2),
         duration_adjusted=durasi_dikoreksi,
+        # Naskah hasil koreksi durasi (LLM) disimpan: revisi cepat memakainya lagi tanpa LLM,
+        # jadi kalimat yang sudah dilihat user tidak berubah diam-diam.
+        naskah_koreksi={k: data.get(k) for k in ("full_voice_over", "voice_over_spoken", "scenes")}
+        if durasi_dikoreksi else None,
         edit_plan_applied=edit_dipakai,
         music=musik_dipakai,
         music_mood=musik_mood,

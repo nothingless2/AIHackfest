@@ -109,6 +109,12 @@ Instruksi agent: `hermes-skill/content-factory/SKILL.md` (salin ke `~/.hermes/sk
 - *Storyboard* 8 panel per varian + contoh suara dikirim bersama draf (`scripts/storyboard.py`).
 - *Pemeriksa mutu* sebelum kirim (`scripts/qa_video.py`): kenyaringan diperbaiki otomatis,
   lalu frame hitam/beku, teks terpotong/tertutup UI TikTok, dan durasi.
+- *Revisi cepat* (`--revisi <run_id>`, `scripts/revisi.py`): render ulang video yang sudah jadi
+  **tanpa LLM** (±80 dtk), mis. `--hapus-broll 2`, `--ganti-broll 1`, `--ganti-musik`,
+  `--subtitle-style capcut`, `--naskah "..."`. Brief yang dirender dipakai ulang persis (naskah
+  hasil koreksi durasi ikut disimpan). Klip B-roll yang tidak disebut dan lagunya dikunci.
+  Voice-over dipakai ulang dari cache bila naskah & suaranya sama. Catatan milik chat lain,
+  lebih dari 7 hari, atau bahannya hilang ditolak.
 
 **Motion graphic** (bawaan `sedang`, matikan dengan `--motion mati`) dirender Remotion
 (`remotion/src/MotionOverlay.jsx`):

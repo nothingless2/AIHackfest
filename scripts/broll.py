@@ -243,16 +243,25 @@ def _sah_video(path):
         return False
 
 
-def ambil(queries, jumlah, orientasi, folder, run_id, awalan="_broll_", saring=True):
+def ambil(queries, jumlah, orientasi, folder, run_id, awalan="_broll_", saring=True,
+          pakai=(), tolak=()):
     """(daftar_klip, catatan_gagal). Tiap klip: {path, id, durasi, kredit}.
+
+    Revisi cepat: `pakai` = id klip render sebelumnya yang dipertahankan (didahulukan, dalam
+    urutan itu), `tolak` = id yang dihapus/diganti user (tidak pernah dipilih lagi).
 
     Tidak pernah melempar karena jaringan: alasan kegagalan dikembalikan sebagai teks
     supaya video yang sudah jadi tidak digagalkan, tapi user TAHU B-roll-nya tidak ada."""
     os.makedirs(folder, exist_ok=True)
+    tolak = {str(i) for i in tolak}
     per_query, terlihat, catatan = [], set(), []
     for q in queries:
         try:
-            daftar = [c for c in cari(q, orientasi) if c["id"] not in terlihat][:PERINGKAT_MAKS]
+            daftar = [c for c in cari(q, orientasi)
+                      if c["id"] not in terlihat and str(c["id"]) not in tolak]
+            # Klip yang dipertahankan revisi boleh berada di luar 5 teratas (hasil Pexels bergeser).
+            daftar = daftar[:PERINGKAT_MAKS] + [c for c in daftar[PERINGKAT_MAKS:]
+                                                if str(c["id"]) in {str(i) for i in pakai}]
             if saring:
                 # Yang judulnya berbagi kata dengan kata kunci lebih dulu (urutan stabil).
                 for c in daftar:
@@ -271,8 +280,13 @@ def ambil(queries, jumlah, orientasi, folder, run_id, awalan="_broll_", saring=T
     if not any(per_query):
         return [], "; ".join(catatan) or f"tidak ada klip yang cocok untuk: {', '.join(queries)}"
 
+    urut = _urutan_variasi(per_query, run_id)
+    if pakai:
+        posisi = {str(i): n for n, i in enumerate(pakai)}
+        urut = (sorted((c for c in urut if str(c["id"]) in posisi), key=lambda c: posisi[str(c["id"])])
+                + [c for c in urut if str(c["id"]) not in posisi])
     klip = []
-    for c in _urutan_variasi(per_query, run_id):
+    for c in urut:
         if len(klip) >= jumlah:
             break
         tujuan = os.path.join(folder, f"{awalan}{len(klip)}.mp4")

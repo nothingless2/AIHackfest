@@ -266,7 +266,8 @@ user ingin mengubahnya, buat draf baru (Langkah 3). Satu draf hanya bisa dirende
 Baca output JSON (satu baris) dari proses latar belakang itu.
 
 - **`ok: true`**: kirim file di `video_path` ke chat ini (pakai kemampuan kirim
-  file/media bawaanmu, BUKAN skrip ini), dengan caption ringkas dari `judul` +
+  file/media bawaanmu, BUKAN skrip ini). **Simpan `run_id`-nya** (per short untuk hasil `shorts`):
+  itu kunci revisi cepat (Langkah 7). Caption ringkas dari `judul` +
   `deskripsi` + `hashtags`. Sebutkan `catatan_durasi` kalau ada isinya (artinya
   durasi diminta user dijepit ke batas yang berbeda). Kalau `qa.masalah` berisi sesuatu,
   sampaikan (mis. "ada frame hitam di detik 3"); `qa.diperbaiki` (mis. suara dikeraskan) cukup
@@ -283,3 +284,33 @@ Baca output JSON (satu baris) dari proses latar belakang itu.
 
 Jangan pernah menjanjikan hasil atau merinci pengaturan sebelum langkah ini
 selesai dan filenya benar-benar ada.
+
+## Langkah 7 — Revisi cepat video yang sudah jadi (tanpa draf baru, WAJIB latar belakang)
+
+Kalau user minta perubahan kecil pada video yang BARU kamu kirim, JANGAN buat draf baru. Render
+ulang dari video itu: ±1 menit, tanpa panggilan AI, dan bagian yang tidak diminta TETAP sama
+(klip B-roll dan lagu lainnya dikunci).
+
+```
+python3 /root/AIHackfest/scripts/hermes_render.py   --chat-id "<label chat yang SAMA PERSIS>" --revisi "<run_id video yang direvisi>" <flag perubahan>
+```
+
+| Permintaan user | Flag |
+|---|---|
+| "hapus B-roll ke-2" / "klip stok kedua jelek, buang" | `--hapus-broll 2` (boleh `1,3`) |
+| "ganti B-roll pertama" | `--ganti-broll 1` |
+| "ganti lagunya" | `--ganti-musik` (atau `--music-file <path>` bila user kirim lagu) |
+| "tanpa musik" | `--music off` |
+| "subtitle/teks narasi lebih tebal/mencolok" | `--subtitle-style capcut` (atau `karaoke-tebal`, `kata`, `karaoke-kapital`) |
+| "font judul/teks tulisan", "teks di atas" | `--text-font tegas`, `--text-position atas` (HANYA teks tulisan, bukan subtitle/narasi) |
+| "warna lebih hangat" | `--color-filter warm` |
+| "tanpa grafik/animasi" | `--motion mati` |
+| "suara pria" | `--voice pria` |
+| "ganti kalimat terakhir jadi ..." (voice-over AI) | `--naskah "<naskah LENGKAP>"`: ambil naskah lama, ubah PERSIS yang diminta |
+
+- Nomor B-roll = urutan klip di video (urutan `broll_kredit` di hasil sebelumnya).
+- Hasil revisi berisi `perubahan` (daftar yang benar-benar diubah) dan `run_id` BARU. Sebutkan
+  `perubahan` saat mengirim video, dan pakai `run_id` baru itu untuk revisi berikutnya.
+- Ditolak dengan `draf_terkunci` (mode audio, durasi, konteks) atau user ingin naskah/gaya yang
+  benar-benar lain -> buat draf baru (Langkah 3). `revisi_tidak_ada`/`revisi_kedaluwarsa`/
+  `revisi_bahan_hilang`/`musik_tidak_ada_pilihan` -> sampaikan `alasan` apa adanya.

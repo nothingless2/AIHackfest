@@ -118,7 +118,8 @@ def render(monkeypatch, tmp_path):
                     "yuv420p", str(bertekstur)], check=True, capture_output=True)
     diambil = []
 
-    def palsu(queries, jumlah, orientasi, folder, run_id, awalan="_broll_", saring=True):
+    def palsu(queries, jumlah, orientasi, folder, run_id, awalan="_broll_", saring=True,
+              pakai=(), tolak=()):
         import shutil
         tujuan = f"{folder}/{awalan}0.mp4"
         shutil.copy2(bertekstur, tujuan)
