@@ -5,7 +5,7 @@
 // Klip -> ProRes 4444 (.mov, alpha). VP8/WebM+alpha DICOBA lebih dulu dan ditolak: dekoder
 // libvpx di ffmpeg 4.4 mesin ini gagal ("Bitstream not supported"); dekoder bawaan membuang alpha.
 import {bundle} from '@remotion/bundler';
-import {openBrowser, renderMedia, renderStill, selectComposition} from '@remotion/renderer';
+import {openBrowser, renderFrames, renderMedia, renderStill, selectComposition} from '@remotion/renderer';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -43,6 +43,12 @@ try {
   for (const p of pekerjaan) {
     if (p.jenis === 'diam') {
       await renderStill({...umum, frame: p.frame, imageFormat: 'png', output: p.out});
+    } else if (p.jenis === 'urutan') {
+      // Urutan PNG (caption dinamis): digabung ffmpeg lewat daftar concat jadi SATU input komposit.
+      fs.mkdirSync(p.out, {recursive: true});
+      await renderFrames({...umum, imageFormat: 'png', outputDir: p.out, frameRange: [p.dari, p.sampai],
+        onStart: () => {}, onFrameUpdate: () => {},
+        concurrency: Number(process.env.REMOTION_CONCURRENCY || 4)});
     } else {
       await renderMedia({...umum, codec: 'prores', proResProfile: '4444', imageFormat: 'png',
         pixelFormat: 'yuva444p10le', muted: true, frameRange: [p.dari, p.sampai],

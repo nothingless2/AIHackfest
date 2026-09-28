@@ -127,14 +127,14 @@ def total_frame_chromium(kerja):
     return sum((k["sampai"] - k["dari"] + 1) if k["jenis"] == "klip" else 1 for k in kerja)
 
 
-def _jalankan_node(props, kerja, folder, komposisi="TextOverlay"):
+def _jalankan_node(props, kerja, folder, komposisi="TextOverlay", batas=None):
     if not shutil.which("node"):
         raise OverlayError("node tidak terpasang")
     if not os.path.isdir(os.path.join(REMOTION_DIR, "node_modules")):
         raise OverlayError("paket Remotion belum terpasang (npm install di remotion/)")
     pekerjaan = []
     for i, k in enumerate(kerja):
-        out = os.path.join(folder, f"_overlay_{i}." + ("mov" if k["jenis"] == "klip" else "png"))
+        out = k.get("out_dir") or os.path.join(folder, f"_overlay_{i}." + ("mov" if k["jenis"] == "klip" else "png"))
         pekerjaan.append({**k, "out": out})
     masukan = os.path.join(folder, "_overlay_props.json")
     with open(masukan, "w", encoding="utf-8") as f:
@@ -144,11 +144,11 @@ def _jalankan_node(props, kerja, folder, komposisi="TextOverlay"):
                             cwd=REMOTION_DIR, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             text=True, start_new_session=True)
     try:
-        out, err = proc.communicate(timeout=BATAS_DETIK)
+        out, err = proc.communicate(timeout=batas or BATAS_DETIK)
     except subprocess.TimeoutExpired:
         os.killpg(proc.pid, signal.SIGKILL)       # Chromium ikut mati, bukan jadi yatim
         proc.communicate()
-        raise OverlayError(f"render animasi melewati {BATAS_DETIK} detik")
+        raise OverlayError(f"render animasi melewati {batas or BATAS_DETIK} detik")
     if proc.returncode != 0:
         raise OverlayError(f"render animasi gagal: {(err or out).strip()[-300:]}")
     for p in pekerjaan:
@@ -167,6 +167,8 @@ def komposit(video_masuk, pekerjaan, fps, video_keluar, filter_akhir=None):
     for p in pekerjaan:
         if p["jenis"] == "diam":
             args += ["-loop", "1", "-framerate", str(fps), "-t", f"{p['tahan'] / fps:.4f}", "-i", p["out"]]
+        elif p["jenis"] == "concat":
+            args += ["-f", "concat", "-safe", "0", "-i", p["out"]]
         else:
             args += ["-i", p["out"]]
     rantai, label = [], "0:v"
@@ -228,3 +230,79 @@ def render_motion(items, folder, *, lebar, tinggi, fps, durasi, aksen=MOTION_AKS
              "items": props_items, "tata": tata}
     pekerjaan = _jalankan_node(props, kerja, folder, komposisi="MotionOverlay")
     return pekerjaan, {"frame_chromium": total_frame_chromium(kerja), "item": len(items)}
+
+
+# Caption dinamis (CaptionDinamis.jsx): frame masuk HARUS sama dengan yang dipakai komponen (props).
+CAPTION_MASUK = 8        # 0,33 dtk pada 24 fps: pop kata kunci
+CAPTION_BATAS_DETIK = int(os.getenv("CAPTION_TIMEOUT", "240"))
+
+
+def rencana_caption(potongan, fps):
+    """Potongan caption -> (items_props, jadwal). items_props untuk timeline RINGKAS
+    (CaptionDinamis ringkas=true): potongan ke-j = frame ringkas [j*(M+1), j*(M+1)+M], yaitu M frame
+    masuk + 1 frame diam. jadwal: (frame_mulai_asli, lama_frame) per potongan, tak bertumpuk
+    (dijamin caption_dinamis.potong; pembulatan frame dirapikan di sini)."""
+    props_items, jadwal, batas = [], [], 0
+    for p in potongan:
+        dari = max(int(round(float(p["mulai"]) * fps)), batas)
+        dur = int(round(float(p["selesai"]) * fps)) - dari
+        if dur < 1:
+            continue
+        batas = dari + dur
+        props_items.append({"kata": p["kata"], "kunci": p.get("kunci"), "mulai": dari / fps,
+                            "selesai": (dari + dur) / fps, "masukFrames": CAPTION_MASUK})
+        jadwal.append((dari, dur))
+    return props_items, jadwal
+
+
+def daftar_concat(jadwal, frame_png, kosong, fps):
+    """Baris daftar concat ffmpeg: celah = PNG transparan, M frame masuk masing-masing 1/fps, lalu
+    frame diam selama sisa potongan. `frame_png` = PNG timeline ringkas terurut."""
+    m1 = CAPTION_MASUK + 1
+    baris, t = [], 0
+
+    def tambah(path, frames):
+        baris.append(f"file '{path}'")
+        baris.append(f"duration {frames / fps:.9f}")
+
+    for j, (dari, dur) in enumerate(jadwal):
+        if dari > t:
+            tambah(kosong, dari - t)
+        for m in range(min(CAPTION_MASUK, dur)):
+            tambah(frame_png[j * m1 + m], 1)
+        if dur > CAPTION_MASUK:
+            tambah(frame_png[j * m1 + CAPTION_MASUK], dur - CAPTION_MASUK)
+        t = dari + dur
+    tambah(kosong, 1)
+    baris.append(f"file '{kosong}'")         # entri terakhir diulang: durasinya dihormati concat
+    return baris
+
+
+def render_caption(potongan, folder, *, lebar, tinggi, fps, durasi, y=0.7, lebar_maks=0.74):
+    """Render caption jadi SATU pekerjaan komposit (daftar concat PNG). Return (pekerjaan, info).
+
+    Asal (27 Sep, render nyata 42 potongan): satu input ffmpeg per potongan (klip ProRes + gambar
+    diam di-loop) -> komposit ~100 input -> ffmpeg 3,8 GB RSS -> DIBUNUH OOM killer (8 GB RAM).
+    Sekarang satu sesi Chromium (timeline ringkas) + satu input concat: memori tidak tumbuh
+    dengan jumlah potongan."""
+    props_items, jadwal = rencana_caption(potongan, fps)
+    if not jadwal:
+        raise OverlayError("tidak ada potongan caption")
+    n = len(props_items) * (CAPTION_MASUK + 1)
+    props = {"lebar": lebar, "tinggi": tinggi, "fps": fps, "durasi": n / fps, "items": props_items,
+             "y": y, "lebarMaks": lebar_maks, "ringkas": True}
+    folder_png = os.path.join(folder, "_caption_png")
+    _jalankan_node(props, [{"jenis": "urutan", "dari": 0, "sampai": n - 1, "mulai": 0,
+                            "out_dir": folder_png}], folder, komposisi="CaptionDinamis",
+                   batas=CAPTION_BATAS_DETIK)
+    frame_png = sorted(os.path.join(folder_png, f) for f in os.listdir(folder_png) if f.endswith(".png"))
+    if len(frame_png) != n:
+        raise OverlayError(f"frame caption {len(frame_png)} dari {n}")
+    from PIL import Image
+    kosong = os.path.join(folder, "_caption_kosong.png")
+    Image.new("RGBA", (lebar, tinggi), (0, 0, 0, 0)).save(kosong)
+    daftar = os.path.join(folder, "_caption.txt")
+    with open(daftar, "w", encoding="utf-8") as f:
+        f.write("\n".join(daftar_concat(jadwal, frame_png, kosong, fps)) + "\n")
+    return ([{"jenis": "concat", "out": daftar, "mulai": 0}],
+            {"frame_chromium": n, "potongan": len(props_items)})

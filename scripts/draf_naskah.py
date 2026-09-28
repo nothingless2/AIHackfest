@@ -42,7 +42,7 @@ def bahan_kurang(teks, brief):
 # Field yang BERBEDA antar-varian; sisanya (transkrip, rencana edit, mode audio, bahan) sama.
 FIELD_VARIAN = ("gaya", "judul", "deskripsi", "full_voice_over", "voice_over_spoken", "scenes",
                 "hashtags", "target_trend", "motion_plan", "naskah_status", "broll",
-                "edit_plan", "edit_summary")
+                "edit_plan", "edit_summary", "kata_kunci")
 
 
 class DrafError(ValueError):

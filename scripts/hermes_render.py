@@ -144,6 +144,8 @@ def _parser():
     p.add_argument("--text-font", default=None, help="standar|tegas|modern|elegan|santai|bersih.")
     p.add_argument("--montase", choices=["on", "off"], default=None,
                    help="Bahan tanpa ucapan + musik: potongan mengikuti ketukan (bawaan on).")
+    p.add_argument("--sfx", choices=["on", "off"], default=None,
+                   help="Bunyi pop/whoosh di kata kunci & grafik (bawaan: on untuk --subtitle-style dinamis).")
     p.add_argument("--motion", default=None,
                    help="Motion graphic penjelas: sedang (bawaan) | mati.")
     p.add_argument("--jumlah-short", type=int, choices=[1, 2, 3], default=None,
@@ -187,7 +189,7 @@ LABEL_REVISI = {"music": "musik", "music_mood": "suasana musik", "music_file": "
                 "voice_persona": "persona suara", "speed_factor": "kecepatan",
                 "visual_cut": "buang bagian goyang", "montase": "montase ketukan",
                 "broll": "B-roll", "broll_query": "kata kunci B-roll", "broll_count": "jumlah B-roll",
-                "auto_zoom": "zoom otomatis"}
+                "auto_zoom": "zoom otomatis", "sfx": "efek suara"}
 
 
 def _flag_eksplisit(parser, argv):
@@ -234,6 +236,7 @@ def _apply_env(args):
         "TEXT_POSITION": args.text_position,
         "TEXT_FONT": args.text_font,
         "MOTION_GRAPHIC": args.motion,
+        "SFX": args.sfx,
         "MONTASE": {"on": "1", "off": "0", None: None}[args.montase],
         "CONTENT_FACTORY_USER_CONTEXT": args.user_context or None,
     }
@@ -378,6 +381,8 @@ def _hasil_render(run_id, pesan_durasi):
                          "(font tidak mendukung emoji); tetap ada di caption.") if status.get("emoji_dihapus") else None,
         "teks_animasi": status.get("teks_animasi"),
         "motion": status.get("motion"),
+        "caption": status.get("caption"),
+        "sfx": status.get("sfx"),
         "potongan_visual": status.get("potong_visual"),
         "suara": status.get("suara"),
         "broll": status.get("broll"),

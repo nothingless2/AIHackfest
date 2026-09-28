@@ -37,6 +37,8 @@ import broll as _broll  # noqa: E402
 import alokasi as _alokasi  # noqa: E402
 import motion_plan as _mp  # noqa: E402
 import overlay_remotion as _ovr  # noqa: E402
+import caption_dinamis as _cd  # noqa: E402
+import sfx as _sfx  # noqa: E402
 import visual_quality as _vq  # noqa: E402
 from broll import BrollError  # noqa: E402
 from edit_plan import MERGE_GAP  # noqa: E402
@@ -1111,6 +1113,9 @@ SUBTITLE_STYLES = {
 SUBTITLE_STYLES["kata"] = {"color": "white", "border": 3, "shadow": 6, "upper": True,
                            "per_kata": True, "font": "Montserrat-ExtraBold.ttf",
                            "ukuran": 0.062, "y_rel": 0.66}
+# Caption dinamis (27 Sep): potongan 1-3 kata, kata kunci besar emas, dirender Remotion
+# (CaptionDinamis.jsx). Gaya drawtext-nya = "kata": itulah yang tampil bila Remotion gagal.
+SUBTITLE_STYLES["dinamis"] = {**SUBTITLE_STYLES["kata"], "remotion": True}
 SUBTITLE_STYLE = os.getenv("SUBTITLE_STYLE", "karaoke")
 # Gaya teks NARASI voice-over AI (bukan ucapan asli): bawaan "kata" kecuali user memilih gaya.
 NARASI_STYLE = os.getenv("SUBTITLE_STYLE") or "kata"
@@ -1444,6 +1449,8 @@ def build_drawtext_chain(scenes, video_height, video_width=None):
 
 TEKS_ANIMASI = {}
 MOTION = {}
+CAPTION = {}        # caption dinamis: dipakai/gagal, potongan, kata kunci (dilaporkan ke user)
+CAPTION_KUNCI = []  # kata kunci usulan brief yang TERUCAP (caption_dinamis.kata_kunci_bersih)
 PENGISIAN = {}      # alokasi.susun_potongan: narasi vs bahan layak, gerak lambat, dipakai ulang
 MONTASE = {}        # potongan mengikuti ketukan musik (bahan tanpa ucapan)
 MONTASE_MIN_DETIK = 1.2
@@ -1669,7 +1676,53 @@ def _motion_gagal(e):
     print(f"[warn] motion graphic gagal ditempel ({e}) — video tanpa grafik.")
 
 
+def _gaya_scene(sc):
+    return sc.get("gaya") or SUBTITLE_STYLE
+
+
+def siapkan_caption(scenes, folder):
+    """Scene ucapan bergaya "dinamis" -> pekerjaan komposit Remotion. Melempar OverlayError."""
+    kata = [w for s in scenes for w in (s.get("words") or [])]
+    potongan = _cd.potong(kata, CAPTION_KUNCI)
+    if not potongan:
+        raise _ovr.OverlayError("tidak ada kata bertimestamp untuk caption")
+    kerja, info = _ovr.render_caption(potongan, folder, lebar=TARGET_W, tinggi=TARGET_H, fps=FPS,
+                                      durasi=max(p["selesai"] for p in potongan) + 0.1,
+                                      y=SUBTITLE_STYLES["dinamis"]["y_rel"] + 0.04,
+                                      lebar_maks=SUBTITLE_MAX_WIDTH)
+    kunci = [p for p in potongan if p["kunci"] is not None]
+    return kerja, {**info, "kata_kunci": [p["kata"][p["kunci"]] for p in kunci],
+                   "detik_kunci": [p["mulai"] for p in kunci]}
+
+
 def apply_text_overlay(input_path, scenes, output_path, motion=None):
+    """Caption dinamis (scene ucapan bergaya "dinamis") dirender Remotion lebih dulu dan ikut
+    ditempel di ATAS motion dalam komposit yang sama; scene itu keluar dari rantai drawtext.
+    Remotion gagal -> scene tetap digambar drawtext gaya "kata" dan alasannya dicatat di CAPTION."""
+    CAPTION.clear()
+    dinamis = [s for s in scenes if s.get("words") and _gaya_scene(s) == "dinamis"]
+    if not dinamis:
+        return _teks_dan_tempel(input_path, scenes, output_path, motion)
+    folder = tempfile.mkdtemp(prefix="_overlay_caption_",
+                              dir=os.path.dirname(os.path.abspath(output_path)))
+    try:
+        try:
+            kerja, info = siapkan_caption(dinamis, folder)
+        except _ovr.OverlayError as e:
+            CAPTION.update(dipakai=False, gagal=str(e)[:300])
+            print(f"[warn] caption dinamis gagal ({e}) — memakai subtitle gaya kata.")
+            return _teks_dan_tempel(input_path, scenes, output_path, motion)
+        CAPTION.update(dipakai=True, gagal=None, **info)
+        print(f"🔤 Caption dinamis: {info['potongan']} potongan, kata kunci {info['kata_kunci']}, "
+              f"{info['frame_chromium']} frame Chromium.")
+        sisa = [s for s in scenes if not any(s is d for d in dinamis)]
+        return _teks_dan_tempel(input_path, sisa, output_path, list(motion or []) + kerja,
+                                cadangan=scenes, n_caption=len(kerja))
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def _teks_dan_tempel(input_path, scenes, output_path, motion=None, cadangan=None, n_caption=0):
     """Teks TULISAN (scene tanpa `words`) -> lapisan animasi Remotion bila TEXT_ANIMATION aktif;
     subtitle UCAPAN (scene ber-`words`) tetap drawtext karaoke. Remotion gagal -> SEMUA teks
     jatuh ke drawtext statis dan kegagalannya dicatat di TEKS_ANIMASI (dilaporkan ke user).
@@ -1704,10 +1757,14 @@ def apply_text_overlay(input_path, scenes, output_path, motion=None):
         finally:
             if tengah != input_path and os.path.exists(tengah):
                 os.remove(tengah)
-    _drawtext_saja(input_path, scenes, output_path, motion=motion)
+    _drawtext_saja(input_path, scenes, output_path, motion=motion, cadangan=cadangan,
+                   n_caption=n_caption)
 
 
-def _drawtext_saja(input_path, scenes, output_path, pindahkan=True, motion=None):
+def _drawtext_saja(input_path, scenes, output_path, pindahkan=True, motion=None, cadangan=None,
+                   n_caption=0):
+    """cadangan/n_caption: `motion` berakhir dengan n_caption pekerjaan caption dinamis; bila
+    komposit gagal, subtitle digambar ulang dari `cadangan` (scene lengkap) supaya tidak hilang."""
     filters = build_drawtext_chain(scenes, TARGET_H, TARGET_W)
     if motion:
         # Motion graphic + teks drawtext dalam SATU encode (teks di atas grafik).
@@ -1715,7 +1772,12 @@ def _drawtext_saja(input_path, scenes, output_path, pindahkan=True, motion=None)
             _ovr.komposit(input_path, motion, FPS, output_path, filter_akhir=filters or None)
             return
         except _ovr.OverlayError as e:
-            _motion_gagal(e)
+            if len(motion) > n_caption:
+                _motion_gagal(e)
+            if n_caption:
+                CAPTION.update(dipakai=False, gagal=f"penempelan: {e}"[:300])
+                print(f"[warn] caption dinamis gagal ditempel ({e}) — memakai subtitle gaya kata.")
+                filters = build_drawtext_chain(cadangan, TARGET_H, TARGET_W)
     if not filters:
         # pindahkan=False: masukan masih dibutuhkan (cadangan teks statis bila Remotion gagal).
         (os.replace if pindahkan else shutil.copyfile)(input_path, output_path)
@@ -2044,6 +2106,9 @@ def render_from_agent_script(
     POTONG_VISUAL.clear()
     PENGISIAN.clear()
     MONTASE.clear()
+    CAPTION.clear()
+    CAPTION_KUNCI.clear()
+    sfx_info = None
     audio_mode = (data.get("audio_mode") or "ai").strip().lower()
     bisu = audio_mode == "mute"
     # `pakai_audio_asli` = jalur berbasis durasi klip + transkrip (seleksi, subtitle kata).
@@ -2270,6 +2335,9 @@ def render_from_agent_script(
     else:
         kata_waktu = petakan_kata(full_vo, TTS_KATA) if TTS_KATA else []
         naskah_terdengar = None
+    # Kata kunci caption dinamis: usulan brief yang BENAR-BENAR terdengar (aturan #5).
+    CAPTION_KUNCI[:] = _cd.kata_kunci_bersih(data.get("kata_kunci"), naskah_terdengar or full_vo)
+    motion = None
     folder_motion = tempfile.mkdtemp(prefix="_overlay_motion_", dir=output_dir)
     try:
         motion = siapkan_motion(data, float(total_duration), kata_waktu,
@@ -2305,6 +2373,33 @@ def render_from_agent_script(
             mux_audio(with_text, temp_audio, output_video)
     finally:
         shutil.rmtree(folder_motion, ignore_errors=True)
+
+    # SFX di momen visual yang BENAR-BENAR tampil: kata kunci caption dinamis (pop), kartu motion
+    # & cutaway yang tertempel (whoosh). Sebelum musik: musik & pemeriksa mutu mengikutinya.
+    if _sfx.aktif():
+        if not has_audio_stream(output_video):
+            sfx_info = {"dipakai": False, "alasan": "video tanpa audio"}
+        else:
+            tempel_ok = not str(MOTION.get("gagal") or "").startswith("penempelan")
+            whoosh = [p["mulai"] / FPS for p in (motion or [])
+                      if p.get("jenis") == "klip" and tempel_ok]
+            pop = (CAPTION.get("detik_kunci") or []) if CAPTION.get("dipakai") else []
+            peristiwa = _sfx.jadwal(pop, whoosh, float(total_duration))
+            sementara = os.path.join(output_dir, "_with_sfx.mp4")
+            try:
+                sfx_info = _sfx.tambah(output_video, peristiwa, sementara, output_dir)
+                if sfx_info.get("dipakai"):
+                    os.replace(sementara, output_video)
+                    print(f"🔊 SFX: {sfx_info['pop']} pop, {sfx_info['whoosh']} whoosh.")
+            except Exception as e:
+                # Hiasan: video yang sudah jadi lebih berharga -- tetap dikirim, alasan dilaporkan.
+                sfx_info = {"dipakai": False, "alasan": f"{type(e).__name__}: {e}"[:200]}
+                print(f"[warn] SFX dilewati ({e}).")
+            finally:
+                for f in (sementara, os.path.join(output_dir, "_sfx_pop.wav"),
+                          os.path.join(output_dir, "_sfx_whoosh.wav")):
+                    if os.path.exists(f):
+                        os.remove(f)
 
     # Musik ditambahkan SETELAH audio final terbentuk (mode apa pun), dan
     # SEBELUM cover diambil supaya artefaknya berasal dari berkas yang sama
@@ -2403,6 +2498,8 @@ def render_from_agent_script(
         emoji_dihapus=sorted(set(EMOJI_DIHAPUS)) or None,
         teks_animasi=dict(TEKS_ANIMASI) or None,
         motion=dict(MOTION) or None,
+        caption=dict(CAPTION) or None,
+        sfx=sfx_info,
         pengisian=dict(PENGISIAN) if audio_mode == "ai" and PENGISIAN else None,
         qa=qa,
         montase={k: v for k, v in MONTASE.items() if k != "track"} or None,

@@ -460,7 +460,8 @@ def build_prompt(asset_names, performance, *, jumlah_gambar, pool=None, konteks=
       "cta_sub": "keterangan kecil, boleh kosong",
       "cta_emoji": "satu emoji atau kosong"
     }}}},
-    "broll": [{broll_skema}]
+    "broll": [{broll_skema}],
+    "kata_kunci": ["maks 8 kata PENTING yang benar-benar DIUCAPKAN: merek, angka, istilah"]
   }}}}"""
     if draf:
         bagian_brief = (
@@ -773,6 +774,11 @@ def run():
     # divalidasi saat render terhadap kata yang benar-benar terdengar.
     for target in (varian or [brief]):
         target["broll"] = usulan_bersih(target.get("broll"))
+        # Kata kunci caption dinamis: bentuk dirapikan di sini; yang tidak terucap dibuang saat
+        # render (caption_dinamis.kata_kunci_bersih terhadap kata yang benar-benar terdengar).
+        kk = target.get("kata_kunci")
+        target["kata_kunci"] = [str(k).strip()[:40] for k in kk if str(k).strip()][:8] \
+            if isinstance(kk, list) else []
     if varian:
         # Brief dasar = varian A (renderer lama tetap bisa membacanya); daftar varian ikut
         # disimpan untuk draf.

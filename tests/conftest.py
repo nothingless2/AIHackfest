@@ -152,3 +152,22 @@ def _lingkungan_dipulihkan():
     yield
     _os.environ.clear()
     _os.environ.update(sebelum)
+
+
+@pytest.fixture(autouse=True)
+def _raw_asli_tidak_tersentuh(monkeypatch, tmp_path):
+    """hermes_render menyalin lampiran ke RAW_DIR. Tes yang lupa mengalihkannya menulis ke
+    workspace/raw ASLI (terukur 27 Sep: `*_k.mp4` dari test_broll muncul tiap suite dijalankan).
+    Jaring pengaman: semua tes memakai folder raw sementara kecuali menimpanya sendiri."""
+    import hermes_render
+    monkeypatch.setattr(hermes_render, "RAW_DIR", str(tmp_path / "raw_uji"))
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _status_render_di_tmp(monkeypatch, tmp_path):
+    """auto_render.write_status menulis workspace/state/render_status.json ASLI saat tes render
+    (terukur 27 Sep). Diarahkan ke tmp_path; tes yang membacanya memakai ar.STATUS_PATH."""
+    import auto_render
+    monkeypatch.setattr(auto_render, "STATUS_PATH", str(tmp_path / "render_status.json"))
+    yield
