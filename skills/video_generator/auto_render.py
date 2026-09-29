@@ -40,6 +40,7 @@ import overlay_remotion as _ovr  # noqa: E402
 import caption_dinamis as _cd  # noqa: E402
 import sfx as _sfx  # noqa: E402
 import suara as _suara  # noqa: E402
+import pengisi as _pengisi  # noqa: E402
 import visual_quality as _vq  # noqa: E402
 from broll import BrollError  # noqa: E402
 from edit_plan import MERGE_GAP  # noqa: E402
@@ -759,6 +760,45 @@ def _buruk_visual(path):
     except Exception as e:
         _catat_visual("gagal_ukur", {"file": os.path.basename(path), "alasan": f"{type(e).__name__}: {e}"[:160]})
         return None
+
+
+POTONG_PENGISI = {}
+
+
+def potong_pengisi_aktif():
+    return (os.getenv("POTONG_PENGISI") or "1").strip().lower() not in ("0", "off", "mati", "false")
+
+
+def terapkan_potong_pengisi(rencana, data):
+    """Buang "eee/emm/hmm" & ulangan gagap dari ranges tiap klip (waktu kata transkrip, klip ASLI).
+    Hard cut di dalam klip; fade audio 0,06 dtk di tiap sambungan sudah dipasang build_segment.
+    Hasil dicatat di POTONG_PENGISI (dilaporkan ke user)."""
+    POTONG_PENGISI.clear()
+    if not potong_pengisi_aktif():
+        return rencana
+    kata_per = data.get("transcript_words") or {}
+    hasil, dibuang, dilewati = [], [], []
+    for item in rencana:
+        nama = os.path.basename(item["path"])
+        kata = [w for w in kata_per.get(nama) or []
+                if _di_dalam(w.get("start", 0), w.get("end", 0), item["ranges"])]
+        ranges, buang = _pengisi.terapkan(item["ranges"], kata, item.get("asli") or item["ranges"][-1][1])
+        if buang is None:
+            dilewati.append(nama)
+            hasil.append(item)
+            continue
+        if not buang:
+            hasil.append(item)
+            continue
+        dibuang += [{"file": nama, "dari": a, "sampai": b, "alasan": al} for a, b, al in buang]
+        hasil.append({**item, "ranges": ranges, "durasi": total_kept(ranges)})
+    if dibuang or dilewati:
+        POTONG_PENGISI.update(dibuang=len(dibuang), detik=round(sum(d["sampai"] - d["dari"] for d in dibuang), 2),
+                              contoh=[d["alasan"] for d in dibuang[:5]], rincian=dibuang,
+                              dilewati=dilewati or None)
+        print(f"✂️ {len(dibuang)} kata pengisi/ulangan dibuang ({POTONG_PENGISI['detik']} dtk)"
+              + (f"; {len(dilewati)} klip dibiarkan (terlalu banyak)" if dilewati else ""))
+    return hasil
 
 
 def terapkan_potong_visual(rencana, data):
@@ -2022,7 +2062,9 @@ def subtitle_scenes(data, rencana, video_width=None, video_height=None):
         # dibentuk dari seluruh ucapan klip, lalu waktunya dipetakan ke potongan
         # yang dipertahankan, sehingga teks yang tidak diucapkan ikut tampil.
         kata = [w for w in (per_kata.get(nama) or [])
-                if _di_dalam(w.get("start", 0), w.get("end", 0), ranges)]
+                if _di_dalam(w.get("start", 0), w.get("end", 0), ranges)
+                # Kata pengisi TIDAK PERNAH tampil, termasuk yang terlalu singkat untuk dipotong.
+                and not _pengisi.adalah_pengisi(w.get("word"))]
         if kata:
             for kelompok in chunk_words(kata, fs, W):
                 mulai_w = geser(kelompok[0].get("start", 0))
@@ -2196,6 +2238,7 @@ def render_from_agent_script(
         data = json.load(f)
 
     POTONG_VISUAL.clear()
+    POTONG_PENGISI.clear()
     PENGISIAN.clear()
     MONTASE.clear()
     CAPTION.clear()
@@ -2255,6 +2298,8 @@ def render_from_agent_script(
                       "memakai semua bahan.")
         if not rencana:
             rencana, dibuang = rencana_semua_klip(existing_assets)
+        if not bisu:
+            rencana = terapkan_potong_pengisi(rencana, data)
         rencana = terapkan_potong_visual(rencana, data)
         if POTONG_VISUAL.get("dipotong"):
             print(f"🎥 {len(POTONG_VISUAL['dipotong'])} bagian goyang/oleng dibuang: "
@@ -2637,6 +2682,7 @@ def render_from_agent_script(
         caption=dict(CAPTION) or None,
         panggung=dict(PANGGUNG) or None,
         suara_bersih=suara_bersih,
+        potong_pengisi=dict(POTONG_PENGISI) or None,
         sfx=sfx_info,
         pengisian=dict(PENGISIAN) if audio_mode == "ai" and PENGISIAN else None,
         qa=qa,
