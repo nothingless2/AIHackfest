@@ -45,7 +45,8 @@ from edit_plan import MERGE_GAP  # noqa: E402
 from retry import with_retry_async  # noqa: E402
 from music import (  # noqa: E402
     MUSIC_BELOW_AMBIENT_DB,
-    MusicError, auto_volume, build_filter as music_filter, has_audio_stream,
+    MusicError, auto_volume, build_filter as music_filter, has_audio_stream, loudness,
+    sidechain_gain as _sc_gain,
     music_wanted, pick_track, requested_mood, solo_volume,
 )
 from spoken import prompt_rule, spoken_text  # noqa: E402
@@ -2084,7 +2085,8 @@ def tambah_musik(video_path, track, out_path, durasi, ada_ucapan=True, offset=0.
          # offset: montase -- musik mulai di ketukan pertamanya supaya grid ketukan berimpit
          # dengan sambungan potongan.
          *(["-ss", f"{offset:.3f}"] if offset else []), "-i", track,
-         "-filter_complex", music_filter(durasi, punya_ucapan=punya and ada_ucapan, volume=vol),
+         "-filter_complex", music_filter(durasi, punya_ucapan=punya and ada_ucapan, volume=vol,
+                                         level_sc=_sc_gain(loudness(video_path)) if punya else None),
          "-map", "0:v", "-map", "[aout]",
          "-c:v", "copy", "-c:a", "aac", "-ar", AUDIO_RATE, "-ac", AUDIO_CHANNELS,
          "-shortest", out_path],

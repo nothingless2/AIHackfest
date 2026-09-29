@@ -4,8 +4,10 @@ Asal (27 Sep): contoh video user memakai SFX di tiap efek. Bunyi DISINTESIS di s
 bukan diunduh: pustaka SFX daring (mis. remotion.media) tidak menyebut lisensinya, dan
 berkas tanpa lisensi jelas tidak boleh masuk video user.
 
-Level diukur dari kenyaringan audio video itu sendiri (pola music.auto_volume): SFX berada
-di bawah ucapan, tidak menutupinya.
+Level diukur dari PUNCAK ucapan video itu sendiri: SFX berada sedikit di bawahnya -- terdengar
+jelas, tidak menutupi ucapan. (Versi 27 Sep mengacu ke LUFS terintegrasi: puncak SFX ±18 dB di
+bawah puncak ucapan, user 29 Sep: "SFX suaranya kecil". Bunyi 70 ms tidak bisa dibandingkan
+dengan kenyaringan rata-rata ucapan; yang sebanding adalah puncaknya.)
 """
 
 import os
@@ -19,9 +21,11 @@ JARAK_MIN = 0.6              # dtk antar SFX: yang lebih awal menang
 # Pop lebih jarang dari whoosh: render nyata 27 Sep = 16 pop dalam 45 dtk (tiap ±2,8 dtk) terasa
 # seperti ketukan terus-menerus. Pop hanya bila >= JARAK_POP dari pop sebelumnya.
 JARAK_POP = float(os.getenv("SFX_JARAK_POP", "4.0"))
-DI_BAWAH_UCAPAN_DB = float(os.getenv("SFX_BELOW_SPEECH_DB", "4"))   # puncak SFX vs LUFS ucapan
-# Batas bawah kecil sekali: 0,05 (versi pertama) membuat SFX LEBIH KERAS dari ucapan pelan
-# (terukur di tes: ucapan -30 dBFS, SFX -27 dBFS).
+# Puncak SFX relatif puncak ucapan (dB). Pop singkat perlu lebih dekat ke puncak agar terdengar;
+# whoosh lebih panjang, energinya lebih besar pada puncak yang sama.
+DI_BAWAH_PUNCAK_DB = {"pop": float(os.getenv("SFX_POP_BELOW_PEAK_DB", "3")),
+                      "whoosh": float(os.getenv("SFX_WHOOSH_BELOW_PEAK_DB", "6"))}
+PUNCAK_CADANGAN_DBFS = -12.0     # puncak ucapan tak terukur (tanpa audio/ffmpeg gagal)
 GAIN_MIN, GAIN_MAX = 0.002, 1.0
 
 
@@ -86,13 +90,31 @@ def jadwal(pop_detik=(), whoosh_detik=(), durasi=None):
     return hasil
 
 
+def puncak_ucapan(video_path):
+    """Puncak khas ucapan (dBFS): persentil 95 dari puncak tiap jendela 50 ms. Bukan puncak
+    mutlak -- satu letupan mik tidak boleh menentukan level semua SFX. None bila tak terukur."""
+    try:
+        out = subprocess.run(["ffmpeg", "-v", "error", "-i", str(video_path), "-vn", "-ac", "1",
+                              "-ar", "16000", "-f", "s16le", "-"], capture_output=True, timeout=120).stdout
+    except (subprocess.SubprocessError, OSError):
+        return None
+    x = np.frombuffer(out, np.int16).astype(float) / 32768
+    w = 800
+    k = len(x) // w
+    if k < 4:
+        return None
+    p = np.abs(x[:k * w]).reshape(k, w).max(axis=1)
+    p95 = float(np.percentile(p, 95))
+    return 20 * np.log10(p95) if p95 > 1e-4 else None
+
+
 def _gain(video_path, puncak_sfx_dbfs=-1.0):
-    from music import loudness
-    ucapan = loudness(video_path)
-    if ucapan is None:
-        return 0.25
-    gain_db = (ucapan - DI_BAWAH_UCAPAN_DB) - puncak_sfx_dbfs
-    return max(GAIN_MIN, min(GAIN_MAX, 10 ** (gain_db / 20.0)))
+    """{jenis: gain linier} supaya puncak SFX = puncak ucapan - DI_BAWAH_PUNCAK_DB[jenis]."""
+    puncak = puncak_ucapan(video_path)
+    if puncak is None:
+        puncak = PUNCAK_CADANGAN_DBFS
+    return {j: max(GAIN_MIN, min(GAIN_MAX, 10 ** ((puncak - turun - puncak_sfx_dbfs) / 20.0)))
+            for j, turun in DI_BAWAH_PUNCAK_DB.items()}
 
 
 def tambah(video_path, peristiwa, out_path, folder):
@@ -108,7 +130,7 @@ def tambah(video_path, peristiwa, out_path, folder):
         args += ["-i", berkas[jenis]]
         ms = int(round(d * 1000))
         rantai.append(f"[{i}:a]aformat=sample_rates=44100:channel_layouts=stereo,"
-                      f"volume={gain:.3f},adelay={ms}|{ms}[s{i}]")
+                      f"volume={gain[jenis]:.3f},adelay={ms}|{ms}[s{i}]")
     masuk = "".join(f"[s{i}]" for i in range(1, len(peristiwa) + 1))
     rantai.append("[0:a]aformat=sample_rates=44100:channel_layouts=stereo[a0]")
     rantai.append(f"[a0]{masuk}amix=inputs={len(peristiwa) + 1}:duration=first:normalize=0[aout]")
@@ -119,4 +141,5 @@ def tambah(video_path, peristiwa, out_path, folder):
         raise RuntimeError(f"SFX gagal dicampur: {r.stderr[-300:]}")
     return {"dipakai": True, "jumlah": len(peristiwa),
             "pop": sum(1 for _, j in peristiwa if j == "pop"),
-            "whoosh": sum(1 for _, j in peristiwa if j == "whoosh"), "gain": round(gain, 3)}
+            "whoosh": sum(1 for _, j in peristiwa if j == "whoosh"),
+            "gain": {j: round(g, 3) for j, g in gain.items()}}

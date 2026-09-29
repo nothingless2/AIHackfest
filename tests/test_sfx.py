@@ -1,5 +1,6 @@
 """SFX (scripts/sfx.py): bunyi sintesis di momen visual, di bawah level ucapan, tepat waktu."""
 
+import os
 import subprocess
 
 import numpy as np
@@ -60,7 +61,7 @@ def test_bunyi_sintesis_pendek_dan_berpuncak_minus_1_dbfs(tmp_path):
 
 def test_sfx_muncul_tepat_di_detiknya_dan_sisanya_utuh(tmp_path, monkeypatch):
     # Waktu diuji terpisah dari level (level: test_puncak_sfx_di_bawah_ucapan).
-    monkeypatch.setattr(sfx, "_gain", lambda path: 1.0)
+    monkeypatch.setattr(sfx, "_gain", lambda path: {"pop": 1.0, "whoosh": 1.0})
     v = _video(tmp_path / "v.mp4")
     out = str(tmp_path / "o.mp4")
     info = sfx.tambah(v, [(1.0, "pop"), (2.0, "whoosh")], out, str(tmp_path))
@@ -78,13 +79,34 @@ def test_sfx_muncul_tepat_di_detiknya_dan_sisanya_utuh(tmp_path, monkeypatch):
     assert _durasi(out) == pytest.approx(_durasi(v), abs=0.05)
 
 
-def test_puncak_sfx_di_bawah_ucapan(tmp_path):
-    from music import loudness
-    v = _video(tmp_path / "keras.mp4", db=-12)
-    lufs = loudness(v)
-    puncak = -1 + 20 * np.log10(sfx._gain(v))
-    assert puncak == pytest.approx(lufs - sfx.DI_BAWAH_UCAPAN_DB, abs=0.5)
-    assert puncak < 20 * np.log10(np.max(np.abs(_pcm(v)))), "SFX tidak lebih keras dari ucapan"
+UCAPAN_UJI = os.path.join(os.path.dirname(__file__), "data", "ucapan_uji.wav")
+
+
+@pytest.mark.parametrize("lufs", [-24, -16])
+def test_sfx_terdengar_tapi_di_bawah_puncak_ucapan_nyata(tmp_path, lufs):
+    """29 Sep, user: "SFX suaranya kecil" -- versi LUFS memberi puncak SFX ±18 dB di bawah puncak
+    ucapan. Diukur pada ucapan sungguhan di dua kenyaringan: puncak SFX di hasil campuran
+    harus 2-7 dB di bawah puncak ucapan (terdengar, tidak menutupi)."""
+    v = str(tmp_path / "u.mp4")
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i",
+                    "color=c=gray:size=160x284:rate=24:duration=11.5", "-i", UCAPAN_UJI,
+                    "-af", f"loudnorm=I={lufs}:TP=-1", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", "-ar", "44100", "-ac", "2", "-shortest", v], check=True, capture_output=True)
+    ucap = sfx.puncak_ucapan(v)
+    assert ucap is not None and ucap < -1
+    # Pop di tengah jeda 2,5 dtk fixture (detik ±5,6): puncaknya terukur tanpa tertutup ucapan.
+    out = str(tmp_path / "o.mp4")
+    sfx.tambah(v, [(5.5, "pop")], out, str(tmp_path))
+    x = _pcm(out)[int(5.45 * 16000):int(5.65 * 16000)]
+    puncak_pop = 20 * np.log10(np.max(np.abs(x)))
+    assert ucap - 7 < puncak_pop < ucap - 2, f"pop {puncak_pop:.1f} dBFS vs puncak ucapan {ucap:.1f}"
+
+
+def test_puncak_tak_terukur_pakai_cadangan(monkeypatch):
+    monkeypatch.setattr(sfx, "puncak_ucapan", lambda p: None)
+    g = sfx._gain("x.mp4")
+    assert g["pop"] == pytest.approx(10 ** ((sfx.PUNCAK_CADANGAN_DBFS - 3 + 1) / 20), rel=1e-6)
+    assert g["whoosh"] < g["pop"]
 
 
 def test_tanpa_peristiwa_tidak_menyentuh_video(tmp_path):

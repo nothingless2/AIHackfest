@@ -56,8 +56,11 @@ def bahan(tmp_path_factory):
         if amp in dibuat:
             return dibuat[amp], track, d
         video = str(d / f"video_{amp}.mp4")
+        # x8: sumber `sine` ffmpeg beramplitudo 1/8 (-18 dBFS). Tanpa itu "ucapan -14 dBFS"
+        # sebenarnya -32 dBFS -- jauh di bawah ucapan ponsel nyata (29 Sep), dan tes ini dulu
+        # mendorong ducking yang menghilangkan musik di video sungguhan.
         ucapan = (f"sine=frequency=2000:duration=12,"
-                  f"volume='{amp}*(between(t,2,4)+between(t,8,10))':eval=frame")
+                  f"volume='{amp * 8}*(between(t,2,4)+between(t,8,10))':eval=frame")
         _jalankan(["-f", "lavfi", "-i", "color=c=gray:size=240x426:rate=24:duration=12",
                    "-f", "lavfi", "-i", ucapan,
                    # -ac 2 sejak awal: pipeline memang menghasilkan stereo, dan
@@ -157,11 +160,13 @@ def test_tanpa_trek_audio_musik_tetap_dipasang_tanpa_sidechain():
 
 # ---------- ducking yang diukur ----------
 
-@pytest.mark.parametrize("amp,label", [(0.5, "-6 dBFS"), (0.2, "-14 dBFS")])
-def test_musik_mengecil_saat_ada_ucapan(bahan, tmp_path, amp, label):
-    """Ucapan pelan ikut diuji, dan itu bukan formalitas: dengan level_sc bawaan
-    ffmpeg, ucapan -14 dBFS hanya menurunkan musik 0,4 dB — ducking-nya praktis
-    tidak ada, padahal versi suara kerasnya terlihat baik-baik saja."""
+@pytest.mark.parametrize("amp,label", [(0.5, "-6 dBFS"), (0.125, "-18 dBFS")])
+def test_musik_mengecil_saat_ada_ucapan_tapi_tidak_hilang(bahan, tmp_path, amp, label):
+    """Ucapan pelan ikut diuji: dengan level_sc bawaan ffmpeg, ucapan pelan praktis tidak
+    menekan musik. Sejak 29 Sep level_sc dinormalkan ke kenyaringan ucapan, jadi tekanannya
+    SAMA untuk ucapan keras & pelan. Seberapa terdengar musiknya diuji dengan ucapan
+    sungguhan (test_musik_terdengar_di_bawah_ucapan_nyata): nada datar tidak bisa menangkap
+    kasus "musik tidak ada" (setelan lama & baru sama-sama ±18 dB pada nada)."""
     video, track, _ = bahan(amp)
     hasil = str(tmp_path / "campur.mp4")
     ar.tambah_musik(video, track, hasil, 12.0)
@@ -169,8 +174,8 @@ def test_musik_mengecil_saat_ada_ucapan(bahan, tmp_path, amp, label):
     saat_bicara = _level_musik(hasil, 2.5, 1.2)
     saat_sunyi = _level_musik(hasil, 5.5, 1.5)
 
-    assert saat_sunyi - saat_bicara > 8, (
-        f"musik tidak ter-duck untuk ucapan {label}: saat bicara "
+    assert 5 < saat_sunyi - saat_bicara < 20, (
+        f"ducking di luar 5-20 dB untuk ucapan {label}: saat bicara "
         f"{saat_bicara:.1f} dB, saat sunyi {saat_sunyi:.1f} dB")
 
 
@@ -181,12 +186,12 @@ def test_kontrol_positif_tanpa_sidechain_level_tetap_sama(bahan, tmp_path, monke
     hasil = str(tmp_path / "tanpa_duck.mp4")
     monkeypatch.setattr(
         ar, "music_filter",
-        lambda durasi, punya_ucapan=True, volume=None: (
+        lambda durasi, punya_ucapan=True, volume=None, level_sc=None: (
             # Kontrol yang BENAR: musik + ucapan tetap dicampur dengan gain yang
             # sama, yang dibuang hanya sidechain-nya. Versi pertama test ini
             # memakai punya_ucapan=False, yang ternyata membuang audio video
             # sama sekali -- yang dibandingkan jadi bukan hal yang sama.
-            m.build_filter(durasi, volume=volume)
+            m.build_filter(durasi, volume=volume, level_sc=level_sc)
             .replace(f"sidechaincompress=threshold={m.MUSIC_DUCK_THRESHOLD}:"
                      f"ratio={m.MUSIC_DUCK_RATIO}",
                      f"sidechaincompress=threshold={m.MUSIC_DUCK_THRESHOLD}:ratio=1")))
@@ -230,3 +235,43 @@ def test_durasi_tidak_memanjang_mengikuti_musik(bahan, tmp_path):
              "-of", "csv=p=0", str(p)], check=True, capture_output=True, text=True).stdout)
 
     assert durasi(hasil) == pytest.approx(durasi(video), abs=0.3)
+
+
+# ---------- level musik dibanding UCAPAN SUNGGUHAN ----------
+
+UCAPAN_UJI = os.path.join(os.path.dirname(__file__), "data", "ucapan_uji.wav")   # edge-tts, 11,6 dtk, jeda 2,5 dtk
+
+
+def _pcm16k(args):
+    import numpy as np
+    out = subprocess.run(["ffmpeg", "-v", "error", *args, "-ac", "1", "-ar", "16000", "-f", "s16le", "-"],
+                         capture_output=True, check=True).stdout
+    return np.frombuffer(out, np.int16).astype(float) / 32768
+
+
+@pytest.mark.parametrize("lufs", [-24, -16])
+def test_musik_terdengar_di_bawah_ucapan_nyata(bahan, tmp_path, lufs):
+    """29 Sep, user: "musik tidak ada". Terukur di video user: musik -30 dB di bawah ucapan
+    saat bicara. Nada sintetis TIDAK bisa menangkap ini (setelan lama & baru sama-sama ±18 dB
+    pada nada datar) -- karena itu diuji dengan ucapan sungguhan: musik setelah ducking
+    (filter pipeline apa adanya, keluaran [md]) dibanding ucapan per jendela 400 ms."""
+    import numpy as np
+    _, track, _ = bahan()
+    video = str(tmp_path / "ucapan.mp4")
+    _jalankan(["-f", "lavfi", "-i", "color=c=gray:size=240x426:rate=24:duration=11.5", "-i", UCAPAN_UJI,
+               "-af", f"loudnorm=I={lufs}:TP=-1", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+               "-c:a", "aac", "-ac", "2", "-shortest", video])
+    f = m.build_filter(11.5, punya_ucapan=True, volume=m.auto_volume(video, track),
+                       level_sc=m.sidechain_gain(m.loudness(video))).split("[md];")[0] + "[md]"
+    musik = _pcm16k(["-i", video, "-stream_loop", "-1", "-i", track, "-filter_complex", f,
+                     "-map", "[md]", "-t", "11.5"])
+    ucap = _pcm16k(["-i", video, "-vn"])
+    w = 6400
+    k = min(len(musik), len(ucap)) // w
+    rms = lambda x: np.sqrt((x[:k * w].reshape(k, w) ** 2).mean(1)) + 1e-9   # noqa: E731
+    rm, ru = rms(musik), rms(ucap)
+    db_u = 20 * np.log10(ru)
+    bicara = db_u > np.percentile(db_u, 80) - 15
+    bicara[:4] = bicara[-4:] = False                      # fade musik di ujung
+    rel = float(np.median(20 * np.log10(rm[bicara] / ru[bicara])))
+    assert -21 < rel < -12, f"musik {rel:.1f} dB dari ucapan saat bicara (target -21..-12)"

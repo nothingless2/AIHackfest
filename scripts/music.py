@@ -36,6 +36,12 @@ MUSIC_ENABLED = (os.getenv("MUSIC_ENABLED") or "1").strip().lower() not in (
 # Pada 10 dB musik hadir sebagai latar di jeda, lalu DUCKING yang menekannya
 # ~15 dB saat ada yang bicara. Itulah pembagian kerja yang benar: level dasar
 # mengurus "terdengar", ducking mengurus "tidak mengganggu".
+#
+# Diukur ulang 29 Sep pada ucapan NYATA (6 video user, musik setelah ducking vs ucapan per
+# 400 ms): setelan lama (10 dB, rasio 12, level_sc 8) = musik -30 dB di bawah ucapan saat
+# bicara -- user: "musik tidak ada". Setelan sekarang (10 dB, rasio 3, level_sc 1,5 dinormalkan ke
+# -24 LUFS): -17 dB saat bicara (terdengar, tidak mengganggu), -6 dB di jeda (mengisi celah),
+# SAMA untuk ucapan -24 dan -16 LUFS (tests/test_music.py, ucapan sungguhan).
 MUSIC_BELOW_SPEECH_DB = float(os.getenv("MUSIC_BELOW_SPEECH_DB", "10"))
 # Bahan TANPA ucapan (suara suasana/keramaian): musik adalah pengisi utama, jadi lebih dekat
 # ke level suasana dan tanpa ducking. 4 dB: suasana tetap terdengar, musik jelas hadir.
@@ -52,7 +58,7 @@ MUSIC_GAIN_MIN, MUSIC_GAIN_MAX = 0.01, 4.0
 
 # Ambang rendah (0.02) supaya ucapan yang pelan pun tetap memicu ducking.
 MUSIC_DUCK_THRESHOLD = float(os.getenv("MUSIC_DUCK_THRESHOLD", "0.02"))
-MUSIC_DUCK_RATIO = float(os.getenv("MUSIC_DUCK_RATIO", "12"))
+MUSIC_DUCK_RATIO = float(os.getenv("MUSIC_DUCK_RATIO", "3"))
 # Serang cepat (musik langsung turun begitu orang mulai bicara), lepas lambat
 # (musik naik perlahan di jeda, tidak memompa di sela-sela kata).
 MUSIC_DUCK_ATTACK = float(os.getenv("MUSIC_DUCK_ATTACK_MS", "20"))
@@ -64,7 +70,22 @@ MUSIC_DUCK_RELEASE = float(os.getenv("MUSIC_DUCK_RELEASE_MS", "600"))
 # Dengan bawaan ffmpeg, ducking praktis tidak bekerja untuk orang yang bicara
 # pelan -- persis kasus rekaman ponsel. 8 membuatnya konsisten apa pun level
 # ucapannya.
-MUSIC_DUCK_SIDECHAIN_GAIN = float(os.getenv("MUSIC_DUCK_SIDECHAIN_GAIN", "8"))
+# 29 Sep: 8 bersama rasio 12 menekan musik ~20 dB di ucapan nyata (lihat MUSIC_BELOW_SPEECH_DB).
+# 1,5 = nilai pada ucapan acuan -24 LUFS (ponsel); dinormalkan per video (sidechain_gain).
+MUSIC_DUCK_SIDECHAIN_GAIN = float(os.getenv("MUSIC_DUCK_SIDECHAIN_GAIN", "1.5"))
+# Penguatan sidechain DINORMALKAN ke kenyaringan ucapan: ambang kompresor absolut, jadi tanpa ini
+# ucapan keras menekan musik jauh lebih dalam dari ucapan pelan (terukur 29 Sep pada ucapan
+# nyata: -24 LUFS -> musik -21 dB, -16 LUFS -> -27 dB). level_sc = gain x 10^((acuan - LUFS)/20).
+MUSIC_DUCK_ACUAN_LUFS = float(os.getenv("MUSIC_DUCK_ACUAN_LUFS", "-24"))
+SC_MIN, SC_MAX = 0.1, 32.0
+
+
+def sidechain_gain(ucapan_lufs):
+    """level_sc untuk ucapan dengan kenyaringan ini; tak terukur -> nilai dasar."""
+    if ucapan_lufs is None:
+        return MUSIC_DUCK_SIDECHAIN_GAIN
+    g = MUSIC_DUCK_SIDECHAIN_GAIN * 10 ** ((MUSIC_DUCK_ACUAN_LUFS - ucapan_lufs) / 20.0)
+    return max(SC_MIN, min(SC_MAX, g))
 MUSIC_FADE = float(os.getenv("MUSIC_FADE_SECONDS", "1.5"))
 
 # Batas puncak setelah pencampuran. BUKAN hiasan: ucapan yang sudah dekat skala
@@ -201,7 +222,7 @@ def auto_volume(video_path, track_path, *, below_db=None):
     return max(MUSIC_GAIN_MIN, min(MUSIC_GAIN_MAX, 10 ** (gain_db / 20.0)))
 
 
-def build_filter(durasi, *, punya_ucapan=True, volume=None, fade=None):
+def build_filter(durasi, *, punya_ucapan=True, volume=None, fade=None, level_sc=None):
     """filter_complex untuk mencampur musik ke audio video.
 
     `punya_ucapan=False` (video memang tanpa trek audio): musik dipasang apa
@@ -225,7 +246,7 @@ def build_filter(durasi, *, punya_ucapan=True, volume=None, fade=None):
         f"[m][0:a]sidechaincompress="
         f"threshold={MUSIC_DUCK_THRESHOLD}:ratio={MUSIC_DUCK_RATIO}:"
         f"attack={MUSIC_DUCK_ATTACK}:release={MUSIC_DUCK_RELEASE}:"
-        f"level_sc={MUSIC_DUCK_SIDECHAIN_GAIN}[md];"
+        f"level_sc={MUSIC_DUCK_SIDECHAIN_GAIN if level_sc is None else level_sc:.3f}[md];"
         # normalize=0 WAJIB: default amix membagi tiap input dengan jumlah input,
         # jadi suara asli video ikut turun separuh hanya karena musik ditambahkan.
         f"[md][0:a]amix=inputs=2:duration=shortest:dropout_transition=0:normalize=0[mix];"
