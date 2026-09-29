@@ -15,6 +15,31 @@ import {fitText} from '@remotion/layout-utils';
 const FONT = {family: 'Montserrat ExtraBold', file: 'fonts/Montserrat-ExtraBold.ttf', weight: 800};
 const EMAS = 'linear-gradient(180deg, #FFF4B8 0%, #F7CC55 48%, #C98E22 100%)';
 const BAYANG = 'drop-shadow(0 6px 10px rgba(0,0,0,0.55))';
+// Varian "panggung" (29 Sep): di latar kertas terang, caption jadi JUDUL serif miring hitam
+// (seperti "NGEDITVIDEO," di contoh video user); kata kunci diberi warna aksen.
+const SERIF = {family: 'Instrument Serif', file: 'fonts/InstrumentSerif-Italic.ttf', weight: 400, style: 'italic'};
+const AKSEN = '#E8743B';
+
+const PotonganPanggung = ({it, W, H, y}) => {
+  const frame = useCurrentFrame();
+  const muncul = frame >= it.masukFrames ? 1 : interpolate(frame, [0, it.masukFrames], [0, 1], {
+    extrapolateLeft: 'clamp', extrapolateRight: 'clamp', easing: Easing.bezier(0.16, 1, 0.3, 1)});
+  const teks = it.kata.join(' ').toUpperCase();
+  const ukuran = Math.min(H * 0.075, fitText({text: teks || 'x', withinWidth: W * 0.84,
+    fontFamily: SERIF.family, fontWeight: String(SERIF.weight)}).fontSize);
+  return (
+    <div style={{position: 'absolute', left: 0, width: W, top: H * y, translate: `0 ${-50 + (1 - muncul) * 30}%`,
+      opacity: muncul, textAlign: 'center', whiteSpace: 'pre', fontFamily: `"${SERIF.family}", serif`,
+      fontStyle: 'italic', fontWeight: SERIF.weight, fontSize: ukuran, lineHeight: 1.0, color: '#17171B',
+      letterSpacing: ukuran * -0.02}}>
+      {it.kata.map((k, i) => (
+        <span key={i} style={{color: i === it.kunci ? AKSEN : '#17171B'}}>
+          {(i ? ' ' : '') + k.toUpperCase()}
+        </span>
+      ))}
+    </div>
+  );
+};
 
 const Potongan = ({it, W, H, y, lebarMaks}) => {
   const frame = useCurrentFrame();
@@ -74,12 +99,16 @@ const Potongan = ({it, W, H, y, lebarMaks}) => {
 // ringkas: timeline RINGKAS untuk render -- potongan ke-j menempati frame [j*(M+1), j*(M+1)+M]:
 // M frame masuk + 1 frame diam. Python memetakan frame ini ke waktu aslinya (daftar concat ffmpeg),
 // jadi SATU sesi Chromium merender semua potongan dan komposit hanya mendapat SATU input.
-export const CaptionDinamis = ({items, y = 0.7, lebarMaks = 0.74, ringkas = false}) => {
+export const CaptionDinamis = ({items, y = 0.7, lebarMaks = 0.74, ringkas = false, yPanggung = 0.365}) => {
   const {fps, width, height} = useVideoConfig();
   const [siap, setSiap] = React.useState(false);
   React.useEffect(() => {
     const h = delayRender(`memuat font ${FONT.family}`);
-    loadFont({family: FONT.family, url: staticFile(FONT.file), weight: String(FONT.weight)})
+    Promise.all([
+      loadFont({family: FONT.family, url: staticFile(FONT.file), weight: String(FONT.weight)}),
+      loadFont({family: SERIF.family, url: staticFile(SERIF.file), weight: String(SERIF.weight),
+        style: SERIF.style}),
+    ])
       .then(() => { setSiap(true); continueRender(h); })
       .catch((e) => { throw e; });
   }, []);
@@ -91,7 +120,9 @@ export const CaptionDinamis = ({items, y = 0.7, lebarMaks = 0.74, ringkas = fals
         const dur = ringkas ? it.masukFrames + 1 : Math.max(1, Math.round((it.selesai - it.mulai) * fps));
         return (
           <Sequence key={i} from={dari} durationInFrames={dur}>
-            <Potongan it={it} W={width} H={height} y={y} lebarMaks={lebarMaks} />
+            {it.varian === 'panggung'
+              ? <PotonganPanggung it={it} W={width} H={height} y={yPanggung} />
+              : <Potongan it={it} W={width} H={height} y={y} lebarMaks={lebarMaks} />}
           </Sequence>
         );
       })}

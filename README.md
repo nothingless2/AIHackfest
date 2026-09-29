@@ -126,6 +126,14 @@ cutaway (`scripts/sfx.py`, `--sfx on|off`).
   PNG ke komposit. Versi pertama memakai satu input ffmpeg per potongan dan terbunuh OOM (3,8 GB).
 - Terukur di video 45 dtk: +51 dtk render, proses terbesar 1,3 GB. Gagal → subtitle gaya `kata`.
 - Aturan Remotion mengikuti Remotion Agent Skills (`.claude/skills/remotion-*`, untuk Claude Code).
+- **Tata letak "panggung"** (`remotion/src/Panggung.jsx`, `motion_plan.jadwal_panggung`): 1-2 jendela
+  ±3 dtk di poin utama (usulan brief `motion_plan.panggung`, atau cadangan: kata kunci caption).
+  Latar kertas + ilustrasi dirender Remotion (satu input concat), video pembicara dikecilkan
+  ffmpeg jadi kartu membulat yang meluncur naik; caption di jendela itu jadi judul serif
+  (Instrument Serif Italic, OFL). Motion & cutaway yang bertabrakan dibuang, QA melewati jendela.
+- **Level audio** (29 Sep, diukur pada ucapan sungguhan `tests/data/ucapan_uji.wav`): musik -17 dB
+  di bawah ucapan saat bicara, -6 dB di jeda (dulu -30 dB = "musik tidak ada"); sidechain
+  dinormalkan ke kenyaringan ucapan. SFX 3-6 dB di bawah PUNCAK ucapan (dulu ±18 dB).
 
 **Motion graphic** (bawaan `sedang`, matikan dengan `--motion mati`) dirender Remotion
 (`remotion/src/MotionOverlay.jsx`):

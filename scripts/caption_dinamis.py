@@ -72,16 +72,22 @@ def _skor(kata, awal_kalimat):
     return 1 if len(n) >= 6 else 0
 
 
-def potong(kata_waktu, kata_kunci=()):
+def potong(kata_waktu, kata_kunci=(), batas=()):
     """[{word,start,end}] -> [{mulai, selesai, kata:[teks], kunci: indeks|None}], urut & tak
-    bertumpuk; semua kata tercakup berurutan."""
+    bertumpuk; semua kata tercakup berurutan.
+
+    batas: detik yang TIDAK boleh dilintasi satu potongan (tepi jendela "panggung"): potongan
+    putus di sana dan tidak tampil melewatinya -- caption serif hitam di latar terang tidak boleh
+    terbawa ke video biasa, begitu juga sebaliknya."""
+    batas = sorted(float(b) for b in batas or ())
     kata = [w for w in kata_waktu or [] if str(w.get("word") or "").strip()]
     kelompok, cur = [], []
     for w in kata:
         if cur:
             teks = " ".join(tampilan(x["word"]) for x in cur + [w])
             if (float(w["start"]) - float(cur[-1]["end"]) > JEDA_PUTUS or len(cur) >= MAKS_KATA
-                    or len(teks) > MAKS_HURUF or _akhir_kalimat(cur[-1]["word"])):
+                    or len(teks) > MAKS_HURUF or _akhir_kalimat(cur[-1]["word"])
+                    or any(float(cur[0]["start"]) < b <= float(w["start"]) for b in batas)):
                 kelompok.append(cur)
                 cur = []
         cur.append(w)
@@ -94,6 +100,7 @@ def potong(kata_waktu, kata_kunci=()):
         selesai = float(g[-1]["end"]) + EKOR
         if i + 1 < len(kelompok):
             selesai = min(selesai, float(kelompok[i + 1][0]["start"]))
+        selesai = min([selesai] + [b for b in batas if b > mulai])
         hasil.append({"mulai": round(mulai, 3), "selesai": round(max(selesai, mulai + 0.04), 3),
                       "kata": [tampilan(x["word"]) for x in g], "kunci": None,
                       "_asli": [x["word"] for x in g],
@@ -101,9 +108,10 @@ def potong(kata_waktu, kata_kunci=()):
     # Potongan yang terlalu singkat tetap ada (kata tidak boleh hilang); hanya dilaporkan lewat
     # durasi. Tampil minimal MIN_TAMPIL bila tidak ada potongan berikutnya yang menghalangi.
     for i, p in enumerate(hasil):
-        batas = hasil[i + 1]["mulai"] if i + 1 < len(hasil) else float("inf")
+        lanjut = hasil[i + 1]["mulai"] if i + 1 < len(hasil) else float("inf")
+        tepi = min([lanjut] + [b for b in batas if b > p["mulai"]])
         if p["selesai"] - p["mulai"] < MIN_TAMPIL:
-            p["selesai"] = round(min(p["mulai"] + MIN_TAMPIL, batas), 3)
+            p["selesai"] = round(min(p["mulai"] + MIN_TAMPIL, tepi), 3)
 
     # Kata kunci: usulan LLM yang terucap diutamakan (skor tertinggi), tapi SEMUA kandidat tunduk
     # pada porsi, jarak, dan batas pengulangan -- render nyata 27 Sep: tanpa batas, 21 dari 42

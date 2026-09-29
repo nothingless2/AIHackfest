@@ -9,5 +9,6 @@ Sumber: https://github.com/google/fonts (folder `ofl/`).
 | BebasNeue-Regular.ttf | `modern` |
 | PlayfairDisplay-Variable.ttf | `elegan` (instance bawaan: Regular) |
 | Pacifico-Regular.ttf | `santai` |
+| InstrumentSerif-Italic.ttf | caption tata letak "panggung" (serif miring, bukan pilihan TEXT_FONT) |
 
 `standar` = DejaVu Sans Bold (sistem), `bersih` = Inter (sistem).

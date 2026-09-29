@@ -382,6 +382,7 @@ def _hasil_render(run_id, pesan_durasi):
         "teks_animasi": status.get("teks_animasi"),
         "motion": status.get("motion"),
         "caption": status.get("caption"),
+        "panggung": status.get("panggung"),
         "sfx": status.get("sfx"),
         "potongan_visual": status.get("potong_visual"),
         "suara": status.get("suara"),

@@ -255,6 +255,11 @@ MOTION GRAPHIC (elemen penjelas di layar, gaya kartu gelap berpendar) di "motion
   PERSIS dari permintaan user. Sebar kata jangkar dari tengah sampai akhir naskah, jangan
   di kalimat pertama (kartu pembuka sedang tampil).
 - "cta" = kartu ajakan di 2 detik terakhir, sejalan dengan ajakan penutup naskah.
+- "panggung" = 0-2 momen POIN PALING PENTING: layar berganti ke tata letak kartu dengan
+  ilustrasi. "saat_kata" = kata yang DIUCAPKAN di momen itu. "ilustrasi" pilih yang cocok:
+  "timeline" (edit/proses/alur kerja), "grafik_naik" (hasil/pertumbuhan/naik), "checklist"
+  (langkah/syarat/daftar), "chat" (percakapan/tanya-jawab), "kode" (teknis/program/aplikasi),
+  "kata" (selain itu). Kosongkan [] bila tidak ada poin yang menonjol.
 - DILARANG angka, harga, tanggal, atau statistik yang tidak ada di permintaan user."""
 
 MOTION_NOTE_UCAPAN = """
@@ -265,6 +270,11 @@ MOTION GRAPHIC (elemen penjelas di layar, gaya kartu gelap berpendar) di "motion
   kata kunci penting; "ikon" = benda/aksi + emoji; "langkah" = tahap/cara; "label" = nama
   acara/tempat/brand PERSIS dari ucapan atau permintaan user. Sebar dari tengah sampai akhir.
 - "cta" = kartu ajakan di 2 detik terakhir.
+- "panggung" = 0-2 momen POIN PALING PENTING: layar berganti ke tata letak kartu dengan
+  ilustrasi. "saat_kata" = kata yang DIUCAPKAN di momen itu. "ilustrasi" pilih yang cocok:
+  "timeline" (edit/proses/alur kerja), "grafik_naik" (hasil/pertumbuhan/naik), "checklist"
+  (langkah/syarat/daftar), "chat" (percakapan/tanya-jawab), "kode" (teknis/program/aplikasi),
+  "kata" (selain itu). Kosongkan [] bila tidak ada poin yang menonjol.
 - DILARANG angka, harga, tanggal, atau statistik yang tidak ada di ucapan atau permintaan user."""
 
 BROLL_NOTE = """
@@ -458,7 +468,8 @@ def build_prompt(asset_names, performance, *, jumlah_gambar, pool=None, konteks=
       "elemen": [{elemen_skema}],
       "cta": "teks kartu ajakan, maks 6 kata",
       "cta_sub": "keterangan kecil, boleh kosong",
-      "cta_emoji": "satu emoji atau kosong"
+      "cta_emoji": "satu emoji atau kosong",
+      "panggung": [{{{{"ilustrasi": "timeline|grafik_naik|checklist|chat|kode|kata", "saat_kata": "kata yang DIUCAPKAN di poin paling penting"}}}}]
     }}}},
     "broll": [{broll_skema}],
     "kata_kunci": ["maks 8 kata PENTING yang benar-benar DIUCAPKAN: merek, angka, istilah"]

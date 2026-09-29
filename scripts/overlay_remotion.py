@@ -250,7 +250,8 @@ def rencana_caption(potongan, fps):
             continue
         batas = dari + dur
         props_items.append({"kata": p["kata"], "kunci": p.get("kunci"), "mulai": dari / fps,
-                            "selesai": (dari + dur) / fps, "masukFrames": CAPTION_MASUK})
+                            "selesai": (dari + dur) / fps, "masukFrames": CAPTION_MASUK,
+                            "varian": p.get("varian") or "biasa"})
         jadwal.append((dari, dur))
     return props_items, jadwal
 
@@ -306,3 +307,60 @@ def render_caption(potongan, folder, *, lebar, tinggi, fps, durasi, y=0.7, lebar
         f.write("\n".join(daftar_concat(jadwal, frame_png, kosong, fps)) + "\n")
     return ([{"jenis": "concat", "out": daftar, "mulai": 0}],
             {"frame_chromium": n, "potongan": len(props_items)})
+
+
+# ---------------------------------------------------------------- tata letak "panggung"
+
+PANGGUNG_BATAS_DETIK = int(os.getenv("PANGGUNG_TIMEOUT", "240"))
+
+
+def kartu_panggung(lebar, tinggi):
+    """Kotak kartu video pembicara (piksel, genap untuk yuv420p): 86% lebar, 42%-94% tinggi."""
+    genap = lambda v: int(round(v / 2)) * 2      # noqa: E731
+    w, h = genap(lebar * 0.86), genap(tinggi * 0.52)
+    return {"x": genap((lebar - w) / 2), "y": genap(tinggi * 0.42), "w": w, "h": h,
+            "r": genap(lebar * 0.045)}
+
+
+def render_panggung(jendela, folder, *, lebar, tinggi, fps):
+    """Latar opak tiap jendela panggung -> SATU pekerjaan concat PNG (frame asli di waktunya,
+    PNG transparan di luar jendela). Return (daftar_concat, info). Melempar OverlayError."""
+    items, frames, t = [], [], 0
+    for j in jendela:
+        dari = int(round(float(j["mulai"]) * fps))
+        dur = int(round(float(j["selesai"]) * fps)) - dari
+        if dur < 2:
+            continue
+        items.append({"ilustrasi": j["ilustrasi"], "teks": j.get("teks") or "", "dari": t, "dur": dur})
+        frames.append((dari, dur))
+        t += dur
+    if not items:
+        raise OverlayError("tidak ada jendela panggung")
+    props = {"lebar": lebar, "tinggi": tinggi, "fps": fps, "durasi": t / fps, "items": items,
+             "kartu": kartu_panggung(lebar, tinggi)}
+    folder_png = os.path.join(folder, "_panggung_png")
+    _jalankan_node(props, [{"jenis": "urutan", "dari": 0, "sampai": t - 1, "mulai": 0,
+                            "out_dir": folder_png}], folder, komposisi="Panggung",
+                   batas=PANGGUNG_BATAS_DETIK)
+    png = sorted(os.path.join(folder_png, f) for f in os.listdir(folder_png) if f.endswith(".png"))
+    if len(png) != t:
+        raise OverlayError(f"frame panggung {len(png)} dari {t}")
+    from PIL import Image
+    # RGB, bukan RGBA: frame Remotion latar opak (RGB). Satu daftar concat dengan PNG campuran
+    # RGBA+RGB membuat ffmpeg 4.4 menampilkan latar TRANSPARAN (terukur 29 Sep: latar tidak muncul
+    # sama sekali). Hitam opak aman: latar hanya ditempel di dalam jendela (enable=between).
+    kosong = os.path.join(folder, "_panggung_kosong.png")
+    Image.new("RGB", (lebar, tinggi), (0, 0, 0)).save(kosong)
+    baris, pos, k = [], 0, 0
+    for dari, dur in frames:
+        if dari > pos:
+            baris += [f"file '{kosong}'", f"duration {(dari - pos) / fps:.9f}"]
+        for _ in range(dur):
+            baris += [f"file '{png[k]}'", f"duration {1 / fps:.9f}"]
+            k += 1
+        pos = dari + dur
+    baris += [f"file '{kosong}'", f"duration {1 / fps:.9f}", f"file '{kosong}'"]
+    daftar = os.path.join(folder, "_panggung.txt")
+    with open(daftar, "w", encoding="utf-8") as f:
+        f.write("\n".join(baris) + "\n")
+    return daftar, {"frame_chromium": t, "jumlah_jendela": len(items)}

@@ -45,8 +45,11 @@ naskah (atau beberapa short) BESERTA gambar storyboard; video baru dibuat setela
 | "Teks lebih dinamis", "caption kayak Remotion/CapCut kekinian", "kata penting dibesarkan" | tambahkan `--subtitle-style dinamis` ke resep mana pun yang berucap/bernarasi |
 
 `--subtitle-style dinamis` (tahap uji): teks tampil 1-3 kata sekaligus, kata PENTING tampil besar
-berwarna emas dengan animasi pop, plus efek suara pop/whoosh halus (matikan: `--sfx off`). Render
-±1 menit lebih lama. Kalau hasil berisi `caption.gagal`, sampaikan: video tetap bersubtitle gaya
+berwarna emas dengan animasi pop, plus efek suara pop/whoosh (matikan: `--sfx off`). Di 1-2 poin
+utama layar berganti ke tata letak "panggung" ±3 dtk: pembicara jadi kartu membulat di latar
+terang berkisi, ilustrasi animasi di atas (timeline/grafik/checklist/chat/kode/kata), caption jadi
+judul serif. Render ±1-1,5 menit lebih lama. `panggung.gagal` terisi -> sebut singkat (video tetap
+jadi tanpa tata letak itu). Kalau hasil berisi `caption.gagal`, sampaikan: video tetap bersubtitle gaya
 biasa. `sfx.dipakai: false` + `alasan` cukup disebut singkat.
 
 B-roll di mode suara asli ditampilkan SEBENTAR di atas video (cutaway) saat kata yang relevan

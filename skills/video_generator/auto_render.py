@@ -1452,6 +1452,8 @@ TEKS_ANIMASI = {}
 MOTION = {}
 CAPTION = {}        # caption dinamis: dipakai/gagal, potongan, kata kunci (dilaporkan ke user)
 CAPTION_KUNCI = []  # kata kunci usulan brief yang TERUCAP (caption_dinamis.kata_kunci_bersih)
+PANGGUNG = {}       # tata letak "panggung": dipakai/gagal/alasan, jendela (dilaporkan ke user)
+PANGGUNG_JENDELA = []   # jendela panggung yang BENAR-BENAR tampil: caption, motion, SFX, QA menyesuaikan
 PENGISIAN = {}      # alokasi.susun_potongan: narasi vs bahan layak, gerak lambat, dipakai ulang
 MONTASE = {}        # potongan mengikuti ketukan musik (bahan tanpa ucapan)
 MONTASE_MIN_DETIK = 1.2
@@ -1513,7 +1515,84 @@ def _sumber_fakta(data):
     return " ".join([data.get("konteks_user") or ""] + ucapan)
 
 
-def siapkan_motion(data, durasi, kata_waktu, ada_teks_statis, folder, naskah=None, tata="atas"):
+def panggung_aktif():
+    """Tata letak panggung: bagian motion "dinamis" (--subtitle-style dinamis), bisa dimatikan
+    PANGGUNG=0. Hanya kanvas tegak (tata letaknya dirancang 9:16)."""
+    if (os.getenv("PANGGUNG") or "1").strip().lower() in ("0", "off", "mati"):
+        return False
+    if (os.getenv("SUBTITLE_STYLE") or "").strip().lower() != "dinamis":
+        return False
+    try:
+        if not _mp.tingkat():
+            return False
+    except Exception:
+        return False
+    return TARGET_H > TARGET_W
+
+
+def siapkan_panggung(data, kata_waktu, durasi, naskah):
+    """Jendela panggung dari usulan brief (motion_plan.panggung) -- tanpa usulan: SATU jendela
+    ilustrasi "kata" pada kata kunci caption terdekat ke 35% durasi. Alasan selalu di PANGGUNG."""
+    PANGGUNG.clear()
+    PANGGUNG_JENDELA.clear()
+    if not panggung_aktif():
+        return []
+    if not kata_waktu:
+        PANGGUNG.update(dipakai=False, alasan="tidak ada kata bertimestamp")
+        return []
+    usulan = (data.get("motion_plan") or {}).get("panggung") if isinstance(data.get("motion_plan"), dict) else None
+    bersih, catatan = _mp.bersihkan_panggung(usulan, naskah=naskah)
+    sumber = "brief"
+    if not bersih:
+        kunci = [p for p in _cd.potong(kata_waktu, CAPTION_KUNCI) if p["kunci"] is not None
+                 and p["mulai"] > _mp.HOOK_DETIK + _mp.PANGGUNG_TEPI]
+        if kunci:
+            p = min(kunci, key=lambda x: abs(x["mulai"] - durasi * 0.35))
+            kata = p["kata"][p["kunci"]]
+            bersih = [{"ilustrasi": "kata", "jangkar": [_mp.norm(kata)], "teks": kata}]
+            sumber = "kata kunci caption"
+    jendela, c2 = _mp.jadwal_panggung(bersih, kata_waktu, durasi,
+                                      ada_cta=bool((data.get("motion_plan") or {}).get("cta")))
+    if not jendela:
+        PANGGUNG.update(dipakai=False, alasan="tidak ada momen yang lolos pemeriksaan",
+                        catatan=catatan + c2)
+        return []
+    PANGGUNG.update(sumber=sumber, catatan=catatan + c2)
+    return jendela
+
+
+def terapkan_panggung(video_masuk, jendela, video_keluar, folder):
+    """Ganti tampilan di tiap jendela: latar Remotion + video pembicara jadi kartu membulat yang
+    meluncur naik. Audio disalin apa adanya. Melempar OverlayError."""
+    daftar, info = _ovr.render_panggung(jendela, folder, lebar=TARGET_W, tinggi=TARGET_H, fps=FPS)
+    k = _ovr.kartu_panggung(TARGET_W, TARGET_H)
+    from PIL import Image, ImageDraw
+    masker = os.path.join(folder, "_panggung_masker.png")
+    m = Image.new("L", (k["w"], k["h"]), 0)
+    ImageDraw.Draw(m).rounded_rectangle([0, 0, k["w"] - 1, k["h"] - 1], radius=k["r"], fill=255)
+    m.save(masker)
+    en = "+".join(f"between(t,{j['mulai']:.3f},{j['selesai']:.3f})" for j in jendela)
+    naik = 0.35
+    geser = "+".join(f"if(between(t,{j['mulai']:.3f},{j['mulai'] + naik:.3f}),"
+                     f"pow(1-(t-{j['mulai']:.3f})/{naik},2)*{TARGET_H * 0.25:.0f},0)" for j in jendela)
+    rasio = k["h"] / k["w"]
+    f = (f"[0:v]split=2[dasar][src];"
+         f"[src]crop=iw:min(ih\,iw*{rasio:.5f}):0:(ih-min(ih\,iw*{rasio:.5f}))*0.3,"
+         f"scale={k['w']}:{k['h']},format=yuva420p[c0];"
+         f"[2:v]format=gray,scale={k['w']}:{k['h']}[m];[c0][m]alphamerge[kartu];"
+         f"[1:v]format=yuv420p,setpts=PTS-STARTPTS[latar];"
+         f"[dasar][latar]overlay=eof_action=pass:enable='{en}'[v1];"
+         f"[v1][kartu]overlay=x={k['x']}:y='{k['y']}+{geser}':enable='{en}'[vout]")
+    run_ffmpeg(["-i", video_masuk, "-f", "concat", "-safe", "0", "-i", daftar,
+                "-loop", "1", "-framerate", str(FPS), "-i", masker,
+                "-filter_complex", f, "-map", "[vout]", "-map", "0:a?", "-c:v", "libx264",
+                "-pix_fmt", "yuv420p", "-preset", "veryfast", "-crf", "18", "-c:a", "copy",
+                "-shortest", video_keluar], "tata letak panggung")
+    return info
+
+
+def siapkan_motion(data, durasi, kata_waktu, ada_teks_statis, folder, naskah=None, tata="atas",
+                   hindari=()):
     """Rencana motion graphic dari brief -> divalidasi & dijadwalkan kode (motion_plan) ->
     potongan dirender Remotion ke `folder`. Return pekerjaan (ditempel bersama encode teks)
     atau None; alasannya SELALU dicatat di MOTION (dilaporkan ke user)."""
@@ -1534,6 +1613,12 @@ def siapkan_motion(data, durasi, kata_waktu, ada_teks_statis, folder, naskah=Non
     bersih, c1 = _mp.bersihkan(plan, naskah=naskah if naskah is not None else data.get("full_voice_over"),
                                sumber_fakta=_sumber_fakta(data), pakai_jangkar=bool(kata_waktu))
     items, c2 = _mp.jadwal(bersih, kata_waktu, durasi, ada_teks_statis=ada_teks_statis)
+    if hindari:
+        # Tata letak panggung mengganti seluruh layar: elemen yang jatuh di jendelanya dibuang.
+        tabrak = [i for i in items if _mp.bertumpuk(i["mulai"], i["selesai"], hindari)]
+        c2 = c2 + [f"{i['jenis']} \"{i.get('teks', '')}\" dibuang: bertabrakan dengan panggung"
+                   for i in tabrak]
+        items = [i for i in items if i not in tabrak]
     catatan = c1 + c2
     if not items:
         MOTION.update(dipakai=False, alasan="tidak ada elemen yang lolos pemeriksaan", catatan=catatan)
@@ -1684,7 +1769,11 @@ def _gaya_scene(sc):
 def siapkan_caption(scenes, folder):
     """Scene ucapan bergaya "dinamis" -> pekerjaan komposit Remotion. Melempar OverlayError."""
     kata = [w for s in scenes for w in (s.get("words") or [])]
-    potongan = _cd.potong(kata, CAPTION_KUNCI)
+    tepi = [t for j in PANGGUNG_JENDELA for t in (j["mulai"], j["selesai"])]
+    potongan = _cd.potong(kata, CAPTION_KUNCI, batas=tepi)
+    for p in potongan:
+        if any(j["mulai"] - 1e-6 <= p["mulai"] < j["selesai"] for j in PANGGUNG_JENDELA):
+            p["varian"] = "panggung"
     if not potongan:
         raise _ovr.OverlayError("tidak ada kata bertimestamp untuk caption")
     kerja, info = _ovr.render_caption(potongan, folder, lebar=TARGET_W, tinggi=TARGET_H, fps=FPS,
@@ -2110,6 +2199,8 @@ def render_from_agent_script(
     MONTASE.clear()
     CAPTION.clear()
     CAPTION_KUNCI.clear()
+    PANGGUNG.clear()
+    PANGGUNG_JENDELA.clear()
     sfx_info = None
     audio_mode = (data.get("audio_mode") or "ai").strip().lower()
     bisu = audio_mode == "mute"
@@ -2339,6 +2430,26 @@ def render_from_agent_script(
         naskah_terdengar = None
     # Kata kunci caption dinamis: usulan brief yang BENAR-BENAR terdengar (aturan #5).
     CAPTION_KUNCI[:] = _cd.kata_kunci_bersih(data.get("kata_kunci"), naskah_terdengar or full_vo)
+    # Tata letak panggung DI VIDEO DASAR (sebelum grafik & teks): semua lapisan lain ada di atasnya.
+    jendela = siapkan_panggung(data, kata_waktu, float(total_duration), naskah_terdengar or full_vo)
+    if jendela:
+        dengan_panggung = os.path.join(output_dir, "_combined_panggung.mp4")
+        folder_p = tempfile.mkdtemp(prefix="_overlay_panggung_", dir=output_dir)
+        try:
+            info_p = terapkan_panggung(silent_combined, jendela, dengan_panggung, folder_p)
+            os.replace(dengan_panggung, silent_combined)
+            PANGGUNG_JENDELA[:] = jendela
+            PANGGUNG.update(dipakai=True, gagal=None, jendela=jendela, **info_p)
+            print(f"🎭 Panggung: {len(jendela)} jendela ({', '.join(j['ilustrasi'] for j in jendela)}), "
+                  f"{info_p['frame_chromium']} frame Chromium.")
+        except Exception as e:
+            PANGGUNG.update(dipakai=False, gagal=f"{type(e).__name__}: {e}"[:300])
+            print(f"[warn] panggung gagal ({e}) — video tanpa tata letak panggung.")
+            if os.path.exists(dengan_panggung):
+                os.remove(dengan_panggung)
+        finally:
+            shutil.rmtree(folder_p, ignore_errors=True)
+    sibuk_panggung = [(j["mulai"], j["selesai"]) for j in PANGGUNG_JENDELA]
     motion = None
     folder_motion = tempfile.mkdtemp(prefix="_overlay_motion_", dir=output_dir)
     try:
@@ -2346,12 +2457,13 @@ def render_from_agent_script(
                                 any(s.get("statis") for s in scenes), folder_motion,
                                 naskah=naskah_terdengar,
                                 # Suara asli: pembicara di layar -> grafik di bawah wajahnya.
-                                tata="bawah" if pakai_audio_asli else "atas")
+                                tata="bawah" if pakai_audio_asli else "atas",
+                                hindari=PANGGUNG_JENDELA)
         if pakai_audio_asli:
             # Cutaway BOLEH bertumpuk dengan elemen motion (kartu digambar di atas klip stok):
             # melarangnya membuang SEMUA B-roll di render nyata 25 Sep, karena momen penting untuk
             # B-roll dan untuk grafik sering kata yang sama. Kartu pembuka/ajakan tetap dihindari.
-            cutaway, info_cut = siapkan_cutaway(data, kata_waktu, float(total_duration), [],
+            cutaway, info_cut = siapkan_cutaway(data, kata_waktu, float(total_duration), sibuk_panggung,
                                                 folder_motion)
             if info_cut is not None:
                 broll_info = info_cut
@@ -2385,6 +2497,8 @@ def render_from_agent_script(
             tempel_ok = not str(MOTION.get("gagal") or "").startswith("penempelan")
             whoosh = [p["mulai"] / FPS for p in (motion or [])
                       if p.get("jenis") == "klip" and tempel_ok]
+            # Panggung masuk & keluar: perpindahan tata letak paling besar di video.
+            whoosh += [t for j in PANGGUNG_JENDELA for t in (j["mulai"], j["selesai"])]
             pop = (CAPTION.get("detik_kunci") or []) if CAPTION.get("dipakai") else []
             peristiwa = _sfx.jadwal(pop, whoosh, float(total_duration))
             sementara = os.path.join(output_dir, "_with_sfx.mp4")
@@ -2451,6 +2565,8 @@ def render_from_agent_script(
             import qa_video as _qa
             cut = [(d["mulai"], d.get("selesai", d["mulai"] + 3.0))
                    for d in ((broll_info or {}).get("dipakai") or []) if "mulai" in d]
+            # Jendela panggung: latar & kartu sengaja menutup tepi/zona UI -- bukan teks terpotong.
+            cut += [(j["mulai"], j["selesai"]) for j in PANGGUNG_JENDELA]
             qa = _qa.periksa(
                 output_video, dasar=silent_combined,
                 ada_foto=any(os.path.splitext(p)[1].lower() in IMAGE_EXTENSIONS for p in existing_assets),
@@ -2501,6 +2617,7 @@ def render_from_agent_script(
         teks_animasi=dict(TEKS_ANIMASI) or None,
         motion=dict(MOTION) or None,
         caption=dict(CAPTION) or None,
+        panggung=dict(PANGGUNG) or None,
         sfx=sfx_info,
         pengisian=dict(PENGISIAN) if audio_mode == "ai" and PENGISIAN else None,
         qa=qa,

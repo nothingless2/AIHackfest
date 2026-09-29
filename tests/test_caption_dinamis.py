@@ -210,3 +210,15 @@ def test_banyak_potongan_tetap_satu_input_komposit(tmp_path):
            for i in range(30)]
     kerja, info = orr.render_caption(pot, str(tmp_path), lebar=180, tinggi=320, fps=24, durasi=15.2)
     assert len(kerja) == 1 and kerja[0]["jenis"] == "concat" and info["potongan"] == 30
+
+
+def test_potongan_tidak_melintasi_tepi_panggung():
+    kata = kw("satu dua tiga empat lima enam", per=0.5)     # mulai 0,0 / 0,5 / 1,0 / ...
+    p = cd.potong(kata, batas=[1.2, 2.2])
+    for x in p:
+        for b in (1.2, 2.2):
+            assert not (x["mulai"] < b < x["selesai"]), f"{x} melintasi {b}"
+    assert [w for x in p for w in x["kata"]] == "satu dua tiga empat lima enam".split()
+    for w in kata:            # tiap kata TAMPIL saat diucapkan, termasuk tepat sesudah tepi
+        assert any(x["mulai"] - 1e-9 <= w["start"] < x["selesai"] and cd.tampilan(w["word"]) in x["kata"]
+                   for x in p), f"{w['word']} tidak tampil saat diucapkan"

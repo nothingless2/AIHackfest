@@ -270,3 +270,74 @@ def jadwal_broll(usulan, kata_waktu, durasi, *, sibuk=()):
                        "mulai": round(a, 3), "selesai": round(b, 3), "dari_user": bool(u.get("dari_user"))})
         terpakai.append((a, b))
     return jadwal, catatan
+
+
+# ---------------------------------------------------------------- tata letak "panggung"
+# 29 Sep, contoh video user (Claude + Remotion): di momen poin utama, pembicara mengecil jadi kartu
+# membulat di latar terang berkisi, ilustrasi di atasnya, caption jadi judul serif. LLM hanya
+# mengusulkan ILUSTRASI (katalog tertutup) dan kata jangkarnya; kode menjadwalkan dari kata yang
+# benar-benar terdengar.
+
+ILUSTRASI = ("timeline", "grafik_naik", "checklist", "chat", "kode", "kata")
+PANGGUNG_MAKS = 2
+PANGGUNG_LAMA = 3.0          # detik tampil
+PANGGUNG_MIN = 2.2           # terpotong lebih pendek dari ini = dibuang
+PANGGUNG_JARAK = 5.0         # jarak minimal antar-mulai panggung
+PANGGUNG_SEBELUM = 0.15      # mulai sedikit sebelum kata jangkar diucapkan
+PANGGUNG_TEPI = 0.4          # celah dari kartu pembuka / ajakan
+
+
+def bersihkan_panggung(usulan, *, naskah):
+    """(daftar, catatan). daftar: [{"ilustrasi", "jangkar", "teks"}]; ilustrasi "kata" menampilkan
+    kata jangkar itu sendiri (dari ucapan, bukan karangan LLM)."""
+    catatan, hasil = [], []
+    if not isinstance(usulan, list):
+        return hasil, (["usulan panggung bukan daftar"] if usulan else [])
+    kata_naskah = [norm(w) for w in (naskah or "").split()]
+    for i, u in enumerate(usulan, 1):
+        if not isinstance(u, dict):
+            continue
+        il = str(u.get("ilustrasi") or "").strip().lower()
+        if il not in ILUSTRASI:
+            catatan.append(f"panggung {i} dibuang: ilustrasi {il!r} tidak ada di katalog")
+            continue
+        jangkar = token_jangkar(u.get("saat_kata"))
+        if not jangkar or cari_frasa(kata_naskah, jangkar) is None:
+            catatan.append(f"panggung {i} dibuang: kata jangkar {u.get('saat_kata')!r} tidak terucap")
+            continue
+        hasil.append({"ilustrasi": il, "jangkar": jangkar,
+                      "teks": " ".join(str(u.get("saat_kata")).split()[:3])})
+    return hasil, catatan
+
+
+def jadwal_panggung(bersih, kata_waktu, durasi, *, awal=HOOK_DETIK, ada_cta=True):
+    """(jendela, catatan). jendela: [{"mulai", "selesai", "ilustrasi", "teks"}], urut, tak bertumpuk,
+    di luar kartu pembuka/ajakan, berjarak >= PANGGUNG_JARAK, maksimal PANGGUNG_MAKS."""
+    catatan, hasil = [], []
+    batas_akhir = durasi - (CTA_DETIK if ada_cta and durasi >= DURASI_MIN_CTA else 0) - PANGGUNG_TEPI
+    waktu = [(norm(w.get("word")), float(w["start"])) for w in (kata_waktu or [])]
+    pos = -1
+    for p in bersih or []:
+        j = cari_frasa([w for w, _ in waktu], p["jangkar"], mulai=pos + 1)
+        if j is None:
+            catatan.append(f"panggung \"{p['teks']}\" dibuang: kata tidak ditemukan di suara")
+            continue
+        pos = j
+        a = max(waktu[j][1] - PANGGUNG_SEBELUM, awal + PANGGUNG_TEPI)
+        b = min(a + PANGGUNG_LAMA, batas_akhir)
+        if b - a < PANGGUNG_MIN:
+            catatan.append(f"panggung \"{p['teks']}\" dibuang: tidak cukup waktu")
+            continue
+        if hasil and a - hasil[-1]["mulai"] < PANGGUNG_JARAK:
+            catatan.append(f"panggung \"{p['teks']}\" dibuang: terlalu dekat panggung sebelumnya")
+            continue
+        if len(hasil) >= PANGGUNG_MAKS:
+            catatan.append(f"panggung \"{p['teks']}\" dibuang: batas {PANGGUNG_MAKS} per video")
+            continue
+        hasil.append({"mulai": round(a, 3), "selesai": round(b, 3), "ilustrasi": p["ilustrasi"],
+                      "teks": p["teks"]})
+    return hasil, catatan
+
+
+def bertumpuk(a, b, jendela):
+    return any(a < j["selesai"] and b > j["mulai"] for j in jendela)
