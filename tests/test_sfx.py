@@ -31,6 +31,11 @@ def _rms_per(x, rate=16000, win=0.01):
     return np.sqrt((x[:k * n].reshape(k, n) ** 2).mean(axis=1))
 
 
+def test_pop_jarang():
+    j = sfx.jadwal(pop_detik=[1.0, 3.0, 5.5, 6.0], durasi=10.0)
+    assert j == [(1.0, "pop"), (5.5, "pop")]
+
+
 def test_jadwal_berjarak_dan_di_dalam_durasi():
     j = sfx.jadwal(pop_detik=[1.0, 1.3, 5.0], whoosh_detik=[0.0, 2.0, 9.95], durasi=10.0)
     assert j == [(0.0, "whoosh"), (1.0, "pop"), (2.0, "whoosh"), (5.0, "pop")]

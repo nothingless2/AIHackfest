@@ -116,6 +116,17 @@ Instruksi agent: `hermes-skill/content-factory/SKILL.md` (salin ke `~/.hermes/sk
   Voice-over dipakai ulang dari cache bila naskah & suaranya sama. Catatan milik chat lain,
   lebih dari 7 hari, atau bahannya hilang ditolak.
 
+**Caption dinamis** (`--subtitle-style dinamis`, tahap uji): potongan 1-3 kata dari waktu kata
+yang terdengar (`scripts/caption_dinamis.py`), satu kata kunci tampil besar bergradasi emas dengan
+pop (`remotion/src/CaptionDinamis.jsx`), plus SFX pop/whoosh sintesis di kata kunci, kartu, dan
+cutaway (`scripts/sfx.py`, `--sfx on|off`).
+- Kata kunci: usulan brief yang benar-benar diucapkan, lalu heuristik (angka, merek, kata panjang).
+  Keduanya dibatasi ±40% potongan, berjarak ≥ 1,2 dtk, dan maksimal 2 kali per kata.
+- Render hemat: SATU sesi Chromium untuk semua potongan (timeline ringkas), lalu satu input concat
+  PNG ke komposit. Versi pertama memakai satu input ffmpeg per potongan dan terbunuh OOM (3,8 GB).
+- Terukur di video 45 dtk: +51 dtk render, proses terbesar 1,3 GB. Gagal → subtitle gaya `kata`.
+- Aturan Remotion mengikuti Remotion Agent Skills (`.claude/skills/remotion-*`, untuk Claude Code).
+
 **Motion graphic** (bawaan `sedang`, matikan dengan `--motion mati`) dirender Remotion
 (`remotion/src/MotionOverlay.jsx`):
 - Jenisnya: kartu pembuka, sorot kata kunci, ikon, langkah, label, kartu ajakan.

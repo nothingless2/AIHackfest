@@ -28,6 +28,9 @@ agar supaya kalau jika sudah akan bisa ada adalah ya aja saja sih kok dong deh l
 aku saya kamu kalian kita kami dia mereka anda gue lo lu nya tuh gitu gini banget sangat
 lebih paling sama buat biar terus lagi udah belum masih cuma hanya semua setiap para
 sebelum sesudah setelah ketika seperti bahwa tentang
+kenapa mengapa bagaimana gimana memang pernah mungkin sekarang nanti tadi kemudian
+lalu makanya soalnya padahal walaupun meskipun apalagi misalnya contohnya intinya
+sebenarnya beberapa banyak sedikit kayak bener benar emang aduh oke okay yaudah sekali
 the a an and or to of in on for is are was it this that with you i we they be
 """.split())
 

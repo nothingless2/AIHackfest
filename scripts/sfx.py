@@ -16,6 +16,9 @@ import numpy as np
 
 RATE = 48000
 JARAK_MIN = 0.6              # dtk antar SFX: yang lebih awal menang
+# Pop lebih jarang dari whoosh: render nyata 27 Sep = 16 pop dalam 45 dtk (tiap ±2,8 dtk) terasa
+# seperti ketukan terus-menerus. Pop hanya bila >= JARAK_POP dari pop sebelumnya.
+JARAK_POP = float(os.getenv("SFX_JARAK_POP", "4.0"))
 DI_BAWAH_UCAPAN_DB = float(os.getenv("SFX_BELOW_SPEECH_DB", "4"))   # puncak SFX vs LUFS ucapan
 # Batas bawah kecil sekali: 0,05 (versi pertama) membuat SFX LEBIH KERAS dari ucapan pelan
 # (terukur di tes: ucapan -30 dBFS, SFX -27 dBFS).
@@ -75,6 +78,9 @@ def jadwal(pop_detik=(), whoosh_detik=(), durasi=None):
         if d < 0 or (durasi is not None and d > durasi - 0.1):
             continue
         if hasil and d - hasil[-1][0] < JARAK_MIN:
+            continue
+        pop_lalu = [x for x, j in hasil if j == "pop"]
+        if jenis == "pop" and pop_lalu and d - pop_lalu[-1] < JARAK_POP:
             continue
         hasil.append((round(d, 3), jenis))
     return hasil

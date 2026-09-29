@@ -42,6 +42,12 @@ naskah (atau beberapa short) BESERTA gambar storyboard; video baru dibuat setela
 | Voice AI natural + teks + animasi (+musik/lagu) | `--audio-mode ai` (+ `--broll` bila minta klip stok, `--music on`) |
 | Video bicara panjang dipecah jadi beberapa konten | `--audio-mode original --jumlah-short 2` atau `3` |
 | Klip/foto tanpa omongan + lagu | `--audio-mode mute --music on` (+ `--music-file`); potongan otomatis mengikuti ketukan lagu |
+| "Teks lebih dinamis", "caption kayak Remotion/CapCut kekinian", "kata penting dibesarkan" | tambahkan `--subtitle-style dinamis` ke resep mana pun yang berucap/bernarasi |
+
+`--subtitle-style dinamis` (tahap uji): teks tampil 1-3 kata sekaligus, kata PENTING tampil besar
+berwarna emas dengan animasi pop, plus efek suara pop/whoosh halus (matikan: `--sfx off`). Render
+±1 menit lebih lama. Kalau hasil berisi `caption.gagal`, sampaikan: video tetap bersubtitle gaya
+biasa. `sfx.dipakai: false` + `alasan` cukup disebut singkat.
 
 B-roll di mode suara asli ditampilkan SEBENTAR di atas video (cutaway) saat kata yang relevan
 diucapkan: suara asli dan subtitle tidak bergeser. Di mode voice-over AI klip stok disisipkan.
@@ -302,6 +308,8 @@ python3 /root/AIHackfest/scripts/hermes_render.py   --chat-id "<label chat yang 
 | "ganti lagunya" | `--ganti-musik` (atau `--music-file <path>` bila user kirim lagu) |
 | "tanpa musik" | `--music off` |
 | "subtitle/teks narasi lebih tebal/mencolok" | `--subtitle-style capcut` (atau `karaoke-tebal`, `kata`, `karaoke-kapital`) |
+| "teks lebih dinamis", "kata penting dibesarkan" | `--subtitle-style dinamis` |
+| "efek suaranya dimatikan" / "tanpa bunyi pop" | `--sfx off` |
 | "font judul/teks tulisan", "teks di atas" | `--text-font tegas`, `--text-position atas` (HANYA teks tulisan, bukan subtitle/narasi) |
 | "warna lebih hangat" | `--color-filter warm` |
 | "tanpa grafik/animasi" | `--motion mati` |

@@ -62,7 +62,10 @@ CORE_STAGES = [
     # (630 naik dari 480, 24 Sep: motion graphic -- satu render Remotion lagi dengan batas
     #  KERAS yang sama (120) = 521 terburuk -> margin ~20%. Terukur: 6 elemen 1080x1920 =
     #  ~35 dtk Chromium; penempelannya menumpang encode teks, tanpa encode tambahan.)
-    ("agent3_render.py", "ContentMakers", True, 630),
+    # (870 naik dari 630, 27 Sep: caption dinamis -- satu sesi Chromium lagi dengan batas KERAS
+    #  CAPTION_TIMEOUT 240 dtk = 761 terburuk -> margin ~14%. Terukur: video 45 dtk / 42 potongan
+    #  = +51 dtk total render dibanding gaya kata.)
+    ("agent3_render.py", "ContentMakers", True, 870),
 ]
 
 # Draf naskah (scripts/draf_naskah.py): ContentInsight + brief saja, TANPA render. Brief draf

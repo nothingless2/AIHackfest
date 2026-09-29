@@ -19,6 +19,7 @@ untuk penjelasan alur & desain lengkap.
 | Pipeline berhenti saat tahap kritis gagal | Exit code diperiksa, tidak lanjut dengan data basi |
 | Data performa tidak selalu "HIGH_PERFORMING" | Hasil tes nyata: `MODERATE_PERFORMING` |
 | Revisi cepat tanpa LLM (26 Sep) | Render nyata + 4 revisi berantai: 80-94 dtk tiap revisi, 0 panggilan LLM; klip B-roll yang tidak disebut ber-id Pexels sama; audio revisi ke-4 identik byte-per-byte dengan revisi ke-3 (cache TTS, 0 panggilan ElevenLabs); chat lain ditolak |
+| Caption dinamis + SFX (27 Sep, tahap uji) | Render nyata 6 video berucap (45 dtk): 42 potongan, kata kunci emas tepat saat diucapkan, 8 pop + 4 whoosh, QA lolos; +51 dtk vs gaya kata; proses terbesar 1,3 GB (versi pertama OOM 3,8 GB → diganti satu input concat) |
 | **Render cepat (ffmpeg-native)** | Profiling berlapis: 332,8s → 35,6s untuk render (~9x), lihat detail di bawah |
 
 ### Optimasi performa render (2026-09-16)
