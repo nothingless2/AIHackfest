@@ -72,6 +72,9 @@ os.environ["TTS_PROVIDER"] = ""
 os.environ["LLM_FALLBACK"] = ""
 # Cache voice-over menulis ke workspace/state asli; tes cache mengarahkannya ke tmp_path sendiri.
 os.environ["TTS_CACHE"] = "0"
+# Pembersih suara mengubah audio (gerbang/EQ/kompresor): tes lama membandingkan audio dengan sumbernya.
+# Dinyalakan di tests/test_suara.py sendiri.
+os.environ["BERSIH_SUARA"] = "0"
 os.environ["ELEVENLABS_API_KEY"] = ""
 os.environ["TTS_VOICE_GENDER"] = ""
 

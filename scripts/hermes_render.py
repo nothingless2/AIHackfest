@@ -146,6 +146,8 @@ def _parser():
                    help="Bahan tanpa ucapan + musik: potongan mengikuti ketukan (bawaan on).")
     p.add_argument("--sfx", choices=["on", "off"], default=None,
                    help="Bunyi pop/whoosh di kata kunci & grafik (bawaan: on untuk --subtitle-style dinamis).")
+    p.add_argument("--bersih-suara", choices=["on", "off"], default=None,
+                   help="Pembersih suara ucapan asli: gerbang jeda + penegas vokal + peredam bila berisik (bawaan on).")
     p.add_argument("--motion", default=None,
                    help="Motion graphic penjelas: sedang (bawaan) | mati.")
     p.add_argument("--jumlah-short", type=int, choices=[1, 2, 3], default=None,
@@ -189,7 +191,8 @@ LABEL_REVISI = {"music": "musik", "music_mood": "suasana musik", "music_file": "
                 "voice_persona": "persona suara", "speed_factor": "kecepatan",
                 "visual_cut": "buang bagian goyang", "montase": "montase ketukan",
                 "broll": "B-roll", "broll_query": "kata kunci B-roll", "broll_count": "jumlah B-roll",
-                "auto_zoom": "zoom otomatis", "sfx": "efek suara"}
+                "auto_zoom": "zoom otomatis", "sfx": "efek suara",
+                "bersih_suara": "pembersih suara"}
 
 
 def _flag_eksplisit(parser, argv):
@@ -237,6 +240,7 @@ def _apply_env(args):
         "TEXT_FONT": args.text_font,
         "MOTION_GRAPHIC": args.motion,
         "SFX": args.sfx,
+        "BERSIH_SUARA": args.bersih_suara,
         "MONTASE": {"on": "1", "off": "0", None: None}[args.montase],
         "CONTENT_FACTORY_USER_CONTEXT": args.user_context or None,
     }
@@ -383,6 +387,7 @@ def _hasil_render(run_id, pesan_durasi):
         "motion": status.get("motion"),
         "caption": status.get("caption"),
         "panggung": status.get("panggung"),
+        "suara_bersih": status.get("suara_bersih"),
         "sfx": status.get("sfx"),
         "potongan_visual": status.get("potong_visual"),
         "suara": status.get("suara"),

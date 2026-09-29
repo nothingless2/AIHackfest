@@ -39,6 +39,7 @@ import motion_plan as _mp  # noqa: E402
 import overlay_remotion as _ovr  # noqa: E402
 import caption_dinamis as _cd  # noqa: E402
 import sfx as _sfx  # noqa: E402
+import suara as _suara  # noqa: E402
 import visual_quality as _vq  # noqa: E402
 from broll import BrollError  # noqa: E402
 from edit_plan import MERGE_GAP  # noqa: E402
@@ -2202,6 +2203,7 @@ def render_from_agent_script(
     PANGGUNG.clear()
     PANGGUNG_JENDELA.clear()
     sfx_info = None
+    suara_bersih = None
     audio_mode = (data.get("audio_mode") or "ai").strip().lower()
     bisu = audio_mode == "mute"
     # `pakai_audio_asli` = jalur berbasis durasi klip + transkrip (seleksi, subtitle kata).
@@ -2419,6 +2421,22 @@ def render_from_agent_script(
     else:
         os.replace(segment_paths[0], silent_combined)
 
+    # Pembersih suara: HANYA ucapan asli (TTS sudah bersih; suasana tanpa ucapan harus utuh).
+    if pakai_audio_asli and not bisu and ada_ucapan and _suara.aktif():
+        bersih = os.path.join(output_dir, "_combined_bersih.mp4")
+        try:
+            suara_bersih = _suara.bersihkan(silent_combined, bersih)
+            if suara_bersih.get("dipakai"):
+                os.replace(bersih, silent_combined)
+                print(f"🎧 Suara dibersihkan: SNR {suara_bersih['snr_sebelum']} -> {suara_bersih['snr_sesudah']} dB"
+                      + (" (peredam bising dipasang)" if suara_bersih["peredam_bising"] else ""))
+        except Exception as e:
+            suara_bersih = {"dipakai": False, "alasan": f"{type(e).__name__}: {e}"[:200]}
+            print(f"[warn] pembersih suara dilewati ({e}).")
+        finally:
+            if os.path.exists(bersih):
+                os.remove(bersih)
+
     # Motion graphic & cutaway B-roll dijangkarkan ke kata yang TERDENGAR: narasi TTS (mode AI)
     # atau ucapan asli dari subtitle (sudah dalam detik keluaran). Dirender dulu, lalu ditempel
     # bersama encode teks: cutaway di bawah, motion di tengah, teks paling atas.
@@ -2618,6 +2636,7 @@ def render_from_agent_script(
         motion=dict(MOTION) or None,
         caption=dict(CAPTION) or None,
         panggung=dict(PANGGUNG) or None,
+        suara_bersih=suara_bersih,
         sfx=sfx_info,
         pengisian=dict(PENGISIAN) if audio_mode == "ai" and PENGISIAN else None,
         qa=qa,
