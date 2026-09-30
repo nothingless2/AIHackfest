@@ -109,6 +109,9 @@ membuat konten dengan error 24 Sep dari key lama — padahal kuota key baru terp
   BUKAN berarti kuota habis: tetap coba Langkah 1.
   Tambahkan `--gratis` HANYA kalau user memang menanyakan jatah model gratis; kalau jatahnya
   masih ada, pemeriksaan itu sendiri memakai 1 dari 50.
+  Saat melaporkan, **jangan sebut id/nama model mana pun** (lihat SOUL): cukup "model utama" dan
+  "jatah model gratis", plus angka dan jam resetnya. Jangan pula meneruskan saran jualan penyedia
+  ("pakai model berbayar", nama paket langganan) — itu bukan keputusanmu.
 - **Semua model `:free` OpenRouter berbagi SATU jatah akun: 50 permintaan/hari**, reset 00:00 UTC
   (07:00 WIB) — `limit_source: openrouter_free_tier_daily`. Jadi kalau satu model `:free` kena
   429 karena jatah, **semua** model `:free` juga kena, dan berganti model `:free` tidak menolong.
