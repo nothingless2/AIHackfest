@@ -103,9 +103,17 @@ membuat konten dengan error 24 Sep dari key lama — padahal kuota key baru terp
   ```bash
   cd /root/AIHackfest && python3 scripts/cek_kuota.py
   ```
-  Tidak memakai kuota. `bisa_jalan: true` → jawab bisa, lalu lanjut Langkah 1. `bisa_jalan:
-  false` → sebut `kuota_gratis` dan `reset` apa adanya. `ok: false` → pemeriksaannya yang gagal
-  (`alasan`), BUKAN berarti kuota habis: tetap coba Langkah 1.
+  Memakai satu permintaan 1-token ke model utama (di luar jatah gratis, jadi tidak mengurangi
+  jatah). `bisa_jalan: true` → jawab bisa, lalu lanjut Langkah 1. `bisa_jalan: false` → sebut
+  `kuota_gratis` dan `reset` apa adanya. `ok: false` → pemeriksaannya yang gagal (`alasan`),
+  BUKAN berarti kuota habis: tetap coba Langkah 1.
+  Tambahkan `--gratis` HANYA kalau user memang menanyakan jatah model gratis; kalau jatahnya
+  masih ada, pemeriksaan itu sendiri memakai 1 dari 50.
+- **Semua model `:free` OpenRouter berbagi SATU jatah akun: 50 permintaan/hari**, reset 00:00 UTC
+  (07:00 WIB) — `limit_source: openrouter_free_tier_daily`. Jadi kalau satu model `:free` kena
+  429 karena jatah, **semua** model `:free` juga kena, dan berganti model `:free` tidak menolong.
+  Jangan pernah menjanjikan "aku coba model lain" dalam keadaan itu; sebut jam resetnya.
+  (Terukur 30 Sep: 6 model `:free` menjawab 429 identik dalam 3 detik.)
 - Error hanya boleh dilaporkan dari hasil perintah yang BARU SAJA kamu jalankan di giliran ini,
   dikutip apa adanya dengan jamnya. Waktu reset dari header harus diubah ke tanggal & jam WIB;
   kalau sudah lewat, jangan disebut "besok".

@@ -1,6 +1,6 @@
 {
   "_catatan": "Harga per 1 JUTA token, mata uang USD. PERIKSA ULANG di halaman resmi penyedia sebelum dipakai untuk keputusan biaya nyata -- harga berubah dan file ini tidak memperbarui dirinya sendiri. Model yang TIDAK ada di sini tidak akan ditebak: biayanya dilaporkan null, bukan dikarang.",
-  "updated_at": "2026-09-25",
+  "updated_at": "2026-09-30",
   "currency": "USD",
   "llm": {
     "gpt-4o": {
@@ -29,6 +29,21 @@
       "sumber": "https://openrouter.ai/models (varian ':free' OpenRouter berharga $0 per definisi; dibatasi rate-limit, bukan biaya)"
     },
     "nvidia/nemotron-3-ultra-550b-a55b:free": {
+      "input_per_1m": 0.0,
+      "output_per_1m": 0.0,
+      "sumber": "https://openrouter.ai/models (varian ':free' OpenRouter berharga $0 per definisi; dibatasi rate-limit, bukan biaya)"
+    },
+    "tokenharbor/deepseek-v4.1-flash:free": {
+      "input_per_1m": 0.0,
+      "output_per_1m": 0.0,
+      "sumber": "https://tokenharbor.ai/pricing (varian ':free' Token Harbor tidak ditagih: dibatasi jatah 7 hari bergulir, dan penyedianya sendiri mengarahkan ke id model TERPISAH 'deepseek-v4.1-flash' untuk pemakaian berbayar. Terukur 30 Sep 2026 dari pesan 429-nya.)"
+    },
+    "openrouter/nvidia/nemotron-3-super-120b-a12b:free": {
+      "input_per_1m": 0.0,
+      "output_per_1m": 0.0,
+      "sumber": "https://openrouter.ai/models (varian ':free' OpenRouter berharga $0 per definisi; dibatasi rate-limit, bukan biaya)"
+    },
+    "openrouter/qwen/qwen3.8-27b:free": {
       "input_per_1m": 0.0,
       "output_per_1m": 0.0,
       "sumber": "https://openrouter.ai/models (varian ':free' OpenRouter berharga $0 per definisi; dibatasi rate-limit, bukan biaya)"
@@ -63,6 +78,7 @@
   },
   "tanpa_harga_per_token": {
     "anthropic/claude-haiku-4.5": "Dipakai lewat Snifox (19 Sep 2026). Snifox menjual paket berlangganan berkuota token/hari dan PAYG; harga per-token per model hanya ada di katalog dashboard mereka, tidak bisa diambil lewat API. Sengaja TIDAK diisi dengan harga resmi Anthropic karena Snifox menyatakan 'hingga 95% di bawah harga resmi'. Biayanya dilaporkan null, bukan dikarang. Isi bagian 'llm' kalau harga dari dashboard sudah diketahui.",
-    "openai/gpt-5.5": "LLM_MODEL dipindah ke model ini lewat Snifox setelah 19 Sep 2026, sebelum dokumentasi harga dashboard sempat dicatat. Alasan sama seperti anthropic/claude-haiku-4.5 di atas: harga per-token per model Snifox tidak bisa diambil lewat API. Biayanya dilaporkan null, bukan dikarang. Isi bagian 'llm' kalau harga dari dashboard sudah diketahui."
+    "openai/gpt-5.5": "LLM_MODEL dipindah ke model ini lewat Snifox setelah 19 Sep 2026, sebelum dokumentasi harga dashboard sempat dicatat. Alasan sama seperti anthropic/claude-haiku-4.5 di atas: harga per-token per model Snifox tidak bisa diambil lewat API. Biayanya dilaporkan null, bukan dikarang. Isi bagian 'llm' kalau harga dari dashboard sudah diketahui.",
+    "openrouter/stealth/space-bunny-alpha": "Model 'stealth' (pra-rilis tersamar) di OpenRouter, dipakai sebagai model utama sejak 30 Sep 2026 karena TIDAK ikut jatah 50 permintaan/hari milik varian ':free'. Halaman harga resminya tidak menyebut model ini, jadi harga per-token TIDAK diisi dan biayanya dilaporkan null, bukan dikarang. Yang terukur: akun ini tidak punya kredit berbayar (OpenRouter sendiri meminta 'Add 10 credits' pada error 429), namun 20+ permintaan ke model ini berhasil pada 30 Sep 2026 -- jadi ia tidak menagih akun. Isi bagian 'llm' begitu OpenRouter menerbitkan harganya atau model ini keluar dari status stealth."
   }
 }

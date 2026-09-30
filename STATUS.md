@@ -669,3 +669,71 @@ belakangnya, sehingga model sehat terbaca "rusak" -- diperbaiki dengan `raw_deco
 - **Hasil nyata**:
   - Suara asli + B-roll: peringatan tombol kanan hilang.
   - 2 short dari 6 video (32 & 18 dtk), masing-masing dengan cutaway + grafik; QA lolos.
+
+## 30 Sept 09:26 — "kenapa seperti ini terus": satu jatah akun, bukan model yang rusak
+
+Pagi 30 Sep bot kembali menggantung ("Provider temporarily unavailable — retrying in 64s, cycle
+1/5") walau rantai modelnya baru diganti malam sebelumnya. Penelusuran menemukan **penggantian
+model kemarin memang tidak bisa menolong**, karena salah sasaran.
+
+**Sebab struktural.** Semua model `:free` OpenRouter memakai **SATU jatah milik AKUN: 50
+permintaan/hari** (`limit_source: openrouter_free_tier_daily`, `X-RateLimit-Limit: 50`,
+`Remaining: 0`, reset 00:00 UTC / 07:00 WIB). Jadi rantai cadangan berisi empat model `:free`
+tidak menambah ketahanan sedikit pun — kalau satu kena 429 karena jatah, semuanya kena. Terukur
+09:26:06-09:26:13 (7 detik): nemotron-super, qwen, gemma menjawab 429 identik; probe langsung
+pukul 09:37 memastikan **6 model `:free` habis serentak**.
+
+**Pemicunya.** Sesi macet 29 Sep 23:08 (`20260929_230820_e39f64c1`, yang mengarang `telegram-cli`)
+masih hidup pagi ini. Antara reset 07:00 dan pesan user 09:26 ia membuat 30 panggilan — 22 di
+antaranya pemadatan konteks — dan **menghabiskan jatah 50 yang baru direset** sebelum user
+mengirim apa pun. Log: 46 error 429 pukul 00:xx, 16 pukul 01:xx, 16 pukul 08:xx, 29 pukul 09:xx.
+
+**Yang sudah dicek dan BUKAN penyebab** (aturan #1 — kontrol negatif juga perlu):
+- cron Hermes: scheduler berdetak tapi **nol job** (`executions.db` tak berubah sejak 21 Sep).
+- gateway kedua (`pid 3670`, `/opt/hermes`, `HERMES_HOME=/opt/data`): idle, **tanpa `config.yaml`
+  dan tanpa `.env`**, nol koneksi keluar, nol log hari ini.
+
+**Hasil ukur 19 model di router (30 Sep 09:37-10:05).**
+
+| Model | Keadaan | Andal | Tool | Vision | Konteks |
+|---|---|---|---|---|---|
+| `openrouter/stealth/space-bunny-alpha` | **hidup** | 5/5 | ya | ya | 200K |
+| 6 model `openrouter/*:free` | 429 jatah akun | — | — | — | — |
+| `tokenharbor/deepseek-v4.1-flash:free` | jatah 7 hari habis s.d. 5 Okt 02:24 UTC | — | — | — | — |
+| `agnes/agnes-2.0-flash` | 1 lolos lalu 429 | 0/5 | — | — | — |
+| `agnes/agnes-1.5-flash` | `model_not_found` | — | — | — | — |
+| `openrouter/inclusionai/ling-3.0-flash-fin:free` | 404 tidak tersedia | — | — | — | — |
+| `openrouter/thinkingmachines/inkling-small:free` | 403 | — | — | — | — |
+| `openrouter/typesafe/jev-1.13` | 400 "decisions model", bukan chat | — | — | — | — |
+| `lm-agent` | 400 unsupported | — | — | — | — |
+| `tokenharbor/claude-*`, `gpt-6-*`, `grok-4.7` | berbayar, tidak diprobe tanpa izin | — | — | — | — |
+
+**Uji beban** (skenario nyata 29 Sep: konteks panjang + 3 tool_call kirim gagal exit 127):
+`space-bunny-alpha` **0/15 mengulangi perintah CLI** dan **0/15 loop** — mode gagal semalam tidak
+tereproduksi. Kebocoran nalar 1/15 dengan panduan SKILL baru saja; 0/6 setelah SOUL diberi satu
+baris larangan menulis proses berpikir. Untuk pipeline: `response_format=json_object` **5/5 sah
+menurut skema**, dan vision benar — pada frame detik 3 draf itu ia membaca teks overlay
+"SPESIAL", yang memang ada di sana (kontrol positif).
+
+**Perubahan.**
+- `~/.hermes/config.yaml`: utama -> `openrouter/stealth/space-bunny-alpha` (di luar jatah 50/hari);
+  cadangan -> nemotron-super, qwen, deepseek, dengan komentar yang menjelaskan jatah bersama.
+  `gemma-4-31b` dibuang (0/5 walau jatah ada). Diff-kontrol: 29 kunci tetap 29, hanya 2 berubah.
+- `~/.hermes/SOUL.md`: larangan menulis proses berpikir dan menjawab Bahasa Inggris.
+- `scripts/cek_kuota.py`: sejak pindah ke router lokal (tanpa `/key`) pemeriksa **selalu** menjawab
+  `bukan_openrouter` — agent buta lagi, persis masalah 26 Sep. Sekarang ia mengukur: satu
+  permintaan 1-token ke model utama, dan angka jatah dibaca dari header di badan 429
+  (`buka_bungkus` membuka lapisan JSON ter-escape dari router; tanpa itu `raw_decode` selalu
+  gagal). Jatah `:free` hanya diprobe kalau perlu, karena probe yang berhasil memakai 1 dari 50.
+- `config/pricing.json`: rantai model baru diisi — varian `:free` $0 (dengan sumbernya),
+  `space-bunny-alpha` masuk `tanpa_harga_per_token` karena harganya tidak dipublikasikan.
+  Ini menutup `test_model_yang_dipakai_pipeline_punya_harga` yang sejak 25 Sep di-deselect.
+- SKILL: aturan "satu jatah bersama" + cara pakai `--gratis`.
+
+**Belum dikerjakan.** `.env` repo (`LLM_MODEL`/`LLM_FALLBACK`) **masih rantai lama yang mati**
+(deepseek habis s.d. 5 Okt + agnes/gemma/nemotron-nano). Jadi pipeline video masih akan gagal
+memanggil LLM walau agent Telegram sudah jalan. Suntingan diblokir classifier ("Production
+Deploy"); menunggu user.
+
+**Tes.** 1139 lolos, 0 gagal. Tiga mutasi pada `cek_kuota` (matikan `buka_bungkus`, probe jatah
+tanpa alasan, reset ditebak bukan dari header) semuanya tertangkap.
