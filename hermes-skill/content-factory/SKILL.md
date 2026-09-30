@@ -289,8 +289,20 @@ user ingin mengubahnya, buat draf baru (Langkah 3). Satu draf hanya bisa dirende
 
 Baca output JSON (satu baris) dari proses latar belakang itu.
 
-- **`ok: true`**: kirim file di `video_path` ke chat ini (pakai kemampuan kirim
-  file/media bawaanmu, BUKAN skrip ini). **Simpan `run_id`-nya** (per short untuk hasil `shorts`):
+**CARA MENGIRIM VIDEO — baca ini sebelum apa pun.** Kirim `video_path` memakai kemampuan kirim
+file/media BAWAANMU, persis seperti kamu mengirim gambar storyboard di Langkah 4. **DILARANG
+KERAS** memakai terminal untuk mengirim: tidak ada perintah `telegram`, `tg`, `telegram-cli`,
+`hermes send`, atau sejenisnya di mesin ini, dan **JANGAN memasang apa pun** (`apt-get install`,
+`npm i`, `pip install`) untuk mencarinya. Kalau perintah kirim pertamamu gagal, JANGAN mencoba
+perintah lain dan JANGAN mengulang: langsung balas user dengan satu kalimat + `video_path`-nya,
+mis. "Videonya jadi tapi gagal kukirim: /root/AIHackfest/workspace/drafts/video_xxx.mp4".
+
+(29 Sep 23:28: render SUKSES (`video_fe04a6ec.mp4`, 15 dtk, QA lolos), lalu 2 jam habis mencoba
+`telegram send` → `tg` → `telegram-cli` → `apt-get install`, berujung dua kali loop pengulangan dan
+pesan 35.000-56.000 karakter berisi "18.50 tbc" berulang. Videonya tidak pernah sampai ke user.)
+
+- **`ok: true`**: kirim file di `video_path` ke chat ini (kemampuan kirim bawaanmu, BUKAN
+  terminal/skrip apa pun). **Simpan `run_id`-nya** (per short untuk hasil `shorts`):
   itu kunci revisi cepat (Langkah 7). Caption ringkas dari `judul` +
   `deskripsi` + `hashtags`. Sebutkan `catatan_durasi` kalau ada isinya (artinya
   durasi diminta user dijepit ke batas yang berbeda). Kalau `qa.masalah` berisi sesuatu,
