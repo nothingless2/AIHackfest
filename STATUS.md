@@ -605,6 +605,43 @@ pro 23,6 dtk. `EDIT_MODEL` berbayar dijadikan komentar sehingga memakai model gr
   - Temuan 2: huruf Mandarin "报错" bocor ke caption varian B. Pesan draf kini menandai huruf
     asing di judul/caption juga.
 
+## 30 Sept — video tidak terkirim 2 jam: model cadangan diganti setelah DIUKUR
+
+**Kejadian (29 Sep 23:28 - 30 Sep 01:27).** Render SUKSES (`video_fe04a6ec.mp4`, 15,3 dtk, QA
+lolos) tapi video tidak pernah sampai ke user. Dua sebab terpisah:
+
+1. **Agent mengarang perintah kirim.** SKILL lama hanya bilang "BUKAN skrip ini", jadi agent
+   mencari CLI lain: `telegram send` -> `tg` -> `telegram-cli` -> `apt-get install` (semua exit
+   127). Padahal 8 menit sebelumnya ia BERHASIL mengirim 2 foto storyboard secara native
+   (`Sending media group of 2 photo(s)`).
+2. **Rantai cadangan jatuh ke model yang tidak layak agent.** deepseek tumbang 23:30 -> agnes
+   (balasan 17-56 token) -> `nemotron-3-nano-omni-30b-a3b-reasoning:free`: **28.260 token
+   keluaran** berisi "18.50 tbc" berulang, pesan Telegram 35.000 lalu 56.000 karakter, dan
+   isi nalar bocor sebagai jawaban ("We need to see the actual output...").
+
+**Yang diukur (30 Sep pagi).** Skenario nyata direproduksi (konteks panjang + 3 tool gagal exit
+127), dibandingkan panduan SKILL lama vs baru; plus keandalan 5 panggilan/model:
+
+| Model | Andal | Latensi | Panduan lama | Vision |
+|---|---|---|---|---|
+| `nemotron-3-super-120b-a12b:free` | 5/5 | 1,5 dtk | bersih, sebut path | ya |
+| `qwen3.8-27b:free` | 5/5 | 1,8 dtk | **bocor nalar**, tak sebut path | ya (bocor) |
+| `gemma-4-31b-it:free` | 0/5 | - | - | - |
+| `deepseek-v4.1-flash:free` (utama lama) | 0/9 | - | - | - |
+| `agnes-2.0-flash` | 1/5 | 0,9 dtk | - | - |
+| `nemotron-3-nano-...-reasoning:free` | 3/5 | 4,2 dtk | rusak di produksi | - |
+| `nemotron-3.5-lightning:free` | - | 219 dtk | **omong kosong** 1.500 token | - |
+
+**Tindakan.** Utama -> `nemotron-3-super-120b-a12b:free`; cadangan: qwen3.8-27b, deepseek,
+gemma-4-31b. Dibuang: agnes-2.0-flash, nemotron-nano-reasoning. SKILL Langkah 6 kini MELARANG
+KERAS kirim lewat terminal dan mewajibkan: gagal kirim = balas path, berhenti (commit `6e94a2f`).
+
+**Pelajaran alat ukur (aturan #1).** Tes pertama meloloskan model yang terbukti rusak, karena
+terlalu mudah. Tes baru memakai konteks panjang + tool gagal berulang, dan dibuktikan dulu bisa
+menangkap kegagalannya (qwen: bocor nalar dengan panduan lama, bersih dengan panduan baru).
+Parser tes sendiri sempat salah: router menambah spasi di depan JSON dan `data: [DONE]` di
+belakangnya, sehingga model sehat terbaca "rusak" -- diperbaiki dengan `raw_decode`.
+
 ## 25-26 Sept — key baru, model gratis dicabut, rantai model, uji nyata ulang
 
 - Key OpenRouter baru terpasang (tanpa kedaluwarsa). Lalu `nex-agi/nex-n2.5-*:free` **dicabut**
