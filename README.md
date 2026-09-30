@@ -141,6 +141,10 @@ cutaway (`scripts/sfx.py`, `--sfx on|off`).
   zoom 1,10x ke wajah (OpenCV Haar) di kata kunci, maks 3, di luar jendela panggung; kartu logo
   merek yang diucapkan dari daftar TERTUTUP `config/merek_logo.json` + ikon simple-icons (CC0).
   Daftar tertutup itu wajib: katalog punya "Hermes" milik myHermes (kurir Jerman).
+- **Cover didesain** (`scripts/sampul.py`, `remotion/src/Sampul.jsx`): frame dipilih dengan MENGUKUR
+  (luas wajah x ketajaman Laplacian) dari video sebelum teks, judul dari kartu pembuka yang sudah
+  divalidasi, ditaruh di bawah kotak wajah. Terukur di cover nyata: pita judul 22,1% piksel putih
+  (frame asli 0%), area wajah justru lebih bersih. Gagal -> cover lama (`--cover frame`).
 - **Level audio** (29 Sep, diukur pada ucapan sungguhan `tests/data/ucapan_uji.wav`): musik -17 dB
   di bawah ucapan saat bicara, -6 dB di jeda (dulu -30 dB = "musik tidak ada"); sidechain
   dinormalkan ke kenyaringan ucapan. SFX 3-6 dB di bawah PUNCAK ucapan (dulu ±18 dB).

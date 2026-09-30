@@ -44,6 +44,7 @@ import pengisi as _pengisi  # noqa: E402
 import zoom_wajah as _zoom  # noqa: E402
 import logo as _logo  # noqa: E402
 import wajah as _wajah  # noqa: E402
+import sampul as _sampul  # noqa: E402
 import visual_quality as _vq  # noqa: E402
 from broll import BrollError  # noqa: E402
 from edit_plan import MERGE_GAP  # noqa: E402
@@ -1498,6 +1499,7 @@ CAPTION = {}        # caption dinamis: dipakai/gagal, potongan, kata kunci (dila
 CAPTION_KUNCI = []  # kata kunci usulan brief yang TERUCAP (caption_dinamis.kata_kunci_bersih)
 PANGGUNG = {}       # tata letak "panggung": dipakai/gagal/alasan, jendela (dilaporkan ke user)
 PANGGUNG_JENDELA = []   # jendela panggung yang BENAR-BENAR tampil: caption, motion, SFX, QA menyesuaikan
+SAMPUL = {}         # cover didesain: dipakai/gagal/detik/judul
 ZOOM = {}           # zoom punch-in: dipakai/jendela/alasan
 LOGO = {}           # kartu logo merek yang diucapkan
 PENGISIAN = {}      # alokasi.susun_potongan: narasi vs bahan layak, gerak lambat, dipakai ulang
@@ -2306,6 +2308,7 @@ def render_from_agent_script(
     PANGGUNG_JENDELA.clear()
     ZOOM.clear()
     LOGO.clear()
+    SAMPUL.clear()
     sfx_info = None
     suara_bersih = None
     audio_mode = (data.get("audio_mode") or "ai").strip().lower()
@@ -2735,11 +2738,42 @@ def render_from_agent_script(
     # dari segmen atau bahan mentah akan menghasilkan gambar tanpa hook.
     thumb_path = None
     if THUMBNAIL_ENABLED:
-        detik = thumbnail_time(scenes, total_duration)
-        thumb_path = extract_thumbnail(
-            output_video, os.path.splitext(output_video)[0] + ".jpg", detik)
-        if thumb_path:
-            print(f"🖼️ Cover diambil dari detik {detik:.2f}: {thumb_path}")
+        tujuan = os.path.splitext(output_video)[0] + ".jpg"
+        # Cover didesain: frame terbaik dari video SEBELUM teks (silent_combined masih ada di sini)
+        # + judul besar. Gagal di titik mana pun -> cover lama (frame dari hasil akhir).
+        if _sampul.aktif() and os.path.exists(silent_combined):
+            folder_s = tempfile.mkdtemp(prefix="_overlay_sampul_", dir=output_dir)
+            try:
+                hindari = ([(j["mulai"], j["selesai"]) for j in PANGGUNG_JENDELA]
+                           + [(d["mulai"], d.get("selesai", d["mulai"] + 3.0))
+                              for d in ((broll_info or {}).get("dipakai") or []) if "mulai" in d])
+                detik, kotak = _sampul.pilih_frame(
+                    silent_combined, _sampul.detik_kandidat(total_duration, hindari))
+                judul, emas = _sampul.judul_sampul(data, CAPTION_KUNCI)
+                mentah = _sampul.ambil_frame_jpg(silent_combined, detik,
+                                                 os.path.join(folder_s, "_frame.jpg"),
+                                                 TARGET_W, TARGET_H)
+                if not judul:
+                    raise ValueError("tidak ada judul untuk cover")
+                if not mentah:
+                    raise ValueError("frame cover gagal diambil")
+                # Judul di bawah wajah bila wajah terdeteksi, selain itu 72% tinggi.
+                y = 0.72 if not kotak else min(0.86, max(0.62, (kotak[1] + kotak[3]) / TARGET_H + 0.12))
+                _ovr.render_sampul(mentah, judul, emas, tujuan, folder_s,
+                                   lebar=TARGET_W, tinggi=TARGET_H, y_judul=y)
+                thumb_path = tujuan
+                SAMPUL.update(dipakai=True, gagal=None, detik=detik, judul=judul, wajah=bool(kotak))
+                print(f"🖼️ Cover didesain dari detik {detik:.2f}: \"{judul}\"")
+            except Exception as e:
+                SAMPUL.update(dipakai=False, gagal=f"{type(e).__name__}: {e}"[:200])
+                print(f"[warn] cover didesain gagal ({e}) — memakai frame biasa.")
+            finally:
+                shutil.rmtree(folder_s, ignore_errors=True)
+        if not thumb_path:
+            detik = thumbnail_time(scenes, total_duration)
+            thumb_path = extract_thumbnail(output_video, tujuan, detik)
+            if thumb_path:
+                print(f"🖼️ Cover diambil dari detik {detik:.2f}: {thumb_path}")
 
     for tmp in [*segment_paths, silent_combined, with_text, temp_audio, *broll_tmp]:
         if tmp and os.path.exists(tmp):
@@ -2769,6 +2803,7 @@ def render_from_agent_script(
         caption=dict(CAPTION) or None,
         panggung=dict(PANGGUNG) or None,
         zoom=dict(ZOOM) or None,
+        sampul=dict(SAMPUL) or None,
         logo=dict(LOGO) or None,
         suara_bersih=suara_bersih,
         potong_pengisi=dict(POTONG_PENGISI) or None,

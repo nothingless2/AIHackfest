@@ -4,6 +4,7 @@ import {TextOverlay} from './TextOverlay.jsx';
 import {MotionOverlay} from './MotionOverlay.jsx';
 import {CaptionDinamis} from './CaptionDinamis.jsx';
 import {Panggung} from './Panggung.jsx';
+import {Sampul} from './Sampul.jsx';
 
 const metadata = ({props}) => ({
   durationInFrames: Math.max(2, Math.ceil((props.durasi || 2) * (props.fps || 24))),
@@ -51,6 +52,16 @@ export const Root = () => (
       durationInFrames={72}
       defaultProps={{items: [{ilustrasi: 'timeline', teks: 'ngedit', dari: 0, dur: 72}],
         kartu: {x: 76, y: 806, w: 928, h: 998, r: 44}}}
+      calculateMetadata={metadata}
+    />
+    <Composition
+      id="Sampul"
+      component={Sampul}
+      width={1080}
+      height={1920}
+      fps={24}
+      durationInFrames={1}
+      defaultProps={{gambar: null, judul: 'Ganti API Key Bikin Pusing', emas: 1}}
       calculateMetadata={metadata}
     />
   </>

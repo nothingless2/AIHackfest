@@ -58,6 +58,10 @@ daftar TIDAK ada kartu (bukan logo tebakan). `logo.alasan` "tidak ada merek terd
 diucapkan" itu NORMAL; kalau user mau mereknya tampil, beri tahu ia bisa menambahkannya ke
 `config/merek_logo.json`.
 
+**Cover** kini didesain: frame terbaik (wajah besar & tajam, di luar jendela panggung/B-roll) +
+judul besar di bawah wajah, bukan frame acak yang subtitle-nya sudah terbakar (`sampul.dipakai`,
+kembali ke cara lama: `--cover frame`). Gagal -> cover lama, `sampul.gagal` disebut singkat.
+
 Mode suara asli juga otomatis: **suara dibersihkan** (`suara_bersih`, `--bersih-suara off`) dan
 **"eee/emm/hmm" & ulangan gagap dibuang** (`potong_pengisi`, `--potong-pengisi off`). Sebut singkat
 kalau `potong_pengisi.dibuang` > 0 ("N kata pengisi dibuang"). Kalau hasil berisi `caption.gagal`, sampaikan: video tetap bersubtitle gaya

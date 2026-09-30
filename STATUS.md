@@ -22,6 +22,7 @@ untuk penjelasan alur & desain lengkap.
 | Caption dinamis + SFX (27 Sep, tahap uji) | Render nyata 6 video berucap (45 dtk): 42 potongan, kata kunci emas tepat saat diucapkan, 8 pop + 4 whoosh, QA lolos; +51 dtk vs gaya kata; proses terbesar 1,3 GB (versi pertama OOM 3,8 GB → diganti satu input concat) |
 | Musik & SFX terdengar + tata letak panggung (29 Sep) | Musik di jeda naik -16,7 → -8,0 dB relatif ucapan, puncak ucapan tetap; tes musik/SFX memakai ucapan sungguhan (setelan lama gagal di tes). Panggung render nyata: latar hanya di jendela 15,75-18,5 dtk (terukur piksel), sudut kartu membulat, +33 dtk render |
 | Suara bersih, pengisi dibuang, zoom & logo (29-30 Sep) | Suara: SNR 31,2->36,1 dB di video user, jeda -7,3 dB. Pengisi: kontrol edge-tts ber-"eee" -> 3 potongan tepat, durasi video berkurang sesuai; 6 video user memang 0 pengisi (dibuktikan dengan kontrol positif). Zoom: skala terukur 1,10x di jendela & 1,00 di luar, pada render NYATA. Logo: "Hermes" ditolak (katalog = myHermes), kartu Claude dirender & tidak menimpa wajah |
+| Cover didesain (30 Sep) | Render nyata: frame terpilih detik 25,86 (wajah terdeteksi), judul "Ganti API key, error terus". Pita judul 22,1% piksel putih vs 0% di frame asli; area wajah 3,31% vs 2,86% (= terang gambar, bukan teks). Remotion gagal -> cover lama tetap dibuat |
 | **Render cepat (ffmpeg-native)** | Profiling berlapis: 332,8s → 35,6s untuk render (~9x), lihat detail di bawah |
 
 ### Optimasi performa render (2026-09-16)

@@ -154,6 +154,8 @@ def _parser():
                    help="Zoom halus ke wajah saat kata kunci (bawaan on untuk gaya dinamis).")
     p.add_argument("--logo-merek", choices=["on", "off"], default=None,
                    help="Kartu logo merek yang diucapkan, dari daftar config/merek_logo.json.")
+    p.add_argument("--cover", choices=["desain", "frame"], default=None,
+                   help="Cover: 'desain' (frame terbaik + judul besar, bawaan) atau 'frame' (cara lama).")
     p.add_argument("--motion", default=None,
                    help="Motion graphic penjelas: sedang (bawaan) | mati.")
     p.add_argument("--jumlah-short", type=int, choices=[1, 2, 3], default=None,
@@ -199,7 +201,7 @@ LABEL_REVISI = {"music": "musik", "music_mood": "suasana musik", "music_file": "
                 "broll": "B-roll", "broll_query": "kata kunci B-roll", "broll_count": "jumlah B-roll",
                 "auto_zoom": "zoom otomatis", "sfx": "efek suara",
                 "bersih_suara": "pembersih suara", "potong_pengisi": "buang kata pengisi",
-                "zoom_wajah": "zoom wajah", "logo_merek": "kartu logo"}
+                "zoom_wajah": "zoom wajah", "logo_merek": "kartu logo", "cover": "cover"}
 
 
 def _flag_eksplisit(parser, argv):
@@ -250,6 +252,7 @@ def _apply_env(args):
         "BERSIH_SUARA": args.bersih_suara,
         "POTONG_PENGISI": args.potong_pengisi,
         "ZOOM_WAJAH": args.zoom_wajah,
+        "COVER": args.cover,
         "LOGO_MEREK": args.logo_merek,
         "MONTASE": {"on": "1", "off": "0", None: None}[args.montase],
         "CONTENT_FACTORY_USER_CONTEXT": args.user_context or None,
@@ -399,6 +402,7 @@ def _hasil_render(run_id, pesan_durasi):
         "panggung": status.get("panggung"),
         "suara_bersih": status.get("suara_bersih"),
         "zoom": status.get("zoom"),
+        "sampul": status.get("sampul"),
         "logo": status.get("logo"),
         "potong_pengisi": {k: v for k, v in (status.get("potong_pengisi") or {}).items() if k != "rincian"} or None,
         "sfx": status.get("sfx"),

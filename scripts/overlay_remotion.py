@@ -364,3 +364,25 @@ def render_panggung(jendela, folder, *, lebar, tinggi, fps):
     with open(daftar, "w", encoding="utf-8") as f:
         f.write("\n".join(baris) + "\n")
     return daftar, {"frame_chromium": t, "jumlah_jendela": len(items)}
+
+
+# ---------------------------------------------------------------- cover didesain
+
+SAMPUL_BATAS_DETIK = int(os.getenv("SAMPUL_TIMEOUT", "120"))
+
+
+def render_sampul(jpg_masuk, judul, emas, out_jpg, folder, *, lebar, tinggi, y_judul=0.72):
+    """Frame terbaik + judul -> cover JPG. Gambar dikirim sebagai data URL (tanpa berkas di
+    public/). Melempar OverlayError."""
+    import base64
+    with open(jpg_masuk, "rb") as f:
+        data_url = "data:image/jpeg;base64," + base64.b64encode(f.read()).decode()
+    props = {"lebar": lebar, "tinggi": tinggi, "fps": 24, "durasi": 1 / 24,
+             "gambar": data_url, "judul": judul, "emas": emas, "yJudul": y_judul}
+    kerja = [{"jenis": "diam", "frame": 0, "tahan": 1, "mulai": 0}]
+    (p,) = _jalankan_node(props, kerja, folder, komposisi="Sampul", batas=SAMPUL_BATAS_DETIK)
+    r = subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", p["out"], "-q:v", "3", out_jpg],
+                       capture_output=True, text=True)
+    if r.returncode != 0 or not os.path.exists(out_jpg):
+        raise OverlayError(f"cover gagal disimpan: {r.stderr[-200:]}")
+    return out_jpg
