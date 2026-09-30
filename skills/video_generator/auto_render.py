@@ -41,6 +41,9 @@ import caption_dinamis as _cd  # noqa: E402
 import sfx as _sfx  # noqa: E402
 import suara as _suara  # noqa: E402
 import pengisi as _pengisi  # noqa: E402
+import zoom_wajah as _zoom  # noqa: E402
+import logo as _logo  # noqa: E402
+import wajah as _wajah  # noqa: E402
 import visual_quality as _vq  # noqa: E402
 from broll import BrollError  # noqa: E402
 from edit_plan import MERGE_GAP  # noqa: E402
@@ -1495,6 +1498,8 @@ CAPTION = {}        # caption dinamis: dipakai/gagal, potongan, kata kunci (dila
 CAPTION_KUNCI = []  # kata kunci usulan brief yang TERUCAP (caption_dinamis.kata_kunci_bersih)
 PANGGUNG = {}       # tata letak "panggung": dipakai/gagal/alasan, jendela (dilaporkan ke user)
 PANGGUNG_JENDELA = []   # jendela panggung yang BENAR-BENAR tampil: caption, motion, SFX, QA menyesuaikan
+ZOOM = {}           # zoom punch-in: dipakai/jendela/alasan
+LOGO = {}           # kartu logo merek yang diucapkan
 PENGISIAN = {}      # alokasi.susun_potongan: narasi vs bahan layak, gerak lambat, dipakai ulang
 MONTASE = {}        # potongan mengikuti ketukan musik (bahan tanpa ucapan)
 MONTASE_MIN_DETIK = 1.2
@@ -1554,6 +1559,23 @@ def _sumber_fakta(data):
     ucapan = [str(seg.get("text") or "") for segs in (data.get("transcript_segments") or {}).values()
               for seg in (segs or []) if isinstance(seg, dict)]
     return " ".join([data.get("konteks_user") or ""] + ucapan)
+
+
+def kotak_wajah_video(video, durasi):
+    """Kotak wajah median dari 3 sampel (pusat zoom & posisi kartu logo). Gagal -> None."""
+    try:
+        contoh = [durasi * f for f in (0.2, 0.5, 0.8)]
+        return _wajah.median(list(_wajah.kotak_wajah(video, contoh).values()))
+    except Exception as e:
+        print(f"[warn] deteksi wajah dilewati ({type(e).__name__}: {e}).")
+        return None
+
+
+def terapkan_zoom(video_masuk, jendela, video_keluar, kotak):
+    """Zoom punch-in ke wajah pada jendela tertentu (satu pass video; audio disalin)."""
+    vf = _zoom.filter_zoom(jendela, TARGET_W, TARGET_H, kotak)
+    run_ffmpeg(["-i", video_masuk, "-vf", vf, "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                "-preset", "veryfast", "-crf", "18", "-c:a", "copy", video_keluar], "zoom wajah")
 
 
 def panggung_aktif():
@@ -1632,8 +1654,30 @@ def terapkan_panggung(video_masuk, jendela, video_keluar, folder):
     return info
 
 
+def item_logo(kata_waktu, durasi, hindari, kotak):
+    """Item motion "logo" untuk merek yang diucapkan. Alasan selalu dicatat di LOGO."""
+    LOGO.clear()
+    if not _logo.aktif():
+        return []
+    try:
+        temuan = _logo.cari(kata_waktu, durasi, hindari=hindari)
+    except Exception as e:
+        LOGO.update(dipakai=False, gagal=f"{type(e).__name__}: {e}"[:200])
+        return []
+    if not temuan:
+        LOGO.update(dipakai=False, alasan="tidak ada merek terdaftar yang diucapkan")
+        return []
+    kartu_w = int(TARGET_W * 0.33 * 1.16)       # lebar + padding (lihat Logo di MotionOverlay.jsx)
+    x, y = _logo.posisi(kotak, TARGET_W, TARGET_H, kartu_w, kartu_w)
+    LOGO.update(dipakai=True, gagal=None, wajah=bool(kotak),
+                merek=[{"merek": t["merek"], "mulai": t["mulai"]} for t in temuan])
+    return [{"jenis": "logo", "mulai": t["mulai"], "selesai": t["selesai"], "teks": t["merek"],
+             "merek": t["merek"], "hex": t["hex"], "path": t["path"], "x": x, "y": y}
+            for t in temuan]
+
+
 def siapkan_motion(data, durasi, kata_waktu, ada_teks_statis, folder, naskah=None, tata="atas",
-                   hindari=()):
+                   hindari=(), tambahan_items=()):
     """Rencana motion graphic dari brief -> divalidasi & dijadwalkan kode (motion_plan) ->
     potongan dirender Remotion ke `folder`. Return pekerjaan (ditempel bersama encode teks)
     atau None; alasannya SELALU dicatat di MOTION (dilaporkan ke user)."""
@@ -1654,6 +1698,21 @@ def siapkan_motion(data, durasi, kata_waktu, ada_teks_statis, folder, naskah=Non
     bersih, c1 = _mp.bersihkan(plan, naskah=naskah if naskah is not None else data.get("full_voice_over"),
                                sumber_fakta=_sumber_fakta(data), pakai_jangkar=bool(kata_waktu))
     items, c2 = _mp.jadwal(bersih, kata_waktu, durasi, ada_teks_statis=ada_teks_statis)
+    if tambahan_items:
+        # Kartu logo tidak lewat katalog motion_plan (merek dari daftar tertutup, bukan usulan LLM),
+        # tapi ikut aturan tumpang tindih yang sama: yang bentrok dibuang.
+        sibuk = [(i["mulai"], i["selesai"]) for i in items]
+        for t in tambahan_items:
+            if _mp.bertumpuk(t["mulai"], t["selesai"], [{"mulai": a, "selesai": b} for a, b in sibuk]):
+                c2 = c2 + [f"kartu logo \"{t['merek']}\" dibuang: bertabrakan dengan grafik lain"]
+                if LOGO.get("merek"):
+                    LOGO["merek"] = [m for m in LOGO["merek"] if m["mulai"] != t["mulai"]]
+                continue
+            items.append(t)
+            sibuk.append((t["mulai"], t["selesai"]))
+        items.sort(key=lambda i: i["mulai"])
+        if LOGO.get("dipakai") and not LOGO.get("merek"):
+            LOGO.update(dipakai=False, alasan="semua kartu logo bertabrakan dengan grafik lain")
     if hindari:
         # Tata letak panggung mengganti seluruh layar: elemen yang jatuh di jendelanya dibuang.
         tabrak = [i for i in items if _mp.bertumpuk(i["mulai"], i["selesai"], hindari)]
@@ -2245,6 +2304,8 @@ def render_from_agent_script(
     CAPTION_KUNCI.clear()
     PANGGUNG.clear()
     PANGGUNG_JENDELA.clear()
+    ZOOM.clear()
+    LOGO.clear()
     sfx_info = None
     suara_bersih = None
     audio_mode = (data.get("audio_mode") or "ai").strip().lower()
@@ -2494,6 +2555,29 @@ def render_from_agent_script(
     # Kata kunci caption dinamis: usulan brief yang BENAR-BENAR terdengar (aturan #5).
     CAPTION_KUNCI[:] = _cd.kata_kunci_bersih(data.get("kata_kunci"), naskah_terdengar or full_vo)
     # Tata letak panggung DI VIDEO DASAR (sebelum grafik & teks): semua lapisan lain ada di atasnya.
+    kotak_wajah = None
+    if pakai_audio_asli and (_zoom.aktif() or _logo.aktif()):
+        kotak_wajah = kotak_wajah_video(silent_combined, float(total_duration))
+    # Zoom punch-in DI VIDEO DASAR, sebelum panggung: panggung mengganti seluruh layar di
+    # jendelanya, jadi urutan ini membuat keduanya tidak saling menimpa.
+    if pakai_audio_asli and _zoom.aktif() and kata_waktu:
+        zoom_jendela = _zoom.jadwal(_cd.potong(kata_waktu, CAPTION_KUNCI), float(total_duration))
+        if not zoom_jendela:
+            ZOOM.update(dipakai=False, alasan="tidak ada kata kunci untuk dijangkarkan")
+        else:
+            dengan_zoom = os.path.join(output_dir, "_combined_zoom.mp4")
+            try:
+                terapkan_zoom(silent_combined, zoom_jendela, dengan_zoom, kotak_wajah)
+                os.replace(dengan_zoom, silent_combined)
+                ZOOM.update(dipakai=True, gagal=None, jendela=zoom_jendela,
+                            skala=_zoom.SKALA, wajah=bool(kotak_wajah))
+                print(f"🔍 Zoom punch-in: {len(zoom_jendela)} kali ({_zoom.SKALA:.2f}x, "
+                      + ("pusat wajah" if kotak_wajah else "tanpa wajah: tengah atas") + ").")
+            except Exception as e:
+                ZOOM.update(dipakai=False, gagal=f"{type(e).__name__}: {e}"[:200])
+                print(f"[warn] zoom dilewati ({e}).")
+                if os.path.exists(dengan_zoom):
+                    os.remove(dengan_zoom)
     jendela = siapkan_panggung(data, kata_waktu, float(total_duration), naskah_terdengar or full_vo)
     if jendela:
         dengan_panggung = os.path.join(output_dir, "_combined_panggung.mp4")
@@ -2521,7 +2605,10 @@ def render_from_agent_script(
                                 naskah=naskah_terdengar,
                                 # Suara asli: pembicara di layar -> grafik di bawah wajahnya.
                                 tata="bawah" if pakai_audio_asli else "atas",
-                                hindari=PANGGUNG_JENDELA)
+                                hindari=PANGGUNG_JENDELA,
+                                tambahan_items=item_logo(kata_waktu, float(total_duration),
+                                                         sibuk_panggung, kotak_wajah)
+                                if pakai_audio_asli else ())
         if pakai_audio_asli:
             # Cutaway BOLEH bertumpuk dengan elemen motion (kartu digambar di atas klip stok):
             # melarangnya membuang SEMUA B-roll di render nyata 25 Sep, karena momen penting untuk
@@ -2681,6 +2768,8 @@ def render_from_agent_script(
         motion=dict(MOTION) or None,
         caption=dict(CAPTION) or None,
         panggung=dict(PANGGUNG) or None,
+        zoom=dict(ZOOM) or None,
+        logo=dict(LOGO) or None,
         suara_bersih=suara_bersih,
         potong_pengisi=dict(POTONG_PENGISI) or None,
         sfx=sfx_info,

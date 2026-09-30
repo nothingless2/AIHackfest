@@ -131,6 +131,16 @@ cutaway (`scripts/sfx.py`, `--sfx on|off`).
   Latar kertas + ilustrasi dirender Remotion (satu input concat), video pembicara dikecilkan
   ffmpeg jadi kartu membulat yang meluncur naik; caption di jendela itu jadi judul serif
   (Instrument Serif Italic, OFL). Motion & cutaway yang bertabrakan dibuang, QA melewati jendela.
+- **Pembersih suara** (`scripts/suara.py`): gerbang jeda (ambang dari level ucapan video), penegas
+  vokal, kompresor; peredam bising hanya bila SNR < 25 dB (di audio bersih afftdn mengubah spektrum
+  ucapan 1,1 dB). Video user: SNR 31,2 -> 36,1 dB, jeda 7,3 dB lebih senyap.
+- **Buang kata pengisi** (`scripts/pengisi.py`): "eee/emm/hmm" & ulangan gagap ("aku pakai aku
+  pakai") dipotong dari `ranges`; penekanan ("setiap hari, setiap hari") dan reduplikasi ("pelan
+  pelan") TIDAK. Kata pengisi tidak pernah tampil di subtitle. Batas aman 25% durasi klip.
+- **Zoom punch-in & kartu logo** (`scripts/zoom_wajah.py`, `scripts/logo.py`, `scripts/wajah.py`):
+  zoom 1,10x ke wajah (OpenCV Haar) di kata kunci, maks 3, di luar jendela panggung; kartu logo
+  merek yang diucapkan dari daftar TERTUTUP `config/merek_logo.json` + ikon simple-icons (CC0).
+  Daftar tertutup itu wajib: katalog punya "Hermes" milik myHermes (kurir Jerman).
 - **Level audio** (29 Sep, diukur pada ucapan sungguhan `tests/data/ucapan_uji.wav`): musik -17 dB
   di bawah ucapan saat bicara, -6 dB di jeda (dulu -30 dB = "musik tidak ada"); sidechain
   dinormalkan ke kenyaringan ucapan. SFX 3-6 dB di bawah PUNCAK ucapan (dulu ±18 dB).

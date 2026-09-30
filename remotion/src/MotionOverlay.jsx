@@ -175,8 +175,31 @@ export const POSISI = {
   bawah: {sorot: 0.58, ikon: 0.42, langkah: 0.47, label: 0.61},
 };
 
+// Kartu logo merek yang DIUCAPKAN (29 Sep, contoh video user): kartu putih membulat berisi ikon
+// berwarna merek + namanya, melayang di samping kepala. Posisi (x, y) dihitung Python dari kotak
+// wajah; ikon (path SVG + hex) dari simple-icons lewat daftar TERTUTUP config/merek_logo.json.
+const Logo = ({it, g, W}) => {
+  const lebar = W * 0.33;
+  const ikon = lebar * 0.42;
+  return (
+    <div style={{position: 'absolute', left: it.x, top: it.y, width: lebar,
+      background: '#FFFFFF', borderRadius: lebar * 0.22, padding: lebar * 0.08,
+      boxShadow: '0 14px 30px rgba(0,0,0,0.28)', display: 'flex', flexDirection: 'column',
+      alignItems: 'center', gap: lebar * 0.05, opacity: g.op,
+      scale: String(interpolate(g.m, [0, 1], [0.55, 1])),
+      translate: `0 ${(1 - g.m) * lebar * 0.18}px`}}>
+      <svg role="img" viewBox="0 0 24 24" width={ikon} height={ikon} aria-label={it.merek}>
+        <path d={it.path} fill={`#${it.hex}`} />
+      </svg>
+      <div style={{fontSize: lebar * 0.115, color: '#17171B', lineHeight: 1.1, textAlign: 'center'}}>
+        {it.merek}
+      </div>
+    </div>
+  );
+};
+
 const KOMPONEN = {kartu_hook: KartuHook, kartu_cta: KartuCta, sorot: Sorot, ikon: Ikon,
-  langkah: Langkah, label: Label};
+  langkah: Langkah, label: Label, logo: Logo};
 
 const Elemen = ({it, dur, W, H, c, Y}) => {
   const g = useGerak(it.masukFrames ?? 16, it.keluarFrames ?? 8, dur);

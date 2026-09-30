@@ -1,0 +1,28 @@
+{
+  "_catatan": [
+    "Merek yang BOLEH tampil sebagai kartu logo, dipetakan ke slug simple-icons.",
+    "Daftar TERTUTUP (aturan #5: kode tidak boleh menebak). Alasannya konkret: simple-icons punya",
+    "'Hermes' (myHermes, kurir Jerman) -- kalau dicocokkan otomatis, video tentang Hermes Agent",
+    "akan menampilkan logo perusahaan kurir. Merek di luar daftar ini tidak jadi logo sama sekali.",
+    "Tambahkan sendiri: \"nama yang diucapkan\": \"slug-simple-icons\" (lihat remotion/node_modules/simple-icons/data/simple-icons.json).",
+    "Logo tetap merek dagang pemiliknya; dipakai hanya untuk menyebut produk yang memang dibicarakan."
+  ],
+  "merek": {
+    "claude": "claude", "anthropic": "anthropic", "chatgpt": "openai", "gemini": "googlegemini",
+    "github": "github", "gitlab": "gitlab", "docker": "docker", "python": "python",
+    "javascript": "javascript", "typescript": "typescript", "react": "react", "nextjs": "nextdotjs",
+    "node": "nodedotjs", "nodejs": "nodedotjs", "vercel": "vercel", "cloudflare": "cloudflare",
+    "figma": "figma", "notion": "notion", "obsidian": "obsidian", "trello": "trello",
+    "instagram": "instagram", "tiktok": "tiktok", "youtube": "youtube", "whatsapp": "whatsapp",
+    "telegram": "telegram", "facebook": "facebook", "linkedin": "linkedin", "x": "x",
+    "twitter": "x", "threads": "threads", "pinterest": "pinterest", "discord": "discord",
+    "spotify": "spotify", "shopee": "shopee", "tokopedia": "tokopedia", "gojek": "gojek",
+    "grab": "grab", "dana": "dana", "ovo": "ovo", "gopay": "gopay",
+    "davinci resolve": "davinciresolve", "blender": "blender", "unity": "unity",
+    "wordpress": "wordpress", "shopify": "shopify", "stripe": "stripe", "paypal": "paypal",
+    "google": "google", "google drive": "googledrive", "gmail": "gmail", "google meet": "googlemeet",
+    "zoom": "zoom", "excel": "microsoftexcel", "word": "microsoftword", "powerpoint": "microsoftpowerpoint",
+    "supabase": "supabase", "firebase": "firebase", "mongodb": "mongodb", "postgresql": "postgresql",
+    "linux": "linux", "ubuntu": "ubuntu", "android": "android", "apple": "apple", "windows": "windows"
+  }
+}

@@ -150,6 +150,10 @@ def _parser():
                    help="Pembersih suara ucapan asli: gerbang jeda + penegas vokal + peredam bila berisik (bawaan on).")
     p.add_argument("--potong-pengisi", choices=["on", "off"], default=None,
                    help="Buang 'eee/emm/hmm' & ulangan gagap dari ucapan asli (bawaan on).")
+    p.add_argument("--zoom-wajah", choices=["on", "off"], default=None,
+                   help="Zoom halus ke wajah saat kata kunci (bawaan on untuk gaya dinamis).")
+    p.add_argument("--logo-merek", choices=["on", "off"], default=None,
+                   help="Kartu logo merek yang diucapkan, dari daftar config/merek_logo.json.")
     p.add_argument("--motion", default=None,
                    help="Motion graphic penjelas: sedang (bawaan) | mati.")
     p.add_argument("--jumlah-short", type=int, choices=[1, 2, 3], default=None,
@@ -194,7 +198,8 @@ LABEL_REVISI = {"music": "musik", "music_mood": "suasana musik", "music_file": "
                 "visual_cut": "buang bagian goyang", "montase": "montase ketukan",
                 "broll": "B-roll", "broll_query": "kata kunci B-roll", "broll_count": "jumlah B-roll",
                 "auto_zoom": "zoom otomatis", "sfx": "efek suara",
-                "bersih_suara": "pembersih suara", "potong_pengisi": "buang kata pengisi"}
+                "bersih_suara": "pembersih suara", "potong_pengisi": "buang kata pengisi",
+                "zoom_wajah": "zoom wajah", "logo_merek": "kartu logo"}
 
 
 def _flag_eksplisit(parser, argv):
@@ -244,6 +249,8 @@ def _apply_env(args):
         "SFX": args.sfx,
         "BERSIH_SUARA": args.bersih_suara,
         "POTONG_PENGISI": args.potong_pengisi,
+        "ZOOM_WAJAH": args.zoom_wajah,
+        "LOGO_MEREK": args.logo_merek,
         "MONTASE": {"on": "1", "off": "0", None: None}[args.montase],
         "CONTENT_FACTORY_USER_CONTEXT": args.user_context or None,
     }
@@ -391,6 +398,8 @@ def _hasil_render(run_id, pesan_durasi):
         "caption": status.get("caption"),
         "panggung": status.get("panggung"),
         "suara_bersih": status.get("suara_bersih"),
+        "zoom": status.get("zoom"),
+        "logo": status.get("logo"),
         "potong_pengisi": {k: v for k, v in (status.get("potong_pengisi") or {}).items() if k != "rincian"} or None,
         "sfx": status.get("sfx"),
         "potongan_visual": status.get("potong_visual"),

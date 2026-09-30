@@ -49,7 +49,18 @@ berwarna emas dengan animasi pop, plus efek suara pop/whoosh (matikan: `--sfx of
 utama layar berganti ke tata letak "panggung" ±3 dtk: pembicara jadi kartu membulat di latar
 terang berkisi, ilustrasi animasi di atas (timeline/grafik/checklist/chat/kode/kata), caption jadi
 judul serif. Render ±1-1,5 menit lebih lama. `panggung.gagal` terisi -> sebut singkat (video tetap
-jadi tanpa tata letak itu). Kalau hasil berisi `caption.gagal`, sampaikan: video tetap bersubtitle gaya
+jadi tanpa tata letak itu).
+
+Ikut aktif bersama gaya dinamis (mode suara asli): **zoom halus ke wajah** di kata kunci
+(`zoom.dipakai`, matikan `--zoom-wajah off`) dan **kartu logo merek** yang diucapkan
+(`logo.dipakai`, `--logo-merek off`). Merek hanya dari daftar `config/merek_logo.json` -- di luar
+daftar TIDAK ada kartu (bukan logo tebakan). `logo.alasan` "tidak ada merek terdaftar yang
+diucapkan" itu NORMAL; kalau user mau mereknya tampil, beri tahu ia bisa menambahkannya ke
+`config/merek_logo.json`.
+
+Mode suara asli juga otomatis: **suara dibersihkan** (`suara_bersih`, `--bersih-suara off`) dan
+**"eee/emm/hmm" & ulangan gagap dibuang** (`potong_pengisi`, `--potong-pengisi off`). Sebut singkat
+kalau `potong_pengisi.dibuang` > 0 ("N kata pengisi dibuang"). Kalau hasil berisi `caption.gagal`, sampaikan: video tetap bersubtitle gaya
 biasa. `sfx.dipakai: false` + `alasan` cukup disebut singkat.
 
 B-roll di mode suara asli ditampilkan SEBENTAR di atas video (cutaway) saat kata yang relevan

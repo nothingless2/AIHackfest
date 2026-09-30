@@ -62,7 +62,7 @@ def clear_render_workspace():
     jumlah = 0
     pola = ["_segment_*.mp4", "_combined_*.mp4", "_concat_list.txt", "_filter_teks.txt",
             "_with_music.mp4", "temp_vo.mp3", "_broll_*.mp4", "_with_sfx.mp4", "_sfx_*.wav",
-            "_combined_panggung.mp4"]
+            "_combined_panggung.mp4", "_combined_zoom.mp4", "_combined_bersih.mp4"]
     for p in pola:
         for path in glob.glob(os.path.join(DRAFTS_DIR, p)):
             jumlah += _hapus(path, "file kerja")

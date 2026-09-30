@@ -5,3 +5,6 @@ moviepy>=2.0
 edge-tts>=7.0
 Pillow>=10.0
 pytest>=7.0
+# Deteksi wajah (scripts/wajah.py): pusat zoom punch-in, posisi kartu logo, pilihan frame cover.
+# Dikunci ke 4.x: 5.0 mengubah paket model Haar yang dipakai di sini.
+opencv-python-headless>=4.9,<5
