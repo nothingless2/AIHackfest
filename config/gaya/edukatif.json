@@ -1,0 +1,21 @@
+{
+  "label": "Edukatif",
+  "deskripsi": "Penjelasan bertahap: caption dinamis, tata letak panggung dan grafik, aksen oranye-indigo.",
+  "tema": {
+    "warna": {
+      "aksen": "#F97316",
+      "aksen2": "#6366F1",
+      "sorot": "#FDBA74"
+    },
+    "font": {
+      "judul": "tegas"
+    },
+    "gerak": "pegas"
+  },
+  "editing": {
+    "subtitle_style": "dinamis",
+    "motion": "sedang",
+    "sfx": "on",
+    "text_animation": "pop"
+  }
+}

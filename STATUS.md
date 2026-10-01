@@ -808,3 +808,66 @@ Uji bahasa, 6 sampel per tahap:
 - `reasoning_effort: high` tidak diubah (belum diukur dampaknya ke mutu).
 - Pemadatan pada percakapan Telegram panjang belum teramati sejak perubahan. Cek
   `sessions.compression*` setelah pemakaian nyata.
+
+## 1 Okt — gaya tampilan yang bisa dipilih + profil per chat
+
+**Masalah.** Gaya tersebar di ±30 flag, dan warna tertanam di tiap komponen Remotion dengan palet
+berbeda: motion ungu `#8B5CF6` + pink, panggung oranye `#E8743B` + ungu `#6D5DF5`, caption & cover
+emas. Satu-satunya "paket" adalah `--subtitle-style dinamis`.
+
+**Yang dibuat.**
+- `config/gaya/*.json`, 6 preset: `klasik` (bawaan, kosong), `bersih`, `edukatif`, `elegan`, `hype`,
+  `promo`. Isinya tema (warna, font judul dari daftar tertutup, sudut, cahaya, karakter gerak) dan
+  knob editing yang SUDAH ada (subtitle, filter warna, font/animasi teks, SFX, zoom, logo, cover,
+  motion).
+- `scripts/gaya.py`:
+  - validasi ketat, siap-SaaS: hex saja, font dari daftar, enum, kontras teks kartu ≥ 4,5, `url(...)`
+    ditolak;
+  - prioritas flag eksplisit > `--gaya` > profil chat > klasik;
+  - profil per pemilik di `workspace/state/profil/` (nama berkas aman untuk label apa pun, label lain
+    tidak dipakai);
+  - CLI `daftar | pratinjau | pakai | lihat | lupakan`.
+- `remotion/src/tema.js` + `MotionOverlay`, `CaptionDinamis`, `Panggung`, `Sampul`: token yang tidak
+  disebut preset jatuh ke literal lama. Tema disuntik di SATU pintu (`overlay_remotion._jalankan_node`).
+- Pratinjau: `PratinjauGaya.jsx` memakai komponen asli, satu gambar grid untuk 6 gaya, latar
+  sintetis (cache dipakai bersama, jadi tidak boleh memuat bahan user), salinan baru tiap
+  permintaan (gateway hanya mengirim berkas baru).
+- `hermes_render.py --gaya`:
+  - nama efektif disimpan di args, knob preset TIDAK, supaya ganti gaya di draf/revisi tidak
+    terkunci;
+  - hasil memuat `gaya_tampilan`;
+  - revisi cepat menerima `--gaya`.
+- Inspect: pertanyaan "gaya" menawarkan preset, dilewati bila profil chat sudah punya gaya atau user
+  menyebut nama preset.
+
+**Bukti.**
+- **Identik piksel**: 33 still acuan direkam SEBELUM komponen diubah (Sampul; 7 jenis elemen motion
+  di tengah animasi & diam; caption biasa/panggung; 6 ilustrasi panggung). Determinisme dicek dulu:
+  render ulang tanpa perubahan 33/33 identik. Setelah perubahan, tanpa tema: **33/33 identik**.
+- Tes tema kosong vs tanpa tema identik; aksen hype terukur di pil sorot dan ungu bawaan hilang;
+  kertas panggung elegan lebih hangat; kata kunci promo kuning.
+- Mutasi tertangkap (5/5): injeksi tema dihapus, `bacaTema` mengabaikan warna, preset menimpa flag
+  user, validasi warna dilonggarkan, cek pemilik profil dihapus.
+- **Uji nyata** (revisi `9cdbfb57`, 6 video berucap, mode dinamis, tanpa LLM):
+
+  | Gaya | Waktu | RSS puncak | QA |
+  |---|---|---|---|
+  | klasik | 287 dtk | 1,16 GB | lolos |
+  | hype | 323 dtk | 1,17 GB | lolos |
+  | elegan | 330 dtk | 1,14 GB | lolos |
+
+  - Frame Chromium identik di ketiganya (caption 351, panggung 144, motion 39).
+  - Klasik + `--color-filter vivid` saja: 324 dtk, jadi tambahan waktu hype berasal dari
+    filter warna `vivid` (knob lama: `unsharp` di tiap frame 1080×1920), BUKAN dari tema. Elegan memakai
+    filter `warm`. Gaya tanpa filter warna tidak menambah waktu.
+  - Di video: hype hijau di caption, judul panggung, dan centang; elegan serif emas + kertas hangat.
+
+**Ditemukan & diperbaiki saat uji nyata.**
+- Preset `hype` (musik "energik") membuat render DITOLAK (`musik_invalid`), karena pustaka hanya
+  punya lagu tenang. Di revisi ia juga akan mengganti lagu video yang user cuma minta ganti gayanya.
+  Suasana musik dikeluarkan dari preset (dan dari knob yang boleh diatur preset).
+- `<Freeze>` di komposisi pratinjau 2 frame menjepit frame-nya, sehingga kartu terekam setengah
+  pudar. Diganti still di frame 20, saat animasi sudah diam.
+- `tests/test_draft.py` menulis catatan revisi ke `workspace/state/revisi/` ASLI: +7 berkas "DM with
+  Uji" setiap suite, 187 dari 210 berkas. Jaring pengaman autouse di conftest; terukur 217 → 217.
+  Berkas sampah yang sudah ada tidak dihapus (keputusan user).

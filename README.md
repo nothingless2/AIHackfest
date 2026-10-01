@@ -116,6 +116,14 @@ Instruksi agent: `hermes-skill/content-factory/SKILL.md` (salin ke `~/.hermes/sk
   Voice-over dipakai ulang dari cache bila naskah & suaranya sama. Catatan milik chat lain,
   lebih dari 7 hari, atau bahannya hilang ditolak.
 
+**Gaya tampilan** (`--gaya klasik|bersih|edukatif|elegan|hype|promo`, `scripts/gaya.py`,
+`config/gaya/*.json`): satu preset = tema Remotion (warna, font judul, sudut, cahaya, karakter gerak)
++ knob editing yang sudah ada (subtitle, filter warna, font/animasi teks, SFX, zoom, cover), konsisten
+di caption, kartu motion, panggung, dan cover. Prioritas: flag eksplisit > `--gaya` > profil chat
+(`gaya.py pakai --chat-id ... --gaya ...`) > `klasik`. `klasik` = tampilan lama, identik piksel.
+Validasi ketat (hex, font dari daftar, kontras teks kartu ≥ 4,5) karena tema kelak bisa datang dari
+pengguna. `gaya.py pratinjau` membuat satu gambar contoh semua gaya (latar sintetis, di-cache).
+
 **Caption dinamis** (`--subtitle-style dinamis`, tahap uji): potongan 1-3 kata dari waktu kata
 yang terdengar (`scripts/caption_dinamis.py`), satu kata kunci tampil besar bergradasi emas dengan
 pop (`remotion/src/CaptionDinamis.jsx`), plus SFX pop/whoosh sintesis di kata kunci, kartu, dan

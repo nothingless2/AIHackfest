@@ -81,6 +81,29 @@ wajah pembicara.
 **YANG TIDAK ADA** — jangan dijanjikan: koreksi warna profesional/LUT, stabilisasi,
 stiker, dubbing bahasa lain, upload otomatis ke platform.
 
+## Gaya tampilan (preset)
+
+Satu **gaya** = paket tampilan + editing yang konsisten di subtitle, kartu grafik, tata letak
+panggung, dan cover: `klasik` (bawaan), `bersih`, `edukatif`, `elegan`, `hype`, `promo`.
+Daftar dan penjelasannya: `python3 /root/AIHackfest/scripts/gaya.py daftar`.
+
+- **"Gaya apa saja?" / "contoh gaya" / user ragu memilih**: jalankan
+  `python3 /root/AIHackfest/scripts/gaya.py pratinjau`, kirim berkas `gambar` dari hasilnya (satu
+  gambar berisi contoh semua gaya) dengan kemampuan kirim bawaanmu, plus satu baris per gaya dari
+  `gaya[].label` + `deskripsi`. Gagal (`ok: false`) -> sebutkan gayanya dengan kata saja.
+- **Memilih untuk satu video**: jawaban pertanyaan `gaya` (Langkah 1) atau permintaan user ->
+  `--gaya <nama>` di Langkah 3/5. Flag gaya lain yang diminta user (font, filter warna, subtitle)
+  tetap menang atas bagian preset yang sama.
+- **"Pakai gaya X seterusnya" / "simpan gayaku"**: `python3 /root/AIHackfest/scripts/gaya.py pakai
+  --chat-id "<label chat yang SAMA PERSIS>" --gaya <nama>`. Video berikutnya otomatis memakainya
+  (pertanyaan gaya tidak muncul lagi). "Lupakan gayaku": perintah `lupakan` dengan `--chat-id` sama;
+  "gayaku apa?": perintah `lihat`.
+- **Mengganti gaya video yang sudah jadi**: revisi cepat (Langkah 7) dengan `--gaya <nama>`.
+- Hasil render berisi `gaya_tampilan` (`label`, `sumber`). Sebut singkat labelnya; kalau
+  `sumber` = `profil`, cukup "pakai gaya tersimpanmu (Hype)". `bawaan_profil_tidak_berlaku` ->
+  gaya tersimpan sudah tidak ada, video memakai Klasik: beri tahu user.
+- Ke user sebut LABEL-nya (Hype, Elegan), bukan flag atau nama berkas.
+
 ## Kapan dipakai
 
 User mengirim video/foto di chat Telegram ini DAN memintanya diedit/disusun jadi
@@ -182,7 +205,8 @@ python3 /root/AIHackfest/scripts/hermes_render.py --draft \
   [--fit-mode ...] [--edit-mode auto|full] [--music on|off] [--music-mood ...] \
   [--music-file "<path musik user, kalau ada>"] [--duration-seconds N] \
   [--color-filter natural|vivid|warm|cool|bw] [--speed-factor 0.5-2.0] [--auto-zoom] \
-  [--text-position atas|tengah|bawah] [--text-font standar|tegas|modern|elegan|santai|bersih]
+  [--text-position atas|tengah|bawah] [--text-font standar|tegas|modern|elegan|santai|bersih] \
+  [--gaya klasik|bersih|edukatif|elegan|hype|promo]
 ```
 
 Pemetaan nama parameter di `pemetaan` (langkah 1) ke flag `hermes_render.py`:
@@ -205,6 +229,7 @@ Pemetaan nama parameter di `pemetaan` (langkah 1) ke flag `hermes_render.py`:
 | `broll` (true) / `brollQuery` | `--broll` / `--broll-query` (semua mode) |
 | `jumlahShort` (2/3) | `--jumlah-short 2` / `--jumlah-short 3` |
 | motion graphic (bawaan sedang; user minta tanpa grafik) | `--motion mati` |
+| `gaya` (klasik/bersih/edukatif/elegan/hype/promo) | `--gaya` |
 
 Teks tulisan di layar kini BERANIMASI (Remotion) dan emoji tampil berwarna. Kalau hasil berisi
 `teks_animasi.dipakai: false`, animasi gagal dan video memakai teks statis: sampaikan
@@ -360,6 +385,7 @@ python3 /root/AIHackfest/scripts/hermes_render.py   --chat-id "<label chat yang 
 | "efek suaranya dimatikan" / "tanpa bunyi pop" | `--sfx off` |
 | "font judul/teks tulisan", "teks di atas" | `--text-font tegas`, `--text-position atas` (HANYA teks tulisan, bukan subtitle/narasi) |
 | "warna lebih hangat" | `--color-filter warm` |
+| "ganti gayanya jadi elegan", "coba gaya hype" | `--gaya elegan` / `--gaya hype` |
 | "tanpa grafik/animasi" | `--motion mati` |
 | "suara pria" | `--voice pria` |
 | "ganti kalimat terakhir jadi ..." (voice-over AI) | `--naskah "<naskah LENGKAP>"`: ambil naskah lama, ubah PERSIS yang diminta |

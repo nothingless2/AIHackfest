@@ -3,6 +3,7 @@ import {AbsoluteFill, Sequence, spring, interpolate, Easing, useCurrentFrame, us
   staticFile, delayRender, continueRender} from 'remotion';
 import {loadFont} from '@remotion/fonts';
 import {fitText} from '@remotion/layout-utils';
+import {bacaTema, gradien, pegas as aturPegas, muatFont} from './tema.js';
 
 // Caption dinamis (27 Sep, contoh video user): potongan 1-3 kata; SATU kata kunci besar bergradasi
 // emas dengan pop, kata pendamping kecil di atasnya. Potongan & kata kunci diputuskan Python
@@ -20,7 +21,7 @@ const BAYANG = 'drop-shadow(0 6px 10px rgba(0,0,0,0.55))';
 const SERIF = {family: 'Instrument Serif', file: 'fonts/InstrumentSerif-Italic.ttf', weight: 400, style: 'italic'};
 const AKSEN = '#E8743B';
 
-const PotonganPanggung = ({it, W, H, y}) => {
+const PotonganPanggung = ({it, W, H, y, aksen}) => {
   const frame = useCurrentFrame();
   const muncul = frame >= it.masukFrames ? 1 : interpolate(frame, [0, it.masukFrames], [0, 1], {
     extrapolateLeft: 'clamp', extrapolateRight: 'clamp', easing: Easing.bezier(0.16, 1, 0.3, 1)});
@@ -33,7 +34,7 @@ const PotonganPanggung = ({it, W, H, y}) => {
       fontStyle: 'italic', fontWeight: SERIF.weight, fontSize: ukuran, lineHeight: 1.0, color: '#17171B',
       letterSpacing: ukuran * -0.02}}>
       {it.kata.map((k, i) => (
-        <span key={i} style={{color: i === it.kunci ? AKSEN : '#17171B'}}>
+        <span key={i} style={{color: i === it.kunci ? aksen : '#17171B'}}>
           {(i ? ' ' : '') + k.toUpperCase()}
         </span>
       ))}
@@ -41,12 +42,13 @@ const PotonganPanggung = ({it, W, H, y}) => {
   );
 };
 
-const Potongan = ({it, W, H, y, lebarMaks}) => {
+// Teks pendamping tetap PUTIH di semua tema: ia selalu tampil di atas video, bukan di atas kartu.
+const Potongan = ({it, W, H, y, lebarMaks, F, emas, gerak}) => {
   const frame = useCurrentFrame();
   const {fps} = useVideoConfig();
   const selesai = frame >= it.masukFrames;
   const pegas = selesai ? 1 : spring({frame, fps, durationInFrames: it.masukFrames,
-    config: {damping: 9, stiffness: 180, mass: 0.6}});
+    config: aturPegas({damping: 9, stiffness: 180, mass: 0.6}, gerak)});
   const muncul = selesai ? 1 : interpolate(frame, [0, Math.max(1, it.masukFrames * 0.6)], [0, 1], {
     extrapolateLeft: 'clamp', extrapolateRight: 'clamp', easing: Easing.bezier(0.16, 1, 0.3, 1)});
   const lebar = W * lebarMaks;
@@ -56,12 +58,12 @@ const Potongan = ({it, W, H, y, lebarMaks}) => {
   const pendamping = ada ? it.kata.slice(0, it.kunci).join(' ') : it.kata.join(' ');
   const sesudah = ada ? it.kata.slice(it.kunci + 1).join(' ') : '';
   const ukur = (teks, maks) => Math.min(maks, fitText({text: teks || 'x', withinWidth: lebar,
-    fontFamily: FONT.family, fontWeight: String(FONT.weight)}).fontSize);
+    fontFamily: F.family, fontWeight: String(F.weight)}).fontSize);
   const kecil = Math.min(...[pendamping, sesudah].filter(Boolean)
     .map((t) => ukur(t, H * (ada ? 0.036 : 0.056))), H);
   const besar = ada ? ukur(kunci, H * 0.1) : 0;
   const teksPutih = {
-    fontFamily: `"${FONT.family}", sans-serif`, fontWeight: FONT.weight, color: '#FFFFFF',
+    fontFamily: `"${F.family}", sans-serif`, fontWeight: F.weight, color: '#FFFFFF',
     lineHeight: 1.05, whiteSpace: 'pre', WebkitTextStroke: `${Math.max(2, kecil * 0.05)}px rgba(0,0,0,0.35)`,
     paintOrder: 'stroke fill', textShadow: `0 ${kecil * 0.08}px ${kecil * 0.25}px rgba(0,0,0,0.6)`,
   };
@@ -78,8 +80,8 @@ const Potongan = ({it, W, H, y, lebarMaks}) => {
       {ada ? (
         <div style={{filter: BAYANG, opacity: Math.min(1, pegas * 3),
           scale: String(interpolate(pegas, [0, 1], [0.6, 1]))}}>
-          <div style={{fontFamily: `"${FONT.family}", sans-serif`, fontWeight: FONT.weight,
-            fontSize: besar, lineHeight: 1.08, whiteSpace: 'pre', backgroundImage: EMAS,
+          <div style={{fontFamily: `"${F.family}", sans-serif`, fontWeight: F.weight,
+            fontSize: besar, lineHeight: 1.08, whiteSpace: 'pre', backgroundImage: emas,
             WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent',
             letterSpacing: besar * -0.01}}>
             {kunci}
@@ -99,13 +101,17 @@ const Potongan = ({it, W, H, y, lebarMaks}) => {
 // ringkas: timeline RINGKAS untuk render -- potongan ke-j menempati frame [j*(M+1), j*(M+1)+M]:
 // M frame masuk + 1 frame diam. Python memetakan frame ini ke waktu aslinya (daftar concat ffmpeg),
 // jadi SATU sesi Chromium merender semua potongan dan komposit hanya mendapat SATU input.
-export const CaptionDinamis = ({items, y = 0.7, lebarMaks = 0.74, ringkas = false, yPanggung = 0.365}) => {
+export const CaptionDinamis = ({items, y = 0.7, lebarMaks = 0.74, ringkas = false, yPanggung = 0.365, tema}) => {
   const {fps, width, height} = useVideoConfig();
+  const T = bacaTema(tema);
+  const F = T.font || FONT;
+  const emas = T.w.kunci ? gradien(T.w.kunci) : EMAS;
+  const aksen = T.w.aksen ?? AKSEN;
   const [siap, setSiap] = React.useState(false);
   React.useEffect(() => {
-    const h = delayRender(`memuat font ${FONT.family}`);
+    const h = delayRender(`memuat font ${F.family}`);
     Promise.all([
-      loadFont({family: FONT.family, url: staticFile(FONT.file), weight: String(FONT.weight)}),
+      muatFont(F),
       loadFont({family: SERIF.family, url: staticFile(SERIF.file), weight: String(SERIF.weight),
         style: SERIF.style}),
     ])
@@ -121,8 +127,9 @@ export const CaptionDinamis = ({items, y = 0.7, lebarMaks = 0.74, ringkas = fals
         return (
           <Sequence key={i} from={dari} durationInFrames={dur}>
             {it.varian === 'panggung'
-              ? <PotonganPanggung it={it} W={width} H={height} y={yPanggung} />
-              : <Potongan it={it} W={width} H={height} y={y} lebarMaks={lebarMaks} />}
+              ? <PotonganPanggung it={it} W={width} H={height} y={yPanggung} aksen={aksen} />
+              : <Potongan it={it} W={width} H={height} y={y} lebarMaks={lebarMaks} F={F} emas={emas}
+                  gerak={T.gerak} />}
           </Sequence>
         );
       })}

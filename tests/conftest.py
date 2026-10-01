@@ -174,3 +174,23 @@ def _status_render_di_tmp(monkeypatch, tmp_path):
     import auto_render
     monkeypatch.setattr(auto_render, "STATUS_PATH", str(tmp_path / "render_status.json"))
     yield
+
+
+@pytest.fixture(autouse=True)
+def _profil_gaya_di_tmp(monkeypatch, tmp_path):
+    """Profil & cache pratinjau gaya ada di workspace/state/ -- di test harus ke tmp (aturan #6):
+    hermes_render.main() membaca profil chat di SETIAP run, dan `gaya.py pakai` menulisnya."""
+    import gaya
+    monkeypatch.setattr(gaya, "PROFIL_DIR", str(tmp_path / "profil"))
+    monkeypatch.setattr(gaya, "PRATINJAU_DIR", str(tmp_path / "pratinjau_gaya"))
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _catatan_revisi_di_tmp(monkeypatch, tmp_path):
+    """hermes_render._catat_revisi menulis ke workspace/state/revisi/. Terukur 1 Okt: setiap kali
+    tests/test_draft.py dijalankan, 7 catatan "DM with Uji" masuk ke state ASLI (187 menumpuk dari
+    210 berkas). Semua tes ke tmp kecuali menimpanya sendiri (test_revisi.py)."""
+    import revisi
+    monkeypatch.setattr(revisi, "REVISI_DIR", str(tmp_path / "revisi_state"))
+    yield

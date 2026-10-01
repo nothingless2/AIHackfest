@@ -255,6 +255,14 @@ _POTONG = re.compile(r"\b(buang|potong|pilih|semua|utuh|apa adanya|jangan dibuan
                      r"padat)\b", re.I)
 
 
+def _preset_disebut(k):
+    """"gaya hype", "style elegan": nama preset yang disebut bersama kata gaya/style."""
+    import gaya as _gaya
+    nama = _gaya.daftar()
+    return bool(nama) and bool(re.search(r"\b(gaya|style|tema)\s+(" + "|".join(map(re.escape, nama)) + r")\b",
+                                          k, re.I))
+
+
 def dari_konteks(konteks):
     """Apa yang SUDAH disebut user. Deteksi ringan berbasis pola, sengaja
     konservatif: lebih baik bertanya sekali lagi daripada menganggap sudah dijawab."""
@@ -272,7 +280,7 @@ def dari_konteks(konteks):
         "potong": bool(_POTONG.search(k)),
         "posisi_teks": bool(_POSISI_TEKS.search(k)),
         "font_teks": bool(_FONT_TEKS.search(k)),
-        "gaya": bool(_GAYA.search(k)),
+        "gaya": bool(_GAYA.search(k)) or _preset_disebut(k),
         "broll": bool(_BROLL.search(k)),
         "short": bool(_SHORT.search(k)),
     }
@@ -488,35 +496,23 @@ def susun_pertanyaan(ringk, tahu):
                 "alasan": "klip stok yang relevan memperjelas konteks",
             })
     if q and not tahu.get("gaya"):
-        # Tawaran proaktif: fitur gaya yang memang ada tapi tidak akan ditemukan user
-        # kalau tidak ditawarkan. HANYA menumpang pada pertanyaan lain yang memang perlu
+        # Tawaran proaktif: preset gaya (config/gaya/) yang memang ada tapi tidak akan ditemukan
+        # user kalau tidak ditawarkan. HANYA menumpang pada pertanyaan lain yang memang perlu
         # (`q` tidak kosong): permintaan yang sudah lengkap tidak boleh dipaksa melewati
         # pertanyaan hanya demi tawaran. Paling akhir supaya tidak menggeser yang penting.
-        if ringk["n_berucap"] > 0:
+        # Satu preset = paket tampilan + editing (subtitle, warna, font, animasi, efek suara),
+        # jadi pilihan yang sama berlaku untuk bahan berucap maupun tidak.
+        import gaya as _gaya
+        preset = [_gaya.muat(n) for n in _gaya.daftar()]
+        if preset:
             q.append({
                 "kode": "gaya",
-                "tanya": "Mau gaya tampilan tertentu?",
-                "opsi": _opsi("Standar (subtitle karaoke, warna asli)",
-                              "Gaya CapCut (subtitle huruf besar tebal, kata aktif menyala hijau)",
-                              "Warna lebih hidup (filter vivid)",
-                              "Gaya CapCut + warna lebih hidup", rekomendasi=0),
-                "catatan": "",
-                "param": {"B": {"subtitleStyle": "capcut"}, "C": {"colorFilter": "vivid"},
-                          "D": {"subtitleStyle": "capcut", "colorFilter": "vivid"}},
-                "default": "standar, subtitle karaoke dan warna asli",
-                "alasan": "ada beberapa gaya subtitle dan filter warna; belum disebut pilihanmu",
-            })
-        else:
-            q.append({
-                "kode": "gaya",
-                "tanya": "Mau filter warna?",
-                "opsi": _opsi("Tanpa filter, warna asli", "Warna lebih hidup (vivid)",
-                              "Warna hangat", "Hitam putih", rekomendasi=0),
-                "catatan": "",
-                "param": {"B": {"colorFilter": "vivid"}, "C": {"colorFilter": "warm"},
-                          "D": {"colorFilter": "bw"}},
-                "default": "tanpa filter, warna asli",
-                "alasan": "filter warna tersedia tapi belum disebut pilihanmu",
+                "tanya": "Mau gaya tampilan yang mana?",
+                "opsi": _opsi(*[f"{p['label']}: {p['deskripsi']}" for p in preset], rekomendasi=0),
+                "catatan": "Mau lihat contohnya dulu? Bilang \"contoh gaya\", nanti kukirim gambarnya.",
+                "param": {chr(65 + i): {"gaya": p["nama"]} for i, p in enumerate(preset)},
+                "default": f"{preset[0]['label'].lower()} (tampilan bawaan)",
+                "alasan": "ada beberapa gaya tampilan siap pakai; belum disebut pilihanmu",
             })
     return q[:MAKS_PERTANYAAN]
 
@@ -698,6 +694,10 @@ def inspeksi(paths, konteks="", chat_id=""):
         fakta = kumpulkan_fakta(paths)
         ringk = ringkas(fakta)
         tahu = dari_konteks(konteks)
+        if not tahu["gaya"]:
+            # Gaya yang sudah disimpan di profil chat ini dipakai otomatis: tidak ditanya lagi.
+            import gaya as _gaya
+            tahu["gaya"] = bool(_gaya.profil(chat_id).get("gaya"))
         pertanyaan = susun_pertanyaan(ringk, tahu)
     except Exception as e:  # noqa: BLE001
         # Pemeriksaan boleh gagal tanpa menahan user: dua pertanyaan generik cukup.

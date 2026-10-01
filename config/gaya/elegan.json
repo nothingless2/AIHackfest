@@ -1,0 +1,34 @@
+{
+  "label": "Elegan",
+  "deskripsi": "Mewah dan tenang: huruf serif Playfair, emas lembut, warna hangat, tanpa efek suara.",
+  "tema": {
+    "warna": {
+      "aksen": "#C9A227",
+      "aksen2": "#8C6A1F",
+      "sorot": "#F3E3B3",
+      "kartu": "#1C1917E6",
+      "garis": "#F5E6B833",
+      "teks": "#FAF7F0",
+      "teks_sub": "#D6CCB8",
+      "kunci": [
+        "#FFF7E0",
+        "#E2C26B",
+        "#A8842C"
+      ],
+      "latar": "#F7F3EA",
+      "kisi": "#ECE4D3"
+    },
+    "font": {
+      "judul": "elegan"
+    },
+    "sudut": 0.6,
+    "cahaya": false,
+    "gerak": "halus"
+  },
+  "editing": {
+    "color_filter": "warm",
+    "text_font": "elegan",
+    "text_animation": "fade",
+    "sfx": "off"
+  }
+}

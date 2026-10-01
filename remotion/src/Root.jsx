@@ -5,6 +5,7 @@ import {MotionOverlay} from './MotionOverlay.jsx';
 import {CaptionDinamis} from './CaptionDinamis.jsx';
 import {Panggung} from './Panggung.jsx';
 import {Sampul} from './Sampul.jsx';
+import {PratinjauGaya} from './PratinjauGaya.jsx';
 
 const metadata = ({props}) => ({
   durationInFrames: Math.max(2, Math.ceil((props.durasi || 2) * (props.fps || 24))),
@@ -62,6 +63,16 @@ export const Root = () => (
       fps={24}
       durationInFrames={1}
       defaultProps={{gambar: null, judul: 'Ganti API Key Bikin Pusing', emas: 1}}
+      calculateMetadata={metadata}
+    />
+    <Composition
+      id="PratinjauGaya"
+      component={PratinjauGaya}
+      width={540}
+      height={960}
+      fps={24}
+      durationInFrames={1}
+      defaultProps={{gambar: null, label: 'Klasik', tema: {}}}
       calculateMetadata={metadata}
     />
   </>

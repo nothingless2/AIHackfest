@@ -127,7 +127,23 @@ def total_frame_chromium(kerja):
     return sum((k["sampai"] - k["dari"] + 1) if k["jenis"] == "klip" else 1 for k in kerja)
 
 
+def _tema_aktif():
+    """Tema preset gaya dari env (scripts/gaya.py), divalidasi ulang; tidak ada -> None."""
+    from gaya import GayaError, tema_aktif
+    try:
+        return tema_aktif()
+    except GayaError as e:
+        raise OverlayError(f"tema gaya tidak sah: {e}")
+
+
 def _jalankan_node(props, kerja, folder, komposisi="TextOverlay", batas=None):
+    # Satu pintu untuk SEMUA komposisi: tema preset disuntik di sini, jadi caption, kartu motion,
+    # panggung, dan cover selalu memakai palet yang sama. Props yang sudah membawa `tema`
+    # (pratinjau gaya) tidak ditimpa.
+    if "tema" not in props:
+        tema = _tema_aktif()
+        if tema:
+            props = {**props, "tema": tema}
     if not shutil.which("node"):
         raise OverlayError("node tidak terpasang")
     if not os.path.isdir(os.path.join(REMOTION_DIR, "node_modules")):
@@ -385,4 +401,51 @@ def render_sampul(jpg_masuk, judul, emas, out_jpg, folder, *, lebar, tinggi, y_j
                        capture_output=True, text=True)
     if r.returncode != 0 or not os.path.exists(out_jpg):
         raise OverlayError(f"cover gagal disimpan: {r.stderr[-200:]}")
+    return out_jpg
+
+
+# ---------------------------------------------------------------- pratinjau preset gaya
+
+PRATINJAU_W, PRATINJAU_H, PRATINJAU_KOLOM = 540, 960, 3
+PRATINJAU_FRAME = 20       # semua animasi masuk (maks 12 frame) sudah diam
+
+
+def _latar_pratinjau():
+    """Latar SINTETIS (gradien), bukan bahan user: pratinjau di-cache untuk semua pengguna."""
+    import base64
+    import io
+    from PIL import Image
+    im = Image.linear_gradient("L").resize((PRATINJAU_W, PRATINJAU_H))
+    warna = Image.merge("RGB", (im.point(lambda v: 40 + v // 3), im.point(lambda v: 70 + v // 4),
+                                im.point(lambda v: 110 - v // 6)))
+    b = io.BytesIO()
+    warna.save(b, "JPEG", quality=90)
+    return "data:image/jpeg;base64," + base64.b64encode(b.getvalue()).decode()
+
+
+def render_pratinjau_gaya(presets, out_jpg):
+    """Satu kartu per preset (komposisi PratinjauGaya), lalu disusun jadi satu grid JPEG."""
+    from PIL import Image
+    folder = tempfile.mkdtemp(prefix="_pratinjau_", dir=os.path.dirname(os.path.abspath(out_jpg)))
+    try:
+        latar = _latar_pratinjau()
+        kartu = []
+        for p in presets:
+            props = {"lebar": PRATINJAU_W, "tinggi": PRATINJAU_H, "fps": 24, "durasi": 2.0,
+                     "gambar": latar, "label": p["label"], "tema": p["tema"]}
+            sub = os.path.join(folder, p["nama"])
+            os.makedirs(sub)
+            (hasil,) = _jalankan_node(props, [{"jenis": "diam", "frame": PRATINJAU_FRAME, "tahan": 1, "mulai": 0}], sub,
+                                      komposisi="PratinjauGaya", batas=SAMPUL_BATAS_DETIK)
+            kartu.append(hasil["out"])
+        baris = (len(kartu) + PRATINJAU_KOLOM - 1) // PRATINJAU_KOLOM
+        grid = Image.new("RGB", (PRATINJAU_W * PRATINJAU_KOLOM, PRATINJAU_H * baris), (16, 16, 20))
+        for i, path in enumerate(kartu):
+            with Image.open(path) as im:
+                grid.paste(im.convert("RGB"), ((i % PRATINJAU_KOLOM) * PRATINJAU_W, (i // PRATINJAU_KOLOM) * PRATINJAU_H))
+        sementara = out_jpg + ".tmp.jpg"
+        grid.save(sementara, "JPEG", quality=85)
+        os.replace(sementara, out_jpg)
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
     return out_jpg

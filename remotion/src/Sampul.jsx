@@ -2,9 +2,8 @@ import React from 'react';
 import {AbsoluteFill, Img, delayRender, continueRender, useVideoConfig} from 'remotion';
 // `gambar` = data URL JPEG frame terbaik (dikirim Python lewat props): tidak ada berkas sementara
 // yang perlu ditaruh di public/ lalu dibersihkan.
-import {staticFile} from 'remotion';
-import {loadFont} from '@remotion/fonts';
 import {fitText} from '@remotion/layout-utils';
+import {bacaTema, gradien, muatFont} from './tema.js';
 
 // Cover video (still 1080x1920): frame terbaik + judul besar. Frame dipilih Python dengan mengukur
 // (luas wajah x ketajaman), judulnya dari kartu pembuka yang sudah divalidasi. Zona judul dihitung
@@ -13,12 +12,15 @@ import {fitText} from '@remotion/layout-utils';
 const FONT = {family: 'Montserrat ExtraBold', file: 'fonts/Montserrat-ExtraBold.ttf', weight: 800};
 const EMAS = 'linear-gradient(180deg, #FFF4B8 0%, #F7CC55 48%, #C98E22 100%)';
 
-export const Sampul = ({gambar, judul, emas, yJudul = 0.72}) => {
+export const Sampul = ({gambar, judul, emas, yJudul = 0.72, tema}) => {
   const {width, height} = useVideoConfig();
+  const T = bacaTema(tema);
+  const F = T.font || FONT;
+  const warnaEmas = T.w.kunci ? gradien(T.w.kunci) : EMAS;
   const [siap, setSiap] = React.useState(false);
   React.useEffect(() => {
-    const h = delayRender(`memuat font ${FONT.family}`);
-    loadFont({family: FONT.family, url: staticFile(FONT.file), weight: String(FONT.weight)})
+    const h = delayRender(`memuat font ${F.family}`);
+    muatFont(F)
       .then(() => { setSiap(true); continueRender(h); })
       .catch((e) => { throw e; });
   }, []);
@@ -27,7 +29,7 @@ export const Sampul = ({gambar, judul, emas, yJudul = 0.72}) => {
   const baris = kata.length > 3 ? [kata.slice(0, Math.ceil(kata.length / 2)), kata.slice(Math.ceil(kata.length / 2))] : [kata];
   const terpanjang = baris.map((b) => b.join(' ')).sort((a, b) => b.length - a.length)[0] || 'x';
   const ukuran = Math.min(height * 0.075, fitText({text: terpanjang, withinWidth: width * 0.84,
-    fontFamily: FONT.family, fontWeight: String(FONT.weight)}).fontSize);
+    fontFamily: F.family, fontWeight: String(F.weight)}).fontSize);
   let idx = -1;
   return (
     <AbsoluteFill style={{background: '#000'}}>
@@ -36,7 +38,7 @@ export const Sampul = ({gambar, judul, emas, yJudul = 0.72}) => {
         `linear-gradient(to bottom, rgba(0,0,0,0) ${Math.round(yJudul * 100) - 22}%, rgba(0,0,0,0.78) ${Math.round(yJudul * 100) + 6}%, rgba(0,0,0,0.9) 100%)`}} />
       {kata.length ? (
         <div style={{position: 'absolute', left: 0, width, top: height * yJudul, translate: '0 -50%',
-          textAlign: 'center', fontFamily: `"${FONT.family}", sans-serif`, fontWeight: FONT.weight,
+          textAlign: 'center', fontFamily: `"${F.family}", sans-serif`, fontWeight: F.weight,
           fontSize: ukuran, lineHeight: 1.06, color: '#FFFFFF', padding: `0 ${width * 0.06}px`,
           textShadow: `0 ${ukuran * 0.05}px ${ukuran * 0.2}px rgba(0,0,0,0.8)`}}>
           {baris.map((b, i) => (
@@ -44,7 +46,7 @@ export const Sampul = ({gambar, judul, emas, yJudul = 0.72}) => {
               {b.map((w, j) => {
                 idx += 1;
                 return idx === emas ? (
-                  <span key={j} style={{backgroundImage: EMAS, WebkitBackgroundClip: 'text',
+                  <span key={j} style={{backgroundImage: warnaEmas, WebkitBackgroundClip: 'text',
                     backgroundClip: 'text', color: 'transparent'}}>{(j ? ' ' : '') + w}</span>
                 ) : <span key={j}>{(j ? ' ' : '') + w}</span>;
               })}

@@ -1,0 +1,28 @@
+{
+  "label": "Hype",
+  "deskripsi": "Gaya CapCut energik: caption dinamis hijau neon, warna hidup, zoom ke wajah, efek suara.",
+  "tema": {
+    "warna": {
+      "aksen": "#22C55E",
+      "aksen2": "#A3E635",
+      "sorot": "#BEF264",
+      "kunci": [
+        "#F7FEE7",
+        "#84CC16",
+        "#3F6212"
+      ]
+    },
+    "font": {
+      "judul": "tegas"
+    },
+    "cahaya": true,
+    "gerak": "tegas"
+  },
+  "editing": {
+    "subtitle_style": "dinamis",
+    "color_filter": "vivid",
+    "sfx": "on",
+    "zoom_wajah": "on",
+    "text_animation": "loncat"
+  }
+}

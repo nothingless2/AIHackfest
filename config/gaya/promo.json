@@ -1,0 +1,29 @@
+{
+  "label": "Promo",
+  "deskripsi": "Jualan tegas: merah-kuning mencolok, subtitle CapCut, warna hidup, musik upbeat.",
+  "tema": {
+    "warna": {
+      "aksen": "#EF4444",
+      "aksen2": "#F59E0B",
+      "sorot": "#FDE047",
+      "kunci": [
+        "#FEF9C3",
+        "#FACC15",
+        "#CA8A04"
+      ]
+    },
+    "font": {
+      "judul": "tegas"
+    },
+    "sudut": 1.25,
+    "cahaya": true,
+    "gerak": "tegas"
+  },
+  "editing": {
+    "subtitle_style": "capcut",
+    "color_filter": "vivid",
+    "text_font": "tegas",
+    "text_animation": "pop",
+    "sfx": "on"
+  }
+}

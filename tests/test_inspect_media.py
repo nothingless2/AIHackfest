@@ -676,7 +676,8 @@ def test_tawaran_gaya_menumpang_bukan_memaksa():
     assert im.susun_pertanyaan(ringk, _tahu(lengkap)) == []
     q = im.susun_pertanyaan(ringk, _tahu("edit ya"))
     g = next(x for x in q if x["kode"] == "gaya")
-    assert g["param"]["B"] == {"subtitleStyle": "capcut"}
+    # 1 Okt: tawaran berupa preset gaya (paket tampilan + editing), bawaan "klasik" di A.
+    assert g["param"]["A"] == {"gaya": "klasik"} and g["opsi"][0]["rekomendasi"]
 
 
 def test_gaya_yang_sudah_disebut_tidak_ditawarkan():
@@ -685,10 +686,36 @@ def test_gaya_yang_sudah_disebut_tidak_ditawarkan():
     assert "gaya" not in _kode(q)
 
 
-def test_bahan_tanpa_ucapan_ditawari_filter_warna_bukan_subtitle():
-    q = im.susun_pertanyaan(_ringk(), _tahu("edit ya"))
-    g = next(x for x in q if x["kode"] == "gaya")
-    assert all("colorFilter" in v and "subtitleStyle" not in v for v in g["param"].values())
+def test_bahan_berucap_maupun_tidak_ditawari_preset_yang_sama():
+    """Sebelum 1 Okt bahan tanpa ucapan ditawari filter warna saja; sekarang keduanya ditawari
+    preset (subtitle di preset memang tidak berpengaruh bila tidak ada ucapan)."""
+    import gaya
+    for ringk in (_ringk(), _ringk(n_berucap=3, n_tanpa_ucapan=0, n_suasana=0)):
+        g = next(x for x in im.susun_pertanyaan(ringk, _tahu("edit ya")) if x["kode"] == "gaya")
+        assert [v["gaya"] for v in g["param"].values()] == gaya.daftar()
+        assert len(g["opsi"]) == len(gaya.daftar())
+
+
+def test_gaya_dari_profil_tidak_ditanya_lagi(tmp_path, monkeypatch):
+    """Gaya yang disimpan user ("pakai gaya hype seterusnya") berlaku otomatis."""
+    import gaya
+    monkeypatch.setattr(im, "kumpulkan_fakta", lambda paths: [])
+    monkeypatch.setattr(im, "ringkas", lambda fakta: _ringk(n_berucap=3, n_tanpa_ucapan=0, n_suasana=0))
+    monkeypatch.setattr(im, "INSPECT_DIR", str(tmp_path / "inspect"))
+    kode = lambda r: [p["kode"] for p in r["pertanyaan"]]          # noqa: E731
+    assert "gaya" in kode(im.inspeksi([], "edit ya", chat_id="DM A")), "kontrol: tanpa profil ditanya"
+    gaya.simpan_gaya("DM A", "hype")
+    assert "gaya" not in kode(im.inspeksi([], "edit ya", chat_id="DM A"))
+    assert "gaya" in kode(im.inspeksi([], "edit ya", chat_id="DM B")), "profil chat lain tidak berlaku"
+
+
+@pytest.mark.parametrize("teks, harap", [
+    ("edit ya, pakai gaya hype", True),
+    ("bikin dengan style elegan dong", True),
+    ("edit ya, videonya bersih", False),           # kata biasa, bukan nama preset
+])
+def test_nama_preset_yang_disebut_dianggap_sudah_dijawab(teks, harap):
+    assert im.dari_konteks(teks)["gaya"] is harap
 
 
 def test_nilai_parameter_di_semua_pertanyaan_valid_menurut_style():
@@ -704,6 +731,9 @@ def test_nilai_parameter_di_semua_pertanyaan_valid_menurut_style():
                     st.resolve_text_font(param["textFont"])
                 if "colorFilter" in param:
                     st.resolve_color_filter(param["colorFilter"])
+                if "gaya" in param:
+                    import gaya
+                    gaya.muat(param["gaya"])
 
 
 def test_pesan_pertanyaan_menyebut_bahan_yang_diterima():

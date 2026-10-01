@@ -1,0 +1,33 @@
+{
+  "label": "Bersih",
+  "deskripsi": "Minimalis terang: kartu putih, aksen biru, huruf Inter, gerak halus tanpa efek suara.",
+  "tema": {
+    "warna": {
+      "aksen": "#2563EB",
+      "aksen2": "#60A5FA",
+      "sorot": "#1D4ED8",
+      "kartu": "#FFFFFFF0",
+      "garis": "#0F172A1F",
+      "teks": "#0F172A",
+      "teks_sub": "#475569",
+      "kunci": [
+        "#FFFFFF"
+      ],
+      "latar": "#F8FAFC",
+      "kisi": "#E2E8F0"
+    },
+    "font": {
+      "judul": "bersih"
+    },
+    "sudut": 0.5,
+    "cahaya": false,
+    "gerak": "halus"
+  },
+  "editing": {
+    "subtitle_style": "kata",
+    "color_filter": "natural",
+    "text_font": "bersih",
+    "text_animation": "fade",
+    "sfx": "off"
+  }
+}

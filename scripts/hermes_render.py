@@ -43,6 +43,7 @@ from cost_estimate import ringkasan_biaya
 from duration import requested_duration
 import draf_naskah
 from draf_naskah import DrafError
+import gaya
 from inspect_media import cek_izin, sidik_bahan
 from music import MusicError, list_tracks, music_wanted, pick_track, requested_mood
 from orchestrator import (
@@ -154,6 +155,9 @@ def _parser():
                    help="Zoom halus ke wajah saat kata kunci (bawaan on untuk gaya dinamis).")
     p.add_argument("--logo-merek", choices=["on", "off"], default=None,
                    help="Kartu logo merek yang diucapkan, dari daftar config/merek_logo.json.")
+    p.add_argument("--gaya", default=None,
+                   help="Preset gaya tampilan + editing (config/gaya/*.json), mis. klasik|bersih|hype. "
+                        "Tanpa flag: gaya di profil chat, lalu 'klasik'. Flag gaya lain tetap menang.")
     p.add_argument("--cover", choices=["desain", "frame"], default=None,
                    help="Cover: 'desain' (frame terbaik + judul besar, bawaan) atau 'frame' (cara lama).")
     p.add_argument("--motion", default=None,
@@ -201,7 +205,8 @@ LABEL_REVISI = {"music": "musik", "music_mood": "suasana musik", "music_file": "
                 "broll": "B-roll", "broll_query": "kata kunci B-roll", "broll_count": "jumlah B-roll",
                 "auto_zoom": "zoom otomatis", "sfx": "efek suara",
                 "bersih_suara": "pembersih suara", "potong_pengisi": "buang kata pengisi",
-                "zoom_wajah": "zoom wajah", "logo_merek": "kartu logo", "cover": "cover"}
+                "zoom_wajah": "zoom wajah", "logo_merek": "kartu logo", "cover": "cover",
+                "gaya": "gaya tampilan"}
 
 
 def _flag_eksplisit(parser, argv):
@@ -318,7 +323,7 @@ def catatan_bahan(brief):
     return catatan
 
 
-def _selesai_draf(run_id, chat_id, run_prefix, nama_bahan, args, media_paths):
+def _selesai_draf(run_id, chat_id, run_prefix, nama_bahan, args, media_paths, gaya_tampilan=None):
     """Simpan draf dari brief run ini, cetak pesan siap kirim. Belum ada video."""
     brief = read_json(brief_path_for_run(run_id), {}) or {}
     try:
@@ -351,6 +356,7 @@ def _selesai_draf(run_id, chat_id, run_prefix, nama_bahan, args, media_paths):
         "storyboard": pratinjau["storyboard"],
         "contoh_suara": pratinjau["contoh_suara"],
         "storyboard_gagal": pratinjau["gagal"] or None,
+        "gaya_tampilan": gaya_tampilan,
         "biaya": ringkasan_biaya(run_id),
     }
     print(json.dumps(hasil, ensure_ascii=False))
@@ -423,7 +429,7 @@ def _hasil_render(run_id, pesan_durasi):
     }
 
 
-def _render_beberapa_short(run_id, chat_id, draf, target, pesan_durasi, gagal, args):
+def _render_beberapa_short(run_id, chat_id, draf, target, pesan_durasi, gagal, args, gaya_tampilan=None):
     """Render beberapa short dari satu draf, berurutan (satu lock per short). Draf diklaim
     sekali (short pertama); short yang gagal tidak menggagalkan yang lain dan dilaporkan.
     Semua gagal -> klaim dilepas (draf boleh dicoba lagi)."""
@@ -461,7 +467,8 @@ def _render_beberapa_short(run_id, chat_id, draf, target, pesan_durasi, gagal, a
         if diklaim:
             draf_naskah.lepas(draf["draft_id"])
         return gagal("render_gagal", "; ".join(f"short {g['short']}: {g['alasan']}" for g in gagal_list))
-    print(json.dumps({"ok": True, "shorts": hasil, "gagal": gagal_list or None}, ensure_ascii=False))
+    print(json.dumps({"ok": True, "shorts": hasil, "gagal": gagal_list or None,
+                      "gaya_tampilan": gaya_tampilan}, ensure_ascii=False))
     return 0
 
 
@@ -600,10 +607,20 @@ def main(argv=None):
     if args.draft:
         os.environ["CONTENT_FACTORY_DRAFT"] = "1"
 
+    # Preset gaya: eksplisit > profil chat > bawaan. Nama efektifnya disimpan di args (ikut draf &
+    # catatan revisi), knob-nya TIDAK -- supaya ganti gaya nanti tidak terkunci nilai preset lama.
+    try:
+        preset_gaya, sumber_gaya = gaya.pilih(args.gaya, chat_id or "")
+    except gaya.GayaError as e:
+        return gagal("gaya_invalid", str(e))
+    args.gaya = preset_gaya["nama"]
+
     try:
         _apply_env(args)
     except MediaPathError as e:
         return gagal("musik_invalid", f"musik: {e}")
+    gaya.pasang(preset_gaya, args)
+    info_gaya = {"nama": preset_gaya["nama"], "label": preset_gaya["label"], "sumber": sumber_gaya}
 
     try:
         resolve_canvas()
@@ -637,7 +654,8 @@ def main(argv=None):
         os.environ["CONTENT_FACTORY_DURATION"] = str(target_durasi)
 
     if draf and len(target) > 1:
-        return _render_beberapa_short(run_id, chat_id, draf, target, pesan_durasi, gagal, args)
+        return _render_beberapa_short(run_id, chat_id, draf, target, pesan_durasi, gagal, args,
+                                      gaya_tampilan=info_gaya)
 
     opsi = {}
     diklaim = []
@@ -679,9 +697,11 @@ def main(argv=None):
         return gagal("render_gagal", f"gagal di tahap {label}.{tail}")
 
     if args.draft:
-        return _selesai_draf(run_id, chat_id, run_prefix, nama_bahan, args, media_paths)
+        return _selesai_draf(run_id, chat_id, run_prefix, nama_bahan, args, media_paths,
+                             gaya_tampilan=info_gaya)
 
     hasil = _hasil_render(run_id, pesan_durasi)
+    hasil["gaya_tampilan"] = info_gaya
     hasil["revisi_gagal"] = _catat_revisi(run_id, chat_id, run_prefix, nama_bahan, args,
                                           revisi_dari=args.revisi)
     if rec:
