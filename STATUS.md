@@ -871,3 +871,15 @@ emas. Satu-satunya "paket" adalah `--subtitle-style dinamis`.
 - `tests/test_draft.py` menulis catatan revisi ke `workspace/state/revisi/` ASLI: +7 berkas "DM with
   Uji" setiap suite, 187 dari 210 berkas. Jaring pengaman autouse di conftest; terukur 217 → 217.
   Berkas sampah yang sudah ada tidak dihapus (keputusan user).
+
+**Uji agent setelah fitur gaya (1 Okt) — label chat.**
+- "Gaya apa saja?": 2 permintaan, satu `gaya.py pratinjau`, label dan deskripsi disebut tanpa flag.
+- "Pakai gaya elegan terus" (mode `hermes -z`, tanpa baris `Source:` konteks sesi): agent menggali
+  `run_log`/state, lalu **menyimpan profil untuk "DM with Stringless"** (chat user sungguhan): 11
+  permintaan, 214 ribu token. Profil itu dihapus (sebelumnya tidak ada).
+- Sebab: satu-satunya kemunculan label itu di system prompt adalah CONTOH di SKILL. Label yang sah
+  ada di baris `**Source:** Telegram (DM with <nama>)` dari konteks sesi gateway Hermes.
+- Contoh diganti label fiktif, plus aturan: label HANYA dari baris Source; tidak ada -> menolak.
+  Uji ulang: 2 permintaan, ±18 ribu token, menolak, tidak ada profil tertulis.
+- Belum teruji: jalur positif lewat Telegram sungguhan (perlu pesan dari chat).
+- Deskripsi preset Promo tidak lagi menyebut musik (sudah dikeluarkan dari preset).

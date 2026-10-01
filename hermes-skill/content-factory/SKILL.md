@@ -171,8 +171,15 @@ dengan JSON di stdin:
 ```json
 {"paths": ["<path lokal video/foto dari cache Hermes>", "..."],
  "konteks": "<pesan/permintaan user apa adanya>",
- "chat_id": "<label chat, mis. DM with Stringless>"}
+ "chat_id": "<label chat dari baris Source di konteks sesi, mis. DM with Budi>"}
 ```
+
+**Label chat** (`chat_id` / `--chat-id`) diambil HANYA dari baris `**Source:**` konteks sesi ini
+(mis. `Telegram (DM with Budi)` -> `DM with Budi`), dan dipakai SAMA PERSIS di semua langkah.
+DILARANG mencarinya di log, `run_log.jsonl`, berkas state, atau perintah sebelumnya: label di sana
+milik chat lain, dan memakainya berarti draf, revisi, atau gaya orang lain ikut tersentuh. Tidak ada
+baris Source -> jangan jalankan perintah yang butuh `--chat-id`; bilang itu hanya bisa dari chat.
+(1 Okt: tanpa baris Source, agent mengambil label user lain dari log lalu menyimpan gayanya.)
 
 Hasilnya JSON berisi fakta terukur (durasi, ada/tidaknya ucapan, dst), `inspectId`,
 dan (kalau ada) `pertanyaan` dengan pesan siap kirim + pemetaan jawaban.
