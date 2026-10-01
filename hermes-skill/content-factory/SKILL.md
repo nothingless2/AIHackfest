@@ -12,6 +12,12 @@ metadata:
 
 # Content Factory (pipeline lokal, bukan editor generatif)
 
+**Skill ini sudah termuat penuh di awal sesi (`skills.auto_load`).** Jangan memanggil
+`skill_view content-factory` lagi, dan jangan membaca kode sumber pipeline (`scripts/*.py`,
+`skills/*`) untuk mencari opsi: semua opsi yang ada tercantum di sini. Opsi yang tidak tercantum
+= belum didukung; bilang begitu ke user. (30 Sep: tanpa skill di konteks, agent membaca
+`music.py`/`revisi.py`/`auto_render.py` dan mencari `*.mp4` di seluruh `~/.hermes`.)
+
 **JANGAN PERNAH menjalankan `ffmpeg` secara manual/improvisasi untuk permintaan
 edit video/foto dari user.** Kalau kamu punya tool terminal dan tahu cara pakai
 ffmpeg, GODAAN itu justru yang harus dihindari di sini — ffmpeg mentah TIDAK
@@ -109,8 +115,9 @@ membuat konten dengan error 24 Sep dari key lama — padahal kuota key baru terp
   BUKAN berarti kuota habis: tetap coba Langkah 1.
   Tambahkan `--gratis` HANYA kalau user memang menanyakan jatah model gratis; kalau jatahnya
   masih ada, pemeriksaan itu sendiri memakai 1 dari 50.
-  Saat melaporkan, **jangan sebut id/nama model mana pun** (lihat SOUL): cukup "model utama" dan
-  "jatah model gratis", plus angka dan jam resetnya. Jangan pula meneruskan saran jualan penyedia
+  Saat melaporkan, **jangan sebut id/nama model mana pun** (lihat SOUL) dan jangan istilah teknis
+  (`429`, `:free`, `rate limit`): cukup "model utama" dan "jatah model gratis", plus angka dan
+  jam resetnya. Jangan pula meneruskan saran jualan penyedia
   ("pakai model berbayar", nama paket langganan) — itu bukan keputusanmu.
 - **Semua model `:free` OpenRouter berbagi SATU jatah akun: 50 permintaan/hari**, reset 00:00 UTC
   (07:00 WIB) — `limit_source: openrouter_free_tier_daily`. Jadi kalau satu model `:free` kena

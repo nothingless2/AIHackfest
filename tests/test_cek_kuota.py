@@ -152,3 +152,17 @@ def test_cek_mengarah_ke_router_bukan_menyerah(_router, monkeypatch):
 
 def test_key_tidak_bocor_dari_jalur_router(_router):
     assert "sk-palsu" not in str(ck.cek_router(SEKARANG, probe=_probe(False, False)))
+
+
+@pytest.mark.parametrize("hidup_utama, hidup_gratis, cek_gratis", [
+    (True, False, False),   # utama hidup, jatah tidak disentuh
+    (False, True, False),   # utama mati, jatah gratis masih ada
+    (False, False, False),  # utama mati, jatah gratis habis
+])
+def test_catatan_untuk_user_tanpa_istilah_teknis(_router, hidup_utama, hidup_gratis, cek_gratis):
+    """`catatan` diteruskan agent ke user apa adanya. 1 Okt: kata ':free' di sini membuat model
+    menerjemahkannya sendiri jadi '免费' karena SOUL melarang istilah teknis."""
+    h = ck.cek_router(SEKARANG, probe=_probe(hidup_utama, hidup_gratis), cek_gratis=cek_gratis)
+    catatan = h["catatan"].lower()
+    for istilah in (":free", "429", "rate limit", "openrouter"):
+        assert istilah not in catatan, (istilah, h["catatan"])

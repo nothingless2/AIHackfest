@@ -131,12 +131,12 @@ def cek_router(sekarang, probe=probe_model, cek_gratis=False, model_gratis=MODEL
         hasil["utama_alasan"] = batas or {"pesan": buka_bungkus(u["pesan"])[:300]}
     if u["hidup"] and not cek_gratis:
         return {**hasil, "ok": True, "bisa_jalan": True,
-                "catatan": "Model utama menjawab, jadi bisa jalan sekarang. Jatah ':free' "
+                "catatan": "Model utama menjawab, jadi bisa jalan sekarang. Jatah model gratis "
                            "tidak diperiksa supaya tidak terpakai."}
     g = probe(model_gratis)
     if g["hidup"]:
         hasil["kuota_gratis"] = {"habis": False, "model_diuji": model_gratis}
-        hasil["catatan"] = "Jatah ':free' masih ada (pemeriksaan ini memakai 1 permintaan)."
+        hasil["catatan"] = "Jatah model gratis masih ada (pemeriksaan ini memakai 1 permintaan)."
     else:
         batas = baca_batas(g["pesan"])
         if batas is None:
@@ -149,8 +149,8 @@ def cek_router(sekarang, probe=probe_model, cek_gratis=False, model_gratis=MODEL
                                         .strftime("%d/%m/%Y %H:%M WIB")
         else:
             hasil["reset"] = reset_berikutnya(sekarang).strftime("%d/%m/%Y %H:%M WIB")
-        hasil["catatan"] = ("Semua model ':free' memakai SATU jatah akun, jadi ganti model "
-                            "':free' tidak menolong. Yang menolong: model di luar jatah itu.")
+        hasil["catatan"] = ("Semua model gratis memakai SATU jatah akun, jadi ganti model gratis "
+                            "tidak menolong. Yang menolong: model di luar jatah itu.")
     hasil["ok"] = True
     hasil["bisa_jalan"] = bool(hasil["utama_hidup"] or not hasil["kuota_gratis"].get("habis"))
     return hasil

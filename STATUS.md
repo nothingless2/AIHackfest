@@ -737,3 +737,74 @@ Deploy"); menunggu user.
 
 **Tes.** 1139 lolos, 0 gagal. Tiga mutasi pada `cek_kuota` (matikan `buka_bungkus`, probe jatah
 tanpa alasan, reset ditebak bukan dari header) semuanya tertangkap.
+
+## 1 Okt — hemat token: yang boros ternyata agent, bukan pipeline
+
+**Diukur dulu, dari catatan router** (`~/.9router/db`, tabel `usageHistory`, angka ASLI per
+permintaan). Sejak 28 Sep: 4,0 juta token masuk. **Agent Hermes 3,86 juta (96%)**, median 31.256
+token per permintaan. **Pipeline video hanya 142 ribu (3,5%)**, median 869. Rencana awal
+(mengecilkan gambar di panggilan kata kunci ContentInsight) dibatalkan: hemat nyatanya ±600 token
+per draf, dan `detail: low` diabaikan penyedia (terukur sama persis). Angka "±5.300/panggilan" dulu
+didominasi gpt-4o-mini (8 panggilan × ±25.700 token).
+
+**Dua sifat router 9Router 0.5.91 yang memengaruhi semua angka token:**
+- Setiap `usage` yang dikirim ke klien ditambah **2.000 token palsu** (`prompt_tokens`,
+  `input_tokens`, `total_tokens`; fungsi di `app/.next-cli-build/server/chunks/5330.js`). Contoh:
+  permintaan "ok" tercatat 564 di router, dilaporkan 2.564 ke kita. Jadi semua `prompt_tokens` di
+  `run_log.jsonl` sejak 28 Sep lebih besar 2.000 dari kenyataan per panggilan.
+- Pengaturan **Token Saver "caveman" level full** aktif: ±555 token instruksi "jawab ringkas,
+  fragmen boleh, sinonim pendek" disuntikkan ke SETIAP permintaan, termasuk naskah kreator dan
+  persona Klipa. Pengaturan router milik user; tidak diubah.
+
+**Akar boros di agent: lingkaran pemadatan.** `compression.threshold_tokens` = 16.000 (bawaan
+Hermes 256.000; asal perubahannya tidak tercatat di log), padahal beban dasar tiap permintaan
+±21K: skema 25 tool ±10.700 + system prompt ±4.500 + skill ±5.900. Hampir tiap giliran
+dipadatkan → isi skill terbuang → agent memuat ulang skill (`skill_view`) → lewat batas lagi.
+
+| Sesi | Pemadatan | `skill_view` | Panggilan API | Pesan user |
+|---|---|---|---|---|
+| 28 Sep | 13 | 4 | 134 | 11 |
+| 29 Sep (macet) | 5 | 6 | 49 | 8 |
+| 30 Sep | 2 | 7 | 27 | 4 |
+
+Tanpa skill di konteks, agent juga berkeliaran: membaca `music.py`/`revisi.py`/`auto_render.py`,
+dan pada uji 1 Okt **mencari `*.mp4` di seluruh `~/.hermes`** sebelum akhirnya memuat skill.
+
+**Perubahan.**
+- `~/.hermes/config.yaml` (cadangan `scratchpad/config.yaml.bak-1okt`; diff-kontrol: 29 kunci tetap,
+  4 berubah):
+  - `compression.threshold_tokens` 16.000 → 64.000;
+  - `platform_toolsets.telegram`: `hermes-telegram` (25 tool, ±10.700 token) → `terminal, file,
+    skills, vision, memory, code_execution` (14 tool, ±6.000). Yang hilang tidak pernah dipakai di
+    1.073 tool call Telegram: brankas login browser, `delegate_task`, web, tts, `clarify`;
+  - `skills.auto_load: [content-factory]`: skill di bagian stabil system prompt, tidak terbuang saat
+    pemadatan;
+  - `skills.platform_disabled.telegram`: 51 skill bawaan lain (indeks 6.506 → 1.569 karakter).
+- SKILL: skill sudah termuat, jadi jangan dimuat ulang dan jangan membaca kode pipeline; status kuota
+  tanpa istilah teknis.
+- `~/.hermes/SOUL.md`: kalimat utuh Bahasa Indonesia, tanpa kata bahasa lain dan istilah server.
+- `cek_kuota.py`: kalimat `catatan` (diteruskan agent ke user) tanpa "':free'". Kata itu membuat
+  model menerjemahkannya sendiri jadi "免费". Tes penjaga + mutasi tertangkap.
+
+**Hasil, pertanyaan sama ("Bisa buat konten sekarang?"), agent sungguhan, token asli dari router:**
+
+| | Permintaan | Token masuk | Waktu |
+|---|---|---|---|
+| Sebelum | 10 | 177.946 | 49 dtk |
+| Sesudah | 3 | 33.788 | 12 dtk |
+
+Uji perilaku (toolset baru):
+- permintaan suara pria enerjik: 2 permintaan, tanpa membaca kode;
+- "pakai model apa": persona terjaga.
+
+Uji bahasa, 6 sampel per tahap:
+- huruf Mandarin/istilah teknis: 1/6 → 1/6 (setelah SOUL) → **0/6** (setelah `catatan` dibetulkan);
+- masih ada selipan gaya ringkas ("checked 08:38", "jatahRolling"), cocok dengan instruksi caveman.
+
+**Belum / keputusan user.**
+- Caveman router: menambah ±555 token per permintaan dan menekan gaya bahasa. Usul dimatikan (halaman
+  Token Saver di dashboard 9Router), lalu diuji A/B mutu naskah.
+- `.env` repo masih rantai model mati, sehingga `cek_kuota` melaporkan "model utama penuh".
+- `reasoning_effort: high` tidak diubah (belum diukur dampaknya ke mutu).
+- Pemadatan pada percakapan Telegram panjang belum teramati sejak perubahan. Cek
+  `sessions.compression*` setelah pemakaian nyata.
