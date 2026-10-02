@@ -44,6 +44,7 @@ from duration import requested_duration
 import draf_naskah
 from draf_naskah import DrafError
 import gaya
+import kamus
 from inspect_media import cek_izin, sidik_bahan
 from music import MusicError, list_tracks, music_wanted, pick_track, requested_mood
 from orchestrator import (
@@ -178,6 +179,8 @@ def _parser():
     p.add_argument("--hapus-broll", default=None, help="Revisi: nomor B-roll yang dihapus, mis. '2' atau '1,3'.")
     p.add_argument("--ganti-broll", default=None, help="Revisi: nomor B-roll yang diganti klip lain.")
     p.add_argument("--ganti-musik", action="store_true", help="Revisi: pakai lagu lain dari pustaka.")
+    p.add_argument("--kamus", action="store_true", dest="terapkan_kamus",
+                   help="Revisi: terapkan kamus istilah chat ini ke subtitle video yang sudah jadi.")
     return p
 
 
@@ -192,7 +195,7 @@ DIKUNCI_DRAF = {"audio_mode", "duration_seconds", "static_text", "edit_mode", "u
 # Tidak relevan saat render dari draf: gerbang inspect sudah dilewati saat draf dibuat.
 DIABAIKAN_DRAF = {"media_paths", "inspect_id", "user_answered", "require_inspect", "chat_id",
                   "draft", "draft_id", "varian", "naskah", "short", "help",
-                  "revisi", "hapus_broll", "ganti_broll", "ganti_musik"}
+                  "revisi", "hapus_broll", "ganti_broll", "ganti_musik", "terapkan_kamus"}
 
 # Label perubahan gaya yang dilaporkan ke user saat revisi (flag -> nama yang dimengerti user).
 LABEL_REVISI = {"music": "musik", "music_mood": "suasana musik", "music_file": "lagu kirimanmu",
@@ -411,6 +414,7 @@ def _hasil_render(run_id, pesan_durasi):
         "sampul": status.get("sampul"),
         "logo": status.get("logo"),
         "potong_pengisi": {k: v for k, v in (status.get("potong_pengisi") or {}).items() if k != "rincian"} or None,
+        "kamus": status.get("kamus"),
         "sfx": status.get("sfx"),
         "potongan_visual": status.get("potong_visual"),
         "suara": status.get("suara"),
@@ -526,6 +530,11 @@ def main(argv=None):
         perubahan = [f"{LABEL_REVISI[d]}: " + (os.path.basename(str(getattr(args, d)))
                                                 if d == "music_file" else str(getattr(args, d)))
                      for d in sorted(eksplisit) if d in LABEL_REVISI] + perubahan
+        if args.terapkan_kamus:
+            # Kamus selalu dipasang; flag ini hanya membuat "betulkan ejaan" sah sebagai revisi.
+            if not kamus.daftar(chat_id or ""):
+                return gagal("kamus_kosong", "Kamus istilah chat ini masih kosong. Tambahkan istilahnya dulu.")
+            perubahan.append("ejaan istilah dari kamus")
         if args.ganti_musik:
             perubahan.append("musik diganti")
             os.environ["MUSIC_TRACK_HINDARI"] = rec["status"].get("music") or ""
@@ -537,8 +546,8 @@ def main(argv=None):
         run_prefix, nama_bahan = rec["prefix"], rec["bahan"]
         if any(not os.path.isfile(os.path.join(RAW_DIR, n)) for n in nama_bahan):
             return gagal("revisi_bahan_hilang", "Bahan video itu sudah tidak ada di server. Kirim ulang bahannya.")
-    elif args.hapus_broll or args.ganti_broll or args.ganti_musik:
-        return gagal("argumen_invalid", "--hapus-broll/--ganti-broll/--ganti-musik hanya bersama --revisi.")
+    elif args.hapus_broll or args.ganti_broll or args.ganti_musik or args.terapkan_kamus:
+        return gagal("argumen_invalid", "--hapus-broll/--ganti-broll/--ganti-musik/--kamus hanya bersama --revisi.")
     elif args.draft_id:
         if args.draft:
             return gagal("argumen_invalid", "--draft dan --draft-id tidak boleh bersamaan.")
@@ -620,6 +629,7 @@ def main(argv=None):
     except MediaPathError as e:
         return gagal("musik_invalid", f"musik: {e}")
     gaya.pasang(preset_gaya, args)
+    kamus.pasang(chat_id or "")
     info_gaya = {"nama": preset_gaya["nama"], "label": preset_gaya["label"], "sumber": sumber_gaya}
 
     try:

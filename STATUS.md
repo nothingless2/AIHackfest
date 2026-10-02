@@ -1006,3 +1006,29 @@ Pexels; gagal -> carousel tetap jadi polos dan disebut di `catatan`.
 ke semua slide, ukur tiap baris).
 
 **Belum.** Gaya kustom dan `--latar` lewat Telegram belum dicoba user.
+
+## 2 Okt (sore) — kamus istilah; pemecahan SKILL dibatalkan
+
+**Kamus istilah per chat** (`scripts/kamus.py`, disimpan di profil yang sama dengan gaya).
+- Dua lapis: ejaan benar ikut dibiaskan ke Whisper (paling depan di prompt), dan KODE mengoreksi hasil
+  transkripsi: rangkaian kata yang cocok dengan bentuk salah digabung jadi satu kata dengan `start`
+  kata pertama dan `end` kata terakhir (render merujuk kata lewat waktu, jadi subtitle tetap
+  sinkron). Batas kata dijaga ("opencloudy" tidak disentuh), pola terpanjang dulu, kapital dirapikan.
+- Diterapkan saat transkripsi DAN saat render membaca brief, jadi revisi cepat video lama ikut
+  terkoreksi. `hermes_render --revisi ... --kamus` membuat "betulkan ejaan" sah sebagai revisi
+  (tanpa itu `revisi_kosong`); kamus kosong -> `kamus_kosong`.
+- Carousel dari video (`--dari-run`) memakai ejaan kamus.
+- Bukti: 20 tes, mutasi 4/4 (waktu akhir kata gabungan, batas kata, pola terpanjang, pembersihan env
+  antar chat). Uji nyata revisi `9cdbfb57` dengan istilah uji "hermes" -> "Hermes Agent":
+  `kamus.diganti: 3`, kata kunci caption berubah, QA lolos, tanpa LLM.
+
+**Pemecahan SKILL dibatalkan (diukur dulu).** SKILL 31 KB (±7.800 token) termuat tiap permintaan.
+Bagian yang bisa dipindah ke berkas rujukan (carousel, posting, detail gaya, revisi) ±8.800 karakter =
+hemat ±1.900 token/permintaan. Tapi tiap kali rujukan dibutuhkan agent harus memanggil `skill_view`
+lagi (±17.000 token satu permintaan), dan rujukan yang dimuat lewat tool ikut terbuang saat pemadatan
+lalu dimuat ulang -- lingkaran yang diperbaiki 1 Okt. Rugi untuk sesi carousel/posting, untung kecil
+untuk sesi video murni. Dibiarkan utuh.
+
+**Belum.** Analitik nyata: belum ada akun terhubung di Zernio dan belum ada posting, jadi tidak ada
+metrik untuk diambil atau diverifikasi. Kamus, gaya kustom, dan `--latar` lewat Telegram belum dicoba
+user.

@@ -767,6 +767,7 @@ def _buruk_visual(path):
 
 
 POTONG_PENGISI = {}
+KAMUS = {}
 
 
 def potong_pengisi_aktif():
@@ -2298,6 +2299,15 @@ def render_from_agent_script(
     with open(json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
+    # Kamus istilah chat ini diterapkan juga di sini: revisi cepat memakai brief LAMA, dan istilah
+    # yang ditambahkan user sesudah video jadi harus ikut membetulkan subtitle-nya.
+    import kamus as _kamus
+    KAMUS.clear()
+    _diganti = _kamus.koreksi_brief(data, _kamus.aktif())
+    if _diganti:
+        KAMUS.update(diganti=_diganti)
+        print(f"📖 {_diganti} kata subtitle dikoreksi dari kamus istilah")
+
     POTONG_VISUAL.clear()
     POTONG_PENGISI.clear()
     PENGISIAN.clear()
@@ -2807,6 +2817,7 @@ def render_from_agent_script(
         logo=dict(LOGO) or None,
         suara_bersih=suara_bersih,
         potong_pengisi=dict(POTONG_PENGISI) or None,
+        kamus=dict(KAMUS) or None,
         sfx=sfx_info,
         pengisian=dict(PENGISIAN) if audio_mode == "ai" and PENGISIAN else None,
         qa=qa,

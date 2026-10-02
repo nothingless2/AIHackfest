@@ -137,6 +137,10 @@ privasi terbit harus dari pilihan akun itu. Key hanya dikirim ke host Zernio. Ke
 (waktu habis, 5xx) berstatus `tidak_pasti` dan tidak diulang. **Belum diuji terhadap layanan
 sungguhan** (ditulis dari dokumentasinya; tes memakai layanan palsu).
 
+**Kamus istilah** (`scripts/kamus.py`, per chat): ejaan benar untuk nama/merek yang salah dengar.
+Dibiaskan ke Whisper dan dikoreksi kode di hasil transkripsi (kata digabung, waktunya dipertahankan);
+berlaku juga untuk revisi cepat video lama (`--revisi ... --kamus`) dan carousel dari video.
+
 **Caption dinamis** (`--subtitle-style dinamis`, tahap uji): potongan 1-3 kata dari waktu kata
 yang terdengar (`scripts/caption_dinamis.py`), satu kata kunci tampil besar bergradasi emas dengan
 pop (`remotion/src/CaptionDinamis.jsx`), plus SFX pop/whoosh sintesis di kata kunci, kartu, dan

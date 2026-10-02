@@ -117,6 +117,20 @@ Daftar dan penjelasannya: `python3 /root/AIHackfest/scripts/gaya.py daftar`.
   gaya tersimpan sudah tidak ada, video memakai Klasik: beri tahu user.
 - Ke user sebut LABEL-nya (Hype, Elegan), bukan flag atau nama berkas.
 
+## Kamus istilah (nama, merek, istilah yang salah tulis di subtitle)
+
+User bilang tulisannya salah ("harusnya OpenClaw, bukan Open Cloud", "namaku ditulis salah"):
+```
+python3 /root/AIHackfest/scripts/kamus.py tambah --chat-id "<label chat>" --benar "OpenClaw" \
+  --salah "open cloud" --salah "opencloud"
+```
+`--benar` = ejaan dari user, persis. `--salah` = bentuk salah yang MUNCUL di subtitle/naskah (boleh
+beberapa). Berlaku untuk semua video dan carousel chat ini sesudahnya. Untuk video yang sudah jadi:
+jalankan revisi cepat (Langkah 7) dengan `--kamus` setelah menambah istilah -> subtitle-nya ikut
+dibetulkan; hasil berisi `kamus.diganti` (jumlah kata yang dikoreksi), sebut singkat. `kamus` kosong
+di hasil = bentuk salahnya tidak ditemukan di ucapan: tanyakan tulisan salah yang persis terlihat. `daftar` / `hapus --benar ...`
+untuk melihat dan menghapus. Jangan menambah istilah yang tidak diminta user.
+
 ## Kapan dipakai
 
 User mengirim video/foto di chat Telegram ini DAN memintanya diedit/disusun jadi
@@ -476,6 +490,7 @@ python3 /root/AIHackfest/scripts/hermes_render.py   --chat-id "<label chat yang 
 | "warna lebih hangat" | `--color-filter warm` |
 | "ganti gayanya jadi elegan", "coba gaya hype" | `--gaya elegan` / `--gaya hype` |
 | "tanpa grafik/animasi" | `--motion mati` |
+| "ejaan X salah di subtitle" | tambah ke kamus dulu (lihat "Kamus istilah"), lalu `--kamus` |
 | "suara pria" | `--voice pria` |
 | "ganti kalimat terakhir jadi ..." (voice-over AI) | `--naskah "<naskah LENGKAP>"`: ambil naskah lama, ubah PERSIS yang diminta |
 

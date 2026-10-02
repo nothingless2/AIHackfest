@@ -115,7 +115,14 @@ def build_vocab_prompt(konteks=""):
     "properti", "skincare"), dan itu membantu Whisper memilih ejaan yang benar
     untuk istilah domain tersebut.
     """
-    bagian = [TRANSCRIBE_VOCAB]
+    bagian = []
+    # Istilah dari kamus chat ini paling depan (prompt dipotong di belakang): nama & merek yang
+    # ejaannya sudah ditetapkan user.
+    import kamus
+    istilah = kamus.istilah_benar(kamus.aktif())
+    if istilah:
+        bagian.append("Nama dan istilah: " + ", ".join(istilah) + ".")
+    bagian.append(TRANSCRIBE_VOCAB)
     konteks = (konteks or "").strip()
     if konteks:
         bagian.append(konteks)
@@ -575,5 +582,13 @@ def transcribe_assets_report(paths, *, max_assets=None, konteks=""):
 
     print(f"[info] transcribe: {len(hasil)}/{len(siap)} bahan selesai "
           f"dalam {time.time() - t0:.0f} detik.")
+
+    # Kamus istilah chat ini: koreksi pasti oleh kode (bias prompt di atas hanya membantu).
+    import kamus
+    entri = kamus.aktif()
+    if entri:
+        diganti = sum(kamus.koreksi_transkrip(d, entri) for d in hasil.values())
+        if diganti:
+            print(f"[info] transcribe: {diganti} kata dikoreksi dari kamus istilah.")
 
     return hasil, gagal

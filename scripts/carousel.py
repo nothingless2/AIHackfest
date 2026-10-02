@@ -195,8 +195,10 @@ def sumber_dari_run(run_id, chat_id):
     """(teks, [path video]) dari catatan run: ucapan asli (transkrip) + naskah + permintaan user.
     Milik chat lain / kedaluwarsa -> RevisiError (gagal-tertutup, sama dengan revisi)."""
     import revisi
+    import kamus
     rec = revisi.muat(run_id, chat_id)
     brief = rec.get("brief") or {}
+    kamus.koreksi_brief(brief, kamus.daftar(chat_id))       # ejaan istilah chat ini
     seg = brief.get("transcript_segments") or {}
     ucapan = " ".join(str(s.get("text") or "").strip() for n in rec.get("bahan", [])
                       for s in (seg.get(n) or []) if isinstance(s, dict))
