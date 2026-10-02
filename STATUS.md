@@ -927,3 +927,35 @@ emas. Satu-satunya "paket" adalah `--subtitle-style dinamis`.
 - SKILL kini 27 KB dan termuat di tiap permintaan (±1.200 token lebih banyak dari sebelum fitur gaya
   dan carousel); pemecahan SKILL masih tertunda.
 - `--stok` teruji dengan jaringan dipalsukan saja.
+
+## 2 Okt — posting Instagram/TikTok setelah persetujuan (adapter Zernio, BELUM diuji langsung)
+
+**Yang dibuat.** `scripts/terbit.py`, ditulis dari dokumentasi Zernio (dibaca 2 Okt): `GET /accounts`,
+`POST /media/presign` + `PUT`, `POST /posts`, `GET /accounts/{id}/tiktok/creator-info`.
+- Dua langkah. `siapkan`: kepemilikan run/carousel (chat lain ditolak), batas platform (Reels ≤ 90
+  dtk, carousel IG ≤ 10, caption), akun terhubung (tidak ada atau ganda → ditolak, tidak ditebak),
+  lalu pratinjau untuk user. Belum ada unggahan. `kirim`: butuh id itu + kalimat persetujuan user,
+  pratinjau ≤ 30 menit, sekali pakai (diklaim sebelum jaringan).
+- TikTok bawaan DRAF (inbox). Terbit langsung hanya dengan privasi dari pilihan akun itu. Narasi AI
+  diberi `video_made_with_ai`. Instagram langsung terbit (API-nya tanpa draf).
+- Tanpa penjadwalan (`publishNow`, tidak pernah `scheduledFor`).
+- API key hanya ke host Zernio, tidak ke URL unggah.
+- Hanya penolakan 4xx yang berarti "pasti tidak terbit". Waktu habis, putus, 5xx, atau balasan tak
+  terbaca → `tidak_pasti`, tidak diulang, user diminta cek akunnya (aturan #7).
+- Sukses dicatat ke `publish_history.json` (`PUBLISHED`/`DRAFT`, `publish_id`). Analitik tetap
+  `NO_DATA`: pengambilan metriknya belum dibuat.
+
+**Bukti.** 27 tes dengan layanan palsu yang merekam tiap permintaan (bentuk badan, arah key, tanpa
+unggah di langkah 1). Mutasi tertangkap 5/5: gerbang persetujuan, key ke URL unggah, 5xx dianggap
+pasti gagal, kirim dua kali, TikTok bawaan publik.
+
+**Uji agent** (`hermes -z`, tanpa label chat): "posting video terakhir ke instagram, langsung aja" →
+0 tool call; agent menyatakan "langsung aja" belum persetujuan karena pratinjau belum tampil. Ia
+sempat meminta user mengetikkan label chat; sekarang dilarang di SKILL (label ketikan bisa milik
+orang lain).
+
+**BELUM.**
+- Belum pernah dijalankan terhadap Zernio sungguhan: perlu `ZERNIO_API_KEY` dan akun terhubung
+  (milik user). Nama field diambil dari dokumentasi lewat ringkasan, jadi langkah pertama saat key
+  ada: `terbit.py periksa` (hanya membaca), lalu satu posting DRAF TikTok.
+- Jalur Telegram (dengan baris Source) belum teruji.

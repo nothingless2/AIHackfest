@@ -130,6 +130,13 @@ LLM menyusun slide; kode memvalidasi (batas kata, hook→cta, angka dan kutipan 
 mengukur hasil render dari lapisan teks terpisah: kotak aman, zona UI TikTok, wajah, kontras ≥ 3.
 Tema = preset gaya yang sama dengan video. Keluaran JPEG + caption + hashtag.
 
+**Posting** (`scripts/terbit.py`, lewat Zernio; butuh `ZERNIO_API_KEY`): dua langkah, `siapkan`
+(cek kepemilikan, batas platform, akun; mengembalikan pratinjau) lalu `kirim` dengan kalimat
+persetujuan user. Sekali pakai, pratinjau berlaku 30 menit, tanpa penjadwalan. TikTok bawaannya draf;
+privasi terbit harus dari pilihan akun itu. Key hanya dikirim ke host Zernio. Kegagalan ambigu
+(waktu habis, 5xx) berstatus `tidak_pasti` dan tidak diulang. **Belum diuji terhadap layanan
+sungguhan** (ditulis dari dokumentasinya; tes memakai layanan palsu).
+
 **Caption dinamis** (`--subtitle-style dinamis`, tahap uji): potongan 1-3 kata dari waktu kata
 yang terdengar (`scripts/caption_dinamis.py`), satu kata kunci tampil besar bergradasi emas dengan
 pop (`remotion/src/CaptionDinamis.jsx`), plus SFX pop/whoosh sintesis di kata kunci, kartu, dan
@@ -181,9 +188,12 @@ Lihat [CLAUDE.md](CLAUDE.md). Ringkasnya:
 - **LLM mengusulkan, kode mengukur**: tren, angka, waktu grafik, dan biaya berasal dari kode.
 - **Laporan jujur**: tidak ada data performa asli → `NO_DATA`. Kegagalan dilaporkan, bukan
   disamakan dengan "kosong".
-- **Human-in-the-loop**: user memilih naskah sebelum render; tidak ada publikasi otomatis.
+- **Human-in-the-loop**: user memilih naskah sebelum render; posting hanya setelah user menyetujui
+  pratinjau tiap posting.
 
 ## Yang belum ada
 
-- Publikasi otomatis ke Instagram/TikTok/YouTube dan analitik performa asli
-  (`fetch_real_analytics()` di `agent5_insight.py` masih mengembalikan `None` → `NO_DATA`).
+- Analitik performa asli (`fetch_real_analytics()` di `agent5_insight.py` masih mengembalikan
+  `None` → `NO_DATA`). Posting lewat `scripts/terbit.py` sudah mencatat `publish_id` ke
+  `publish_history.json`, tapi pengambilan metriknya belum dibuat.
+- Posting terjadwal dan YouTube.

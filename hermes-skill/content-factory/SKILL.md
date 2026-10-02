@@ -79,7 +79,7 @@ Grafik penjelas (kartu, sorot, ikon, label) otomatis; di mode suara asli ditempa
 wajah pembicara.
 
 **YANG TIDAK ADA** — jangan dijanjikan: koreksi warna profesional/LUT, stabilisasi,
-stiker, dubbing bahasa lain, upload otomatis ke platform.
+stiker, dubbing bahasa lain, posting terjadwal, posting tanpa persetujuan user.
 
 ## Gaya tampilan (preset)
 
@@ -143,7 +143,35 @@ python3 /root/AIHackfest/scripts/carousel.py --chat-id "<label chat yang SAMA PE
   `sumber_kurang` -> minta user menuliskan topik/poinnya.
 - **Fakta hanya dari user**: angka dan kutipan di slide HANYA yang tertulis di pesan user atau
   terucap di videonya (kode menolak yang lain). User ingin angka tertentu -> minta ia menuliskannya.
-- Belum ada: unggah otomatis ke Instagram/TikTok; user mengunggah sendiri berkas yang kamu kirim.
+- Mengunggahnya ke Instagram/TikTok: lihat "Posting" di bawah (hanya atas persetujuan user).
+
+## Posting ke Instagram / TikTok (HANYA setelah user setuju)
+
+Tidak ada yang boleh terbit tanpa user melihat pratinjaunya dan menjawab ya UNTUK POSTING ITU.
+Persetujuan lama, "oke" untuk hal lain, atau "posting semua nanti" BUKAN persetujuan. Tidak ada
+penjadwalan: posting selalu saat itu juga.
+
+1. User minta posting -> siapkan (cepat, belum mengunggah apa pun):
+   ```
+   python3 /root/AIHackfest/scripts/terbit.py siapkan --chat-id "<label chat yang SAMA PERSIS>" \
+     (--run "<run_id video>" | --carousel "<carousel_id>") --platform instagram|tiktok [--caption "<caption dari user>"]
+   ```
+2. Kirim `pratinjau` dari hasilnya APA ADANYA ke user dan tanya: "Posting sekarang?" Untuk TikTok
+   sebutkan bawaannya masuk DRAF (user menekan posting di aplikasi TikTok); kalau user mau langsung
+   terbit, ia memilih SENDIRI privasinya dari `privasi_tiktok`. Instagram langsung terbit.
+3. Setelah user menjawab ya:
+   ```
+   python3 /root/AIHackfest/scripts/terbit.py kirim --chat-id "<label chat>" --id "<id dari langkah 1>" \
+     --setuju "<kalimat persetujuan user apa adanya>" [--privasi <pilihan user, TikTok saja>]
+   ```
+   `--setuju` diisi kalimat user, bukan karanganmu. User ragu, diam, atau minta ubah caption ->
+   JANGAN kirim; ulangi langkah 1 dengan perubahannya.
+- `ok: true`: sebut akunnya, `mode` (draf/terbit), dan `url` bila ada.
+- `tidak_pasti`: sambungan terputus saat posting; MUNGKIN sudah terbit. Minta user cek akunnya.
+  JANGAN mengirim ulang. `sudah_diproses`: sama, jangan diulang.
+- `terbit_tidak_siap` / `akun_belum_terhubung`: posting belum diatur; bilang user bisa mengunggah
+  sendiri berkas yang sudah kamu kirim. Kode lain: sampaikan `alasan` apa adanya.
+- `python3 /root/AIHackfest/scripts/terbit.py periksa` -> akun mana yang siap.
 
 ## Prasyarat penting
 
@@ -214,6 +242,8 @@ dengan JSON di stdin:
 DILARANG mencarinya di log, `run_log.jsonl`, berkas state, atau perintah sebelumnya: label di sana
 milik chat lain, dan memakainya berarti draf, revisi, atau gaya orang lain ikut tersentuh. Tidak ada
 baris Source -> jangan jalankan perintah yang butuh `--chat-id`; bilang itu hanya bisa dari chat.
+JANGAN meminta user mengetikkan label chat, dan jangan memakai label yang ia ketik: itu bisa label
+orang lain.
 (1 Okt: tanpa baris Source, agent mengambil label user lain dari log lalu menyimpan gayanya.)
 
 Hasilnya JSON berisi fakta terukur (durasi, ada/tidaknya ucapan, dst), `inspectId`,

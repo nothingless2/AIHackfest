@@ -194,3 +194,16 @@ def _catatan_revisi_di_tmp(monkeypatch, tmp_path):
     import revisi
     monkeypatch.setattr(revisi, "REVISI_DIR", str(tmp_path / "revisi_state"))
     yield
+
+
+@pytest.fixture(autouse=True)
+def _terbit_dan_carousel_di_tmp(monkeypatch, tmp_path):
+    """Permintaan posting, riwayat terbit, dan hasil carousel ada di workspace/ asli -- di test harus
+    ke tmp (aturan #6). Riwayat terbit dibaca ContentInsight: catatan palsu dari test akan terbaca
+    sebagai posting sungguhan."""
+    import carousel
+    import terbit
+    monkeypatch.setattr(terbit, "TERBIT_DIR", str(tmp_path / "terbit_state"))
+    monkeypatch.setattr(terbit, "PUBLISH_HISTORY_PATH", str(tmp_path / "publish_history_terbit.json"))
+    monkeypatch.setattr(carousel, "CAROUSEL_DIR", str(tmp_path / "carousel_keluar"))
+    yield
