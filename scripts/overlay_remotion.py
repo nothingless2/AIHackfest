@@ -449,3 +449,28 @@ def render_pratinjau_gaya(presets, out_jpg):
     finally:
         shutil.rmtree(folder, ignore_errors=True)
     return out_jpg
+
+
+# ---------------------------------------------------------------- carousel
+
+CAROUSEL_BATAS_DETIK = int(os.getenv("CAROUSEL_TIMEOUT", "240"))
+
+
+def render_carousel(slides, kotak, tema, platform, lebar, tinggi, folder):
+    """Semua slide dalam SATU sesi Chromium per lapisan: (png_penuh, png_lapisan_teks), terurut.
+    Lapisan teks (latar transparan) hanya untuk diukur scripts/carousel.periksa_slide."""
+    n = len(slides)
+    hasil = []
+    for nama, hanya_teks in (("penuh", False), ("teks", True)):
+        props = {"lebar": lebar, "tinggi": tinggi, "fps": 24, "durasi": n / 24, "slides": slides,
+                 "kotak": kotak, "tema": tema or {}, "platform": platform, "hanyaTeks": hanya_teks}
+        sub = os.path.join(folder, nama)
+        os.makedirs(sub, exist_ok=True)
+        out_dir = os.path.join(sub, "png")
+        _jalankan_node(props, [{"jenis": "urutan", "dari": 0, "sampai": n - 1, "mulai": 0, "out_dir": out_dir}],
+                       sub, komposisi="Carousel", batas=CAROUSEL_BATAS_DETIK)
+        png = sorted(os.path.join(out_dir, f) for f in os.listdir(out_dir) if f.endswith(".png"))
+        if len(png) != n:
+            raise OverlayError(f"slide carousel {len(png)} dari {n}")
+        hasil.append(png)
+    return hasil[0], hasil[1]

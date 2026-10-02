@@ -6,6 +6,7 @@ import {CaptionDinamis} from './CaptionDinamis.jsx';
 import {Panggung} from './Panggung.jsx';
 import {Sampul} from './Sampul.jsx';
 import {PratinjauGaya} from './PratinjauGaya.jsx';
+import {Carousel} from './Carousel.jsx';
 
 const metadata = ({props}) => ({
   durationInFrames: Math.max(2, Math.ceil((props.durasi || 2) * (props.fps || 24))),
@@ -73,6 +74,17 @@ export const Root = () => (
       fps={24}
       durationInFrames={1}
       defaultProps={{gambar: null, label: 'Klasik', tema: {}}}
+      calculateMetadata={metadata}
+    />
+    <Composition
+      id="Carousel"
+      component={Carousel}
+      width={1080}
+      height={1350}
+      fps={24}
+      durationInFrames={2}
+      defaultProps={{slides: [{jenis: 'hook', judul: 'Contoh carousel'}],
+        kotak: [{x: 76, y: 148, w: 928, h: 1094, zona: 'tengah'}], tema: {}, platform: 'ig'}}
       calculateMetadata={metadata}
     />
   </>

@@ -110,6 +110,41 @@ User mengirim video/foto di chat Telegram ini DAN memintanya diedit/disusun jadi
 konten (atau konteksnya jelas mengarah ke situ). Jangan dipakai untuk permintaan
 lain (mis. "buatkan video animasi dari teks" — itu bukan tool ini).
 
+Juga untuk **carousel** (postingan geser Instagram/TikTok) dari tulisan user atau dari video yang
+sudah jadi — lihat bagian "Carousel" di bawah.
+
+## Carousel (Instagram / TikTok)
+
+Postingan geser 3-10 slide (pembuka, isi/daftar, ajakan) dengan gaya yang sama dengan video.
+WAJIB latar belakang (±1 menit), sama seperti render:
+
+```
+python3 /root/AIHackfest/scripts/carousel.py --chat-id "<label chat yang SAMA PERSIS>" \
+  --teks "<topik / poin / naskah dari user, apa adanya>" \
+  [--dari-run "<run_id video yang didaur ulang>"] [--foto "<path foto user>"]... [--stok] \
+  [--gaya <nama>] [--platform ig|tiktok|keduanya] [--jumlah 3-10]
+```
+
+| Permintaan user | Flag |
+|---|---|
+| "bikin carousel tentang ..." | `--teks "<pesan user apa adanya>"` |
+| "jadikan video tadi carousel" | `--dari-run <run_id video itu>` (boleh ditambah `--teks`) |
+| user mengirim foto untuk carousel | `--foto <path>` per foto (urut: slide pembuka dulu) |
+| "pakai foto stok" | `--stok` (butuh kunci Pexels; gagal -> slide tetap jadi tanpa foto) |
+| untuk TikTok / dua-duanya | `--platform tiktok` / `--platform keduanya` (bawaan: `ig`) |
+| jumlah slide / gaya | `--jumlah N`, `--gaya <nama>` (tanpa flag: gaya tersimpan, lalu Klasik) |
+
+- **`ok: true`**: kirim SEMUA berkas `slide.ig` (dan/atau `slide.tiktok`) berurutan dalam SATU balasan
+  dengan kemampuan kirim bawaanmu (jadi album), lalu `caption` + `hashtags` sebagai teks siap tempel.
+  Sebut `gaya_tampilan.label`. `catatan` berisi sesuatu -> sebut singkat.
+- `qa.<platform>.lolos: false`: sebutkan slide mana dan masalahnya (`per_slide[].masalah`), tawarkan
+  dibuat ulang lebih ringkas. Jangan bilang "sudah rapi" kalau QA tidak lolos.
+- **`ok: false`**: sampaikan `alasan` apa adanya. `render_sibuk` -> jangan coba lagi otomatis.
+  `sumber_kurang` -> minta user menuliskan topik/poinnya.
+- **Fakta hanya dari user**: angka dan kutipan di slide HANYA yang tertulis di pesan user atau
+  terucap di videonya (kode menolak yang lain). User ingin angka tertentu -> minta ia menuliskannya.
+- Belum ada: unggah otomatis ke Instagram/TikTok; user mengunggah sendiri berkas yang kamu kirim.
+
 ## Prasyarat penting
 
 - Lampiran yang diupload user tersimpan Hermes di `~/.hermes/cache/videos/`,

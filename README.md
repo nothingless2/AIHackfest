@@ -124,6 +124,12 @@ di caption, kartu motion, panggung, dan cover. Prioritas: flag eksplisit > `--ga
 Validasi ketat (hex, font dari daftar, kontras teks kartu ≥ 4,5) karena tema kelak bisa datang dari
 pengguna. `gaya.py pratinjau` membuat satu gambar contoh semua gaya (latar sintetis, di-cache).
 
+**Carousel** (`scripts/carousel.py`, `remotion/src/Carousel.jsx`): 3-10 slide untuk Instagram
+(1080×1350) dan TikTok (1080×1920) dari teks user atau transkrip video (`--dari-run`). Satu panggilan
+LLM menyusun slide; kode memvalidasi (batas kata, hook→cta, angka dan kutipan harus ada di sumber) dan
+mengukur hasil render dari lapisan teks terpisah: kotak aman, zona UI TikTok, wajah, kontras ≥ 3.
+Tema = preset gaya yang sama dengan video. Keluaran JPEG + caption + hashtag.
+
 **Caption dinamis** (`--subtitle-style dinamis`, tahap uji): potongan 1-3 kata dari waktu kata
 yang terdengar (`scripts/caption_dinamis.py`), satu kata kunci tampil besar bergradasi emas dengan
 pop (`remotion/src/CaptionDinamis.jsx`), plus SFX pop/whoosh sintesis di kata kunci, kartu, dan

@@ -883,3 +883,47 @@ emas. Satu-satunya "paket" adalah `--subtitle-style dinamis`.
   Uji ulang: 2 permintaan, ±18 ribu token, menolak, tidak ada profil tertulis.
 - Belum teruji: jalur positif lewat Telegram sungguhan (perlu pesan dari chat).
 - Deskripsi preset Promo tidak lagi menyebut musik (sudah dikeluarkan dari preset).
+
+## 2 Okt — carousel Instagram/TikTok bergaya
+
+**Yang dibuat.** `scripts/carousel.py` + `remotion/src/Carousel.jsx` (1 frame = 1 slide) +
+`overlay_remotion.render_carousel`.
+- Sumber: teks user (`--teks`), transkrip + naskah video (`--dari-run`, kepemilikan dicek seperti
+  revisi), foto user (`--foto`, wajib di cache Hermes), frame berwajah dari video, foto Pexels
+  (`--stok`).
+- Naskah: satu panggilan LLM; KODE memvalidasi batas kata per jenis (hook / isi / daftar /
+  statistik / kutipan / cta), hook di depan dan cta di belakang, 3-10 slide. Angka statistik dan
+  kutipan HARUS ada di sumber (aturan #5). Tulis ulang paling banyak sekali; slide yang tetap salah
+  dibuang bila strukturnya masih utuh.
+- Tema = preset gaya yang sama dengan video. Ukuran IG 1080×1350, TikTok 1080×1920. Keluaran JPEG
+  (foto TikTok hanya menerima JPG/WEBP) + caption + hashtag. Memakai lock render yang sama.
+- QA diukur dari lapisan teks yang dirender terpisah (latar transparan): teks di luar kotak aman,
+  di zona UI TikTok (`qa_video.ZONA_UI`), di atas wajah, dan kontras median teks vs latar (≥ 3).
+
+**Ditemukan QA saat uji, lalu diperbaiki.**
+- Preset bersih: angka statistik putih di atas latar putih (kontras 1,0). Warna `kunci` preset dibuat
+  untuk teks di atas video. Di latar terang sekarang dipakai gradien aksen (kontras 4,1).
+- Slide pembuka berfoto wajah: judul meluap ke atas sampai dagu. Ukuran huruf sekarang diskalakan
+  terhadap tinggi kotak aman yang tersisa.
+
+**Bukti.**
+- 37 tes, termasuk render sungguhan dua ukuran dan regresi untuk kedua cacat di atas (dengan kontrol
+  positif: wajah sintetis terdeteksi). Mutasi tertangkap 4/4: cek angka dari sumber, batas kata,
+  perbaikan latar terang, penskalaan huruf.
+- Uji nyata dengan LLM sungguhan (model dialihkan lewat env proses, `.env` tidak disentuh):
+
+  | Kasus | Waktu | Slide | QA |
+  |---|---|---|---|
+  | teks user, hype, IG + TikTok | 43 dtk | 6 + 6 | lolos |
+  | `--dari-run 9cdbfb57`, elegan, IG | 36 dtk | 6 | lolos |
+
+  Isi setia pada sumber (tanpa angka/klaim tambahan); versi video memakai foto pembicara dengan teks
+  di bawah wajah.
+
+**Belum.**
+- `.env` masih rantai model mati, jadi lewat agent carousel akan gagal di panggilan LLM sampai `.env`
+  diganti.
+- Jalur agent lewat Telegram belum teruji (perlu pesan dari chat).
+- SKILL kini 27 KB dan termuat di tiap permintaan (±1.200 token lebih banyak dari sebelum fitur gaya
+  dan carousel); pemecahan SKILL masih tertunda.
+- `--stok` teruji dengan jaringan dipalsukan saja.
