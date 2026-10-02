@@ -99,6 +99,19 @@ Daftar dan penjelasannya: `python3 /root/AIHackfest/scripts/gaya.py daftar`.
   (pertanyaan gaya tidak muncul lagi). "Lupakan gayaku": perintah `lupakan` dengan `--chat-id` sama;
   "gayaku apa?": perintah `lihat`.
 - **Mengganti gaya video yang sudah jadi**: revisi cepat (Langkah 7) dengan `--gaya <nama>`.
+- **Gaya kustom** ("pakai warna merekku biru tua", "fontnya yang elegan tapi tetap hype", "tanpa
+  pendar"): racik di atas salah satu gaya dan simpan untuk chat ini:
+  ```
+  python3 /root/AIHackfest/scripts/gaya.py kustom --chat-id "<label chat>" [--dasar <gaya>] \
+    [--aksen "#RRGGBB"] [--font standar|tegas|modern|elegan|santai|bersih] [--sudut 0-2] \
+    [--cahaya on|off] [--gerak pegas|halus|tegas] [--kartu "#RRGGBB"] [--teks "#RRGGBB"]
+  ```
+  Cukup `--aksen` untuk warna merek: warna pendampingnya diturunkan otomatis. Warna WAJIB hex; user
+  menyebut nama warna ("marun", "biru dongker") -> pilih hex yang wajar dan SEBUTKAN ke user. Kirim
+  `gambar` pratinjaunya. Sesudah itu video dan carousel chat ini otomatis memakainya; perubahan
+  berikutnya menambah ke yang sudah ada. `ok: false` (mis. kontras teks kurang) -> sampaikan
+  `alasan`, tawarkan warna lain. Kembali ke gaya jadi: `pakai --gaya <nama>`; ke racikannya lagi:
+  `pakai --gaya kustom`.
 - Hasil render berisi `gaya_tampilan` (`label`, `sumber`). Sebut singkat labelnya; kalau
   `sumber` = `profil`, cukup "pakai gaya tersimpanmu (Hype)". `bawaan_profil_tidak_berlaku` ->
   gaya tersimpan sudah tidak ada, video memakai Klasik: beri tahu user.
@@ -130,13 +143,17 @@ python3 /root/AIHackfest/scripts/carousel.py --chat-id "<label chat yang SAMA PE
 | "bikin carousel tentang ..." | `--teks "<pesan user apa adanya>"` |
 | "jadikan video tadi carousel" | `--dari-run <run_id video itu>` (boleh ditambah `--teks`) |
 | user mengirim foto untuk carousel | `--foto <path>` per foto (urut: slide pembuka dulu) |
-| "pakai foto stok" | `--stok` (butuh kunci Pexels; gagal -> slide tetap jadi tanpa foto) |
+| "pakai foto stok" tiap slide | `--stok` (gagal -> slide tetap jadi tanpa foto) |
+| "latarnya pakai gambar ini" (satu gambar untuk semua slide) | `--latar <path gambar user>` |
+| "latarnya foto estetik yang cocok" / "kasih background" | `--latar stok` (satu foto sesuai topik) |
 | untuk TikTok / dua-duanya | `--platform tiktok` / `--platform keduanya` (bawaan: `ig`) |
 | jumlah slide / gaya | `--jumlah N`, `--gaya <nama>` (tanpa flag: gaya tersimpan, lalu Klasik) |
 
 - **`ok: true`**: kirim SEMUA berkas `slide.ig` (dan/atau `slide.tiktok`) berurutan dalam SATU balasan
   dengan kemampuan kirim bawaanmu (jadi album), lalu `caption` + `hashtags` sebagai teks siap tempel.
-  Sebut `gaya_tampilan.label`. `catatan` berisi sesuatu -> sebut singkat.
+  Sebut `gaya_tampilan.label`. `catatan` berisi sesuatu -> sebut singkat (mis. "foto latar gagal").
+  `--foto` = foto jadi gambar utama slide (teks menjauhi wajah); `--latar` = gambar diburamkan di
+  belakang SEMUA slide. Boleh digabung: slide berfoto memakai fotonya, sisanya memakai latar.
 - `qa.<platform>.lolos: false`: sebutkan slide mana dan masalahnya (`per_slide[].masalah`), tawarkan
   dibuat ulang lebih ringkas. Jangan bilang "sudah rapi" kalau QA tidak lolos.
 - **`ok: false`**: sampaikan `alasan` apa adanya. `render_sibuk` -> jangan coba lagi otomatis.

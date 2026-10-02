@@ -973,3 +973,36 @@ orang lain).
   untuk agent penulis kode, tidak relevan untuk Klipa.
 - Zernio: `terbit.py periksa` dijalankan user dengan key asli -> `ok: true`, 0 akun. Autentikasi dan
   `GET /accounts` terbukti jalan; akun Instagram/TikTok belum dihubungkan.
+
+## 2 Okt (siang) — uji Telegram pertama carousel, gaya kustom, latar carousel
+
+**Uji Telegram sungguhan (user).** Carousel 6 slide gaya Hype jadi dan terkirim sebagai album; label
+chat benar (`DM with Stringless`, dari baris Source); agent melaporkan QA slide 3 apa adanya.
+
+**Cacat slide 3 (diperbaiki).** "Perintah AI yang / Langsung Kepakai": dua baris sama-sama 16
+karakter, tapi baris kedua lebih lebar. `layout.susunBaris` mengukur hanya baris dengan karakter
+terbanyak, sehingga baris kedua terpotong di tepi. Opsi baru `ukurSemua` mengukur tiap baris; dipakai
+carousel saja, jadi overlay video tetap 33/33 identik dengan acuan. Tes regresi gagal sebelum
+perbaikan (179 piksel di luar kotak), lolos sesudahnya.
+
+**Gaya kustom** (`gaya.py kustom`): racikan user di atas preset dasar, disimpan di profil chat sebagai
+gaya `kustom`, berlaku untuk video dan carousel.
+- Cukup satu warna merek: `palet_dari_aksen` (kode, bukan model) menurunkan aksen2, sorot, dan gradien
+  kata kunci (dibuat terang karena tampil di atas video).
+- Divalidasi sebelum disimpan (hex, font daftar tertutup, kontras teks kartu); tidak sah -> profil
+  tidak berubah. Ubahan berikutnya menambah. Dasar yang hilang -> render jatuh ke klasik + sumbernya
+  menyebut itu.
+- Pratinjau satu kartu dikirim bersama hasil perintah.
+
+**Latar carousel** (`--latar <path>` / `--latar stok`): satu gambar untuk semua slide, diburamkan
+ringan + lapisan warna tema 58%. `--latar stok` memakai `kata_kunci_latar` dari model (divalidasi) ke
+Pexels; gagal -> carousel tetap jadi polos dan disebut di `catatan`.
+- Uji nyata Pexels + LLM: 46 dtk, foto "minimal morning desk", QA lolos (kontras 11-16 pada lapisan
+  72%; setelah ditipiskan ke 58% tema gelap tetap > 9).
+- QA menangkap: preset bersih di atas latar terang, angka statistik kontras 2,7. Di latar terang
+  sekarang dipakai aksen penuh (3,5).
+
+**Bukti.** +16 tes (1276 total), mutasi 4/4 tertangkap (validasi kustom, kontras latar terang, latar
+ke semua slide, ukur tiap baris).
+
+**Belum.** Gaya kustom dan `--latar` lewat Telegram belum dicoba user.

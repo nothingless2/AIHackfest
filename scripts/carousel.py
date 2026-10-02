@@ -110,6 +110,9 @@ def validasi(data, sumber):
             sorot = str(s.get("sorot") or "").strip()
             if sorot and _norm(sorot) in _norm(bersih.get("judul", "")).split():
                 bersih["sorot"] = sorot
+            latar = str(data.get("kata_kunci_latar") or "").strip()
+            if latar and re.fullmatch(r"[A-Za-z][A-Za-z ]{1,40}", latar) and _kata(latar) <= 4:
+                bersih["cari_latar"] = latar
         cari = str(s.get("kata_kunci_gambar") or "").strip()
         if cari and re.fullmatch(r"[A-Za-z][A-Za-z ]{1,40}", cari) and _kata(cari) <= 4:
             bersih["cari"] = cari
@@ -146,6 +149,8 @@ Aturan:
 - Jangan menambah fakta, angka, nama, atau klaim yang tidak ada di SUMBER.
 - Bahasa Indonesia sehari-hari, kalimat pendek dan jelas. Tanpa tanda pagar di slide.
 - "kata_kunci_gambar" opsional per slide: 1-4 kata BAHASA INGGRIS untuk mencari foto stok yang cocok.
+- "kata_kunci_latar": 1-4 kata BAHASA INGGRIS untuk SATU foto latar estetik yang cocok dengan topik
+  (suasana/benda, bukan teks), mis. "minimal desk laptop".
 - "caption": teks postingan 1-3 kalimat; "hashtags": 3-5 tagar relevan.
 {platform}
 Balas HANYA JSON:
@@ -153,7 +158,7 @@ Balas HANYA JSON:
             {{"jenis": "isi", "judul": "...", "isi": "..."}},
             {{"jenis": "daftar", "judul": "...", "butir": ["...", "..."]}},
             {{"jenis": "cta", "judul": "...", "sub": "...", "tombol": "..."}}],
- "caption": "...", "hashtags": ["#...", "#..."]}}
+ "kata_kunci_latar": "...", "caption": "...", "hashtags": ["#...", "#..."]}}
 
 SUMBER:
 \"\"\"{sumber}\"\"\"
@@ -248,20 +253,24 @@ def frame_terbaik(videos, W, H, folder):
     return None
 
 
-def foto_stok(query, W, H, folder):
-    """(path, kredit) foto Pexels untuk query, atau melempar. Jaringan lewat broll (tes menggantinya)."""
+def foto_stok(query, W, H, folder, pilih=0):
+    """(path, kredit) foto Pexels untuk query, atau melempar. Jaringan lewat broll (tes menggantinya).
+    `pilih`: geser pilihan di antara hasil yang sah, supaya carousel berbeda tidak selalu memakai
+    foto yang sama untuk kata kunci yang sama."""
     import urllib.parse
     import broll
     if not broll.kunci():
         raise CarouselError("stok_tidak_siap", "PEXELS_API_KEY belum diisi")
     url = "https://api.pexels.com/v1/search?" + urllib.parse.urlencode(
-        {"query": query, "orientation": "portrait", "per_page": 5})
+        {"query": query, "orientation": "portrait", "per_page": 8})
     data = broll._http_get_json(url, {"Authorization": broll.kunci(), "User-Agent": "content-factory/1.0"})
+    sah = []
     for f in data.get("photos") or []:
-        src = (f.get("src") or {})
+        src = (f.get("src") or {}) if isinstance(f, dict) else {}
         u = src.get("portrait") or src.get("large2x") or src.get("large") or ""
-        if not broll.host_sah(u):
-            continue
+        if broll.host_sah(u):
+            sah.append((f, u))
+    for f, u in (sah[pilih % len(sah):] + sah[:pilih % len(sah)]) if sah else []:
         tujuan = os.path.join(folder, f"stok_{f.get('id')}.jpg")
         broll._unduh_ke(u, tujuan, 12 * 1024 * 1024)
         return tujuan, {"id": f.get("id"), "fotografer": f.get("photographer") or "",
@@ -342,7 +351,7 @@ def periksa_slide(penuh, teks, kotak, platform, wajah=None):
 
 # ------------------------------------------------------------------ utama
 
-def buat(*, chat_id, teks="", dari_run=None, foto=(), stok=False, nama_gaya=None, platform="ig",
+def buat(*, chat_id, teks="", dari_run=None, foto=(), stok=False, latar=None, nama_gaya=None, platform="ig",
          jumlah=JUMLAH_BAWAAN, chat=None):
     """Bangun carousel; kembalikan dict hasil (ok True) atau melempar CarouselError."""
     import overlay_remotion as orr
@@ -369,10 +378,13 @@ def buat(*, chat_id, teks="", dari_run=None, foto=(), stok=False, nama_gaya=None
         raise CarouselError("sumber_kurang", "Bahannya terlalu sedikit untuk carousel. Tulis topik atau poinnya, "
                                              "atau sebut video yang mau didaur ulang.")
     foto_sah = []
-    if foto:
+    latar_berkas = None
+    if foto or (latar and latar != "stok"):
         from hermes_render import MediaPathError, _validate_media_paths
         try:
-            foto_sah = _validate_media_paths(list(foto))
+            foto_sah = _validate_media_paths(list(foto)) if foto else []
+            if latar and latar != "stok":
+                (latar_berkas,) = _validate_media_paths([latar])
         except MediaPathError as e:
             raise CarouselError("foto_invalid", str(e))
 
@@ -412,8 +424,27 @@ def buat(*, chat_id, teks="", dari_run=None, foto=(), stok=False, nama_gaya=None
                                 hasil["kredit_foto"].append({**kredit, "slide": i + 1})
                             except Exception as e:  # noqa: BLE001  (dilaporkan, slide tetap jadi)
                                 catatan.append(f"foto stok slide {i + 1} gagal: {str(e)[:120]}")
+                # Satu latar untuk SEMUA slide yang belum punya foto sendiri: gambar user atau satu
+                # foto stok estetik sesuai topik. Diburamkan + ditimpa warna tema di komponen;
+                # wajah tidak dihindari (latar, bukan subjek) dan kontrasnya tetap diukur QA.
+                latar_url = None
+                if latar_berkas:
+                    latar_url, _ = siapkan_gambar(latar_berkas, W, H)
+                elif latar == "stok":
+                    kata = slides[0].get("cari_latar") or slides[0].get("cari")
+                    try:
+                        if not kata:
+                            raise CarouselError("stok_kosong", "model tidak memberi kata kunci latar")
+                        p, kredit = foto_stok(kata, W, H, kerja, pilih=int(cid, 16))
+                        latar_url, _ = siapkan_gambar(p, W, H)
+                        if not any(k.get("latar") and k["id"] == kredit["id"] for k in hasil["kredit_foto"]):
+                            hasil["kredit_foto"].append({**kredit, "latar": True})
+                    except Exception as e:  # noqa: BLE001  (dilaporkan, carousel tetap jadi polos)
+                        catatan.append(f"foto latar gagal: {str(e)[:120]}")
+                pakai_latar = [latar_url is not None and g is None for g in gambar]
+                gambar = [latar_url if pl else g for pl, g in zip(pakai_latar, gambar)]
                 kotak = [kotak_teks(plat, W, H, w) for w in wajah]
-                props_slide = [{**s, "gambar": g} for s, g in zip(slides, gambar)]
+                props_slide = [{**s, "gambar": g, "latar": pl} for s, g, pl in zip(slides, gambar, pakai_latar)]
                 png, png_teks = orr.render_carousel(props_slide, kotak, preset["tema"], plat, W, H,
                                                     os.path.join(kerja, plat))
                 jalur, qa = [], []
@@ -449,12 +480,13 @@ def main(argv=None):
     ap.add_argument("--dari-run", default=None, help="run_id video yang didaur ulang jadi carousel.")
     ap.add_argument("--foto", action="append", default=[], help="Foto user (path di cache Hermes).")
     ap.add_argument("--stok", action="store_true", help="Isi slide tanpa foto dengan foto Pexels.")
+    ap.add_argument("--latar", default=None, help="Satu latar untuk semua slide: path gambar user, atau 'stok'.")
     ap.add_argument("--gaya", default=None)
     ap.add_argument("--platform", default="ig", choices=["ig", "tiktok", "keduanya"])
     ap.add_argument("--jumlah", type=int, default=JUMLAH_BAWAAN)
     a = ap.parse_args(argv)
     try:
-        out = buat(chat_id=a.chat_id, teks=a.teks, dari_run=a.dari_run, foto=a.foto, stok=a.stok,
+        out = buat(chat_id=a.chat_id, teks=a.teks, dari_run=a.dari_run, foto=a.foto, stok=a.stok, latar=a.latar,
                    nama_gaya=a.gaya, platform=a.platform, jumlah=a.jumlah)
     except CarouselError as e:
         out = {"ok": False, "kode": e.kode, "alasan": str(e)}

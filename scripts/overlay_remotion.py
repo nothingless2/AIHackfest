@@ -438,11 +438,12 @@ def render_pratinjau_gaya(presets, out_jpg):
             (hasil,) = _jalankan_node(props, [{"jenis": "diam", "frame": PRATINJAU_FRAME, "tahan": 1, "mulai": 0}], sub,
                                       komposisi="PratinjauGaya", batas=SAMPUL_BATAS_DETIK)
             kartu.append(hasil["out"])
-        baris = (len(kartu) + PRATINJAU_KOLOM - 1) // PRATINJAU_KOLOM
-        grid = Image.new("RGB", (PRATINJAU_W * PRATINJAU_KOLOM, PRATINJAU_H * baris), (16, 16, 20))
+        kolom = min(PRATINJAU_KOLOM, len(kartu))          # satu gaya (kustom) = satu kartu, tanpa ruang kosong
+        baris = (len(kartu) + kolom - 1) // kolom
+        grid = Image.new("RGB", (PRATINJAU_W * kolom, PRATINJAU_H * baris), (16, 16, 20))
         for i, path in enumerate(kartu):
             with Image.open(path) as im:
-                grid.paste(im.convert("RGB"), ((i % PRATINJAU_KOLOM) * PRATINJAU_W, (i // PRATINJAU_KOLOM) * PRATINJAU_H))
+                grid.paste(im.convert("RGB"), ((i % kolom) * PRATINJAU_W, (i // kolom) * PRATINJAU_H))
         sementara = out_jpg + ".tmp.jpg"
         grid.save(sementara, "JPEG", quality=85)
         os.replace(sementara, out_jpg)

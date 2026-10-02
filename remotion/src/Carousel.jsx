@@ -35,7 +35,9 @@ const palet = (T) => {
     aksen,
     aksen2,
     sorot: w.sorot ?? '#C4B5FD',
-    kunci: terang ? gradien([aksen, aksen2]) : gradien(w.kunci || ['#FFF4B8', '#F7CC55', '#C98E22']),
+    // Latar terang: aksen PENUH. Gradien ke aksen2 (biasanya lebih muda) terukur kontras 2,7 di atas
+    // latar foto + putih (3 Okt), di bawah ambang 3.
+    kunci: terang ? gradien([aksen]) : gradien(w.kunci || ['#FFF4B8', '#F7CC55', '#C98E22']),
     r: (px) => px * T.sudut,
   };
 };
@@ -43,7 +45,7 @@ const palet = (T) => {
 const bersih = (k) => k.toLowerCase().replace(/[^\p{L}\p{N}_]/gu, '');
 
 const Judul = ({teks, sorot, F, p, lebar, maks, rata = 'left'}) => {
-  const tata = susunBaris({text: teks, lebar, fontFamily: F.family, fontWeight: F.weight, maks});
+  const tata = susunBaris({text: teks, lebar, fontFamily: F.family, fontWeight: F.weight, maks, ukurSemua: true});
   return (
     <div style={{fontFamily: `"${F.family}", ${EMOJI}, sans-serif`, fontWeight: F.weight, textAlign: rata,
       lineHeight: 1.08, color: p.teks}}>
@@ -139,7 +141,17 @@ const Slide = ({s, i, n, W, H, F, p, kotak, hanyaTeks, platform}) => {
   const latar = hanyaTeks ? 'transparent' : p.latar;
   return (
     <AbsoluteFill style={{background: latar}}>
-      {!hanyaTeks && s.gambar ? (
+      {!hanyaTeks && s.gambar && s.latar ? (
+        <>
+          {/* Latar bersama (gambar user / foto stok): sedikit buram + lapisan warna tema, supaya
+              warna teks tema tetap terbaca di slide mana pun. Kontrasnya diukur Python. */}
+          <Img src={s.gambar} style={{width: W, height: H, objectFit: 'cover', filter: `blur(${W * 0.004}px)`,
+            scale: '1.03'}} />
+          {/* 58%: foto masih terlihat; terukur kontras teks tetap > 8 (ambang 3). 72% membuat foto nyaris hilang. */}
+          <AbsoluteFill style={{background: `${p.latar}94`}} />
+        </>
+      ) : null}
+      {!hanyaTeks && s.gambar && !s.latar ? (
         <>
           <Img src={s.gambar} style={{width: W, height: H, objectFit: 'cover'}} />
           {/* Gradien gelap di sisi teks: kontrasnya diukur Python dari render akhir. */}
@@ -159,7 +171,7 @@ const Slide = ({s, i, n, W, H, F, p, kotak, hanyaTeks, platform}) => {
       </div>
       {/* Nomor slide: di dalam kotak aman, pojok atas. */}
       <div style={{position: 'absolute', left: kotak.x, top: H * 0.045, fontFamily: ISI, fontWeight: 700,
-        fontSize: W * 0.03, color: s.gambar && !hanyaTeks ? '#FFFFFF' : p.aksen, letterSpacing: 1}}>
+        fontSize: W * 0.03, color: s.gambar && !s.latar && !hanyaTeks ? '#FFFFFF' : p.aksen, letterSpacing: 1}}>
         {`${i + 1}/${n}`}{platform === 'ig' && i === 0 ? '   geser →' : ''}
       </div>
     </AbsoluteFill>

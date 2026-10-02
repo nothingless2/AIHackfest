@@ -40,6 +40,7 @@ GAYA_DIR = os.path.join(PROJECT_ROOT, "config", "gaya")
 PROFIL_DIR = os.path.join(STATE_DIR, "profil")
 PRATINJAU_DIR = os.path.join(STATE_DIR, "pratinjau_gaya")
 BAWAAN = "klasik"
+KUSTOM = "kustom"            # nama cadangan: gaya racikan user, disimpan di profilnya (bukan berkas preset)
 _NAMA = re.compile(r"^[a-z][a-z0-9_-]{1,30}$")
 
 # Harus sama dengan kunci auto_render.SUBTITLE_STYLES (dijaga tes; modul itu berat diimpor).
@@ -183,7 +184,8 @@ def daftar():
     """Nama preset; bawaan selalu pertama (pilihan A di pertanyaan inspect), sisanya urut abjad."""
     if not os.path.isdir(GAYA_DIR):
         return []
-    nama = sorted(f[:-5] for f in os.listdir(GAYA_DIR) if f.endswith(".json") and _NAMA.match(f[:-5]))
+    nama = sorted(f[:-5] for f in os.listdir(GAYA_DIR) if f.endswith(".json") and _NAMA.match(f[:-5])
+                  and f[:-5] != KUSTOM)
     return ([BAWAAN] if BAWAAN in nama else []) + [n for n in nama if n != BAWAAN]
 
 
@@ -219,6 +221,13 @@ def profil(pemilik):
 
 
 def simpan_gaya(pemilik, nama):
+    if str(nama or "").strip().lower() == KUSTOM:
+        # Kembali ke gaya kustom yang sudah pernah dibuat (bukan membuat baru).
+        data = profil(pemilik)
+        _preset_kustom(data)
+        data.update(gaya=KUSTOM, diubah=dt.datetime.now(dt.timezone.utc).isoformat())
+        write_json(_berkas_profil(pemilik), data)
+        return data
     preset = muat(nama)
     data = {**profil(pemilik), "pemilik": str(pemilik).strip(), "gaya": preset["nama"],
             "diubah": dt.datetime.now(dt.timezone.utc).isoformat()}
@@ -236,17 +245,85 @@ def lupakan_gaya(pemilik):
 
 # ------------------------------------------------------------------ dipakai render
 
+# ------------------------------------------------------------------ gaya kustom per pemilik
+
+def _hex_rgb(h):
+    return tuple(int(h[i:i + 2], 16) for i in (1, 3, 5))
+
+
+def _campur(h, ke, t):
+    """Campur warna hex dengan `ke` (rgb) sebesar t (0-1)."""
+    return "#" + "".join(f"{round(c + (k - c) * t):02X}" for c, k in zip(_hex_rgb(h), ke))
+
+
+def palet_dari_aksen(aksen):
+    """Satu warna merek -> warna pendamping yang serasi. KODE yang menurunkan (bukan model), supaya
+    user cukup menyebut satu warna dan hasilnya tetap satu keluarga."""
+    if not isinstance(aksen, str) or not _HEX6.match(aksen):
+        raise GayaError(f"warna aksen harus hex #RRGGBB, bukan {aksen!r}")
+    putih, hitam = (255, 255, 255), (0, 0, 0)
+    return {"aksen": aksen.upper(), "aksen2": _campur(aksen, hitam, 0.28), "sorot": _campur(aksen, putih, 0.55),
+            # Kata kunci caption tampil DI ATAS VIDEO: dibuat terang supaya warna merek yang tua
+            # (marun, biru dongker) tetap terbaca. Gradien terang -> sedang -> warna merek.
+            "kunci": [_campur(aksen, putih, 0.88), _campur(aksen, putih, 0.5), aksen.upper()]}
+
+
+def _gabung_tema(dasar, ubahan):
+    hasil = {**dasar, **{k: v for k, v in ubahan.items() if k != "warna"}}
+    if "warna" in dasar or "warna" in ubahan:
+        hasil["warna"] = {**dasar.get("warna", {}), **ubahan.get("warna", {})}
+    return hasil
+
+
+def _preset_kustom(data):
+    """Preset dari catatan kustom di profil: preset dasar + ubahan user, divalidasi ULANG."""
+    k = data.get("kustom")
+    if not isinstance(k, dict):
+        raise GayaError("Chat ini belum punya gaya kustom. Buat dulu (gaya.py kustom).")
+    dasar = muat(k.get("dasar") or BAWAAN)
+    tema = validasi_tema(_gabung_tema(dasar["tema"], k.get("tema") or {}))
+    return {"nama": KUSTOM, "label": f"Kustom (dasar {dasar['label']})", "deskripsi": "Gaya racikanmu sendiri.",
+            "tema": tema, "editing": dasar["editing"], "dasar": dasar["nama"]}
+
+
+def simpan_kustom(pemilik, dasar=None, ubahan=None):
+    """Simpan gaya kustom pemilik dan jadikan gayanya. `ubahan` = tema parsial; `warna.aksen` saja
+    sudah cukup (pendampingnya diturunkan kode, kecuali disebut sendiri). Tidak sah -> GayaError,
+    profil tidak berubah."""
+    if not str(pemilik or "").strip():
+        raise GayaError("pemilik profil tidak diketahui")
+    lama = profil(pemilik).get("kustom") or {}
+    # Dasar: yang disebut > dasar kustom lama > preset yang sedang dipakai > bawaan.
+    kandidat = dasar or lama.get("dasar") or profil(pemilik).get("gaya")
+    nama_dasar = muat(kandidat if kandidat and str(kandidat).lower() != KUSTOM else BAWAAN)["nama"]
+    ubahan = dict(ubahan or {})
+    warna = dict(ubahan.get("warna") or {})
+    if "aksen" in warna:
+        warna = {**palet_dari_aksen(warna["aksen"]), **warna}
+    tema_baru = _gabung_tema(lama.get("tema") or {}, {**ubahan, **({"warna": warna} if warna else {})})
+    catatan = {"dasar": nama_dasar, "tema": tema_baru}
+    preset = _preset_kustom({"kustom": catatan})          # validasi gabungan (hex, font, kontras)
+    data = {**profil(pemilik), "pemilik": str(pemilik).strip(), "gaya": KUSTOM, "kustom": catatan,
+            "diubah": dt.datetime.now(dt.timezone.utc).isoformat()}
+    write_json(_berkas_profil(pemilik), data)
+    return preset
+
+
 def pilih(eksplisit, pemilik):
     """(preset, sumber). sumber: 'diminta' | 'profil' | 'bawaan' (| 'bawaan_profil_tidak_berlaku').
 
     Nama eksplisit yang salah -> GayaError (user/agent harus tahu). Gaya di profil yang presetnya
-    sudah dihapus TIDAK menggagalkan render: jatuh ke bawaan dan sumbernya menyebutkan itu."""
+    sudah dihapus (atau kustom yang tak lagi sah) TIDAK menggagalkan render: jatuh ke bawaan dan
+    sumbernya menyebutkan itu."""
     if eksplisit:
+        if str(eksplisit).strip().lower() == KUSTOM:
+            return _preset_kustom(profil(pemilik)), "diminta"
         return muat(eksplisit), "diminta"
-    di_profil = profil(pemilik).get("gaya")
+    data = profil(pemilik)
+    di_profil = data.get("gaya")
     if di_profil:
         try:
-            return muat(di_profil), "profil"
+            return (_preset_kustom(data) if di_profil == KUSTOM else muat(di_profil)), "profil"
         except GayaError:
             return muat(BAWAAN), "bawaan_profil_tidak_berlaku"
     return muat(BAWAAN), "bawaan"
@@ -315,15 +392,48 @@ def pratinjau(keluar_dir=None):
 
 # ------------------------------------------------------------------ CLI
 
+def pratinjau_satu(preset, keluar_dir=None):
+    """Satu kartu contoh untuk SATU preset (dipakai gaya kustom: tidak di-cache bersama)."""
+    import overlay_remotion as orr
+    keluar_dir = keluar_dir or PRATINJAU_DIR
+    os.makedirs(keluar_dir, exist_ok=True)
+    out = os.path.join(keluar_dir, f"pratinjau_{preset['nama']}_{dt.datetime.now():%Y%m%d_%H%M%S_%f}.jpg")
+    return orr.render_pratinjau_gaya([preset], out)
+
+
 def _ringkas(p):
     return {"nama": p["nama"], "label": p["label"], "deskripsi": p["deskripsi"]}
 
 
+def _ubahan_dari_argumen(a):
+    """Flag CLI `kustom` -> tema parsial. Nilai dicek validasi_tema saat disimpan."""
+    warna = {k: v for k, v in (("aksen", a.aksen), ("aksen2", a.aksen2), ("sorot", a.sorot), ("teks", a.teks),
+                               ("teks_sub", a.teks_sub), ("kartu", a.kartu), ("latar", a.latar)) if v}
+    if a.kunci:
+        warna["kunci"] = [w.strip() for w in a.kunci.split(",") if w.strip()]
+    ubahan = {"warna": warna} if warna else {}
+    if a.font:
+        ubahan["font"] = {"judul": a.font.strip().lower()}
+    if a.sudut is not None:
+        ubahan["sudut"] = a.sudut
+    if a.cahaya:
+        ubahan["cahaya"] = a.cahaya == "on"
+    if a.gerak:
+        ubahan["gerak"] = a.gerak
+    return ubahan
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Preset gaya tampilan + editing")
-    ap.add_argument("perintah", choices=["daftar", "pratinjau", "pakai", "lihat", "lupakan"])
+    ap.add_argument("perintah", choices=["daftar", "pratinjau", "pakai", "lihat", "lupakan", "kustom"])
     ap.add_argument("--chat-id", default="")
     ap.add_argument("--gaya", default="")
+    # kustom: racik gaya sendiri di atas preset --dasar. Warna hex #RRGGBB; --aksen saja sudah cukup.
+    ap.add_argument("--dasar", default=None)
+    for nama in ("aksen", "aksen2", "sorot", "teks", "teks-sub", "kartu", "latar", "kunci", "font", "gerak"):
+        ap.add_argument(f"--{nama}", default=None)
+    ap.add_argument("--sudut", type=float, default=None)
+    ap.add_argument("--cahaya", choices=["on", "off"], default=None)
     a = ap.parse_args(argv)
     try:
         if a.perintah == "daftar":
@@ -333,9 +443,24 @@ def main(argv=None):
         elif a.perintah == "pakai":
             data = simpan_gaya(a.chat_id, a.gaya)
             out = {"ok": True, "gaya": _ringkas(muat(data["gaya"]))}
+        elif a.perintah == "kustom":
+            ubahan = _ubahan_dari_argumen(a)
+            if not ubahan and not a.dasar:
+                raise GayaError("Sebutkan yang mau diubah, mis. --aksen \"#B91C1C\" atau --font elegan.")
+            preset = simpan_kustom(a.chat_id, a.dasar, ubahan)
+            out = {"ok": True, "gaya": _ringkas(preset), "dasar": preset["dasar"], "tema": preset["tema"], "gambar": None}
+            try:
+                out["gambar"] = pratinjau_satu(preset)
+            except Exception as e:  # noqa: BLE001  (gaya sudah tersimpan; pratinjau gagal dilaporkan)
+                out["pratinjau_gagal"] = f"{type(e).__name__}: {str(e)[:160]}"
         elif a.perintah == "lihat":
-            nama = profil(a.chat_id).get("gaya")
-            out = {"ok": True, "gaya": _ringkas(muat(nama)) if nama else None, "bawaan": BAWAAN}
+            data = profil(a.chat_id)
+            nama = data.get("gaya")
+            if nama == KUSTOM:
+                preset = _preset_kustom(data)
+                out = {"ok": True, "gaya": _ringkas(preset), "dasar": preset["dasar"], "tema": preset["tema"]}
+            else:
+                out = {"ok": True, "gaya": _ringkas(muat(nama)) if nama else None, "bawaan": BAWAAN}
         else:
             out = {"ok": True, "dihapus": lupakan_gaya(a.chat_id)}
     except (GayaError, StyleError) as e:

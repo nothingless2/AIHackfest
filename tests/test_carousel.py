@@ -285,3 +285,89 @@ def test_render_nyata_judul_tidak_menimpa_wajah(lingkungan, monkeypatch):
                 foto=[str(lingkungan / "wajah.png")], chat=_chat(_naskah()))
     hook = h["qa"]["ig"]["per_slide"][0]
     assert not hook["masalah"], hook
+
+
+def test_render_nyata_judul_lebar_tidak_keluar_kotak(lingkungan):
+    """Regresi 3 Okt (carousel user): "Perintah AI yang / Langsung Kepakai" -- dua baris sama-sama 16
+    karakter, tapi baris kedua lebih LEBAR; ukuran huruf dihitung dari baris pertama saja, sehingga
+    baris kedua terpotong di tepi kanan."""
+    naskah = _naskah()
+    naskah["slide"][1] = {"jenis": "isi", "judul": "Perintah AI yang Langsung Kepakai",
+                          "isi": "Mulai dari perintah AI yang langsung kepakai."}
+    h = cr.buat(chat_id="DM A", teks=SUMBER, nama_gaya="hype", platform="ig", jumlah=5, chat=_chat(naskah))
+    slide = h["qa"]["ig"]["per_slide"][1]
+    assert not slide["masalah"], slide
+
+
+# ------------------------------------------------------------------ latar bersama (gambar user / stok)
+
+def test_kata_kunci_latar_divalidasi():
+    slides, *_ = cr.validasi(_naskah(kata_kunci_latar="minimal desk laptop"), SUMBER)
+    assert slides[0]["cari_latar"] == "minimal desk laptop"
+    for buruk in ("meja kerja estetik sekali banget pokoknya", "https://x.y/z.jpg", "日本"):
+        slides, *_ = cr.validasi(_naskah(kata_kunci_latar=buruk), SUMBER)
+        assert "cari_latar" not in slides[0]
+
+
+def test_latar_di_luar_cache_ditolak_sebelum_llm(lingkungan):
+    chat = _chat(_naskah())
+    with pytest.raises(cr.CarouselError) as e:
+        cr.buat(chat_id="DM A", teks=SUMBER, latar="/etc/passwd", chat=chat)
+    assert e.value.kode == "foto_invalid" and chat.panggil == []
+
+
+def _tangkap_render(monkeypatch):
+    import overlay_remotion as orr
+    asli, tangkap = orr.render_carousel, {}
+
+    def render(slides, *a, **k):
+        tangkap["slides"] = slides
+        return asli(slides, *a, **k)
+    monkeypatch.setattr(orr, "render_carousel", render)
+    return tangkap
+
+
+def _gambar_terang(path):
+    from PIL import Image
+    Image.new("RGB", (400, 500), (232, 226, 240)).save(path)
+    return str(path)
+
+
+def test_latar_user_dipakai_semua_slide_dan_tetap_terbaca(lingkungan, monkeypatch):
+    """Termasuk regresi 3 Okt: angka statistik preset bersih di atas latar terang kontras 2,7."""
+    import hermes_render
+    monkeypatch.setattr(hermes_render, "MEDIA_ROOTS", [str(lingkungan)])
+    tangkap = _tangkap_render(monkeypatch)
+    h = cr.buat(chat_id="DM A", teks=SUMBER, nama_gaya="bersih", platform="ig", jumlah=5,
+                latar=_gambar_terang(lingkungan / "latar.jpg"), chat=_chat(_naskah()))
+    assert all(s["latar"] and s["gambar"] for s in tangkap["slides"]), "satu latar untuk semua slide"
+    assert h["qa"]["ig"]["lolos"], h["qa"]["ig"]["per_slide"]
+
+
+def test_latar_stok_memakai_kata_kunci_latar_dan_gagalnya_dilaporkan(lingkungan, monkeypatch):
+    import broll
+    dicari = []
+
+    def stok(query, W, H, folder, pilih=0):
+        dicari.append(query)
+        return _gambar_terang(os.path.join(folder, "s.jpg")), {"id": 7, "fotografer": "Ani", "halaman": "", "query": query}
+    monkeypatch.setattr(cr, "foto_stok", stok)
+    tangkap = _tangkap_render(monkeypatch)
+    h = cr.buat(chat_id="DM A", teks=SUMBER, platform="ig", jumlah=5, latar="stok",
+                chat=_chat(_naskah(kata_kunci_latar="coffee desk")))
+    assert dicari == ["coffee desk"] and all(s["latar"] for s in tangkap["slides"])
+    assert h["kredit_foto"] == [{"id": 7, "fotografer": "Ani", "halaman": "", "query": "coffee desk", "latar": True}]
+    monkeypatch.setattr(cr, "foto_stok", lambda *a, **k: (_ for _ in ()).throw(cr.CarouselError("stok_kosong", "tidak ada")))
+    h = cr.buat(chat_id="DM A", teks=SUMBER, platform="ig", jumlah=5, latar="stok",
+                chat=_chat(_naskah(kata_kunci_latar="coffee desk")))
+    assert h["ok"] and any("foto latar gagal" in c for c in h["catatan"]), "carousel tetap jadi, gagalnya disebut"
+    assert not any(s["latar"] for s in tangkap["slides"])
+
+
+def test_foto_stok_bergilir_di_antara_hasil_yang_sah(monkeypatch, tmp_path):
+    import broll
+    monkeypatch.setenv("PEXELS_API_KEY", "palsu")
+    monkeypatch.setattr(broll, "_http_get_json", lambda url, h: {"photos": [
+        {"id": i, "src": {"portrait": f"https://images.pexels.com/photos/{i}/a.jpg"}} for i in (1, 2, 3)]})
+    monkeypatch.setattr(broll, "_unduh_ke", lambda u, t, m: open(t, "wb").write(b"x"))
+    assert [cr.foto_stok("x", 270, 338, str(tmp_path), pilih=n)[1]["id"] for n in (0, 1, 2, 3)] == [1, 2, 3, 1]

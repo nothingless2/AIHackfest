@@ -383,3 +383,79 @@ def test_render_panggung_dan_caption_ikut_tema_yang_sama(monkeypatch, tmp_path):
     promo = gaya.muat("promo")["tema"]
     c = _render("CaptionDinamis", {**cap, "tema": promo}, 12, str(tmp_path / "c"))
     assert _rona(c, "#FACC15", 70) > 30, "kata kunci memakai gradien kuning preset promo"
+
+
+# ------------------------------------------------------------------ gaya kustom (racikan user)
+
+def test_palet_diturunkan_kode_dari_satu_warna():
+    p = gaya.palet_dari_aksen("#b91c1c")
+    assert p["aksen"] == "#B91C1C" and len(p["kunci"]) == 3 and p["kunci"][-1] == "#B91C1C"
+    gaya.validasi_tema({"warna": p})                      # hasil turunan selalu sah
+    assert gaya._luminans(p["sorot"]) > gaya._luminans(p["aksen"]) > gaya._luminans(p["aksen2"])
+    with pytest.raises(gaya.GayaError):
+        gaya.palet_dari_aksen("merah")
+
+
+def test_kustom_tersimpan_di_profil_dan_dipakai_otomatis():
+    assert "kustom" not in gaya.daftar(), "kustom bukan berkas preset"
+    with pytest.raises(gaya.GayaError):
+        gaya.pilih("kustom", "DM A")                       # belum pernah dibuat
+    p = gaya.simpan_kustom("DM A", "hype", {"warna": {"aksen": "#B91C1C"}, "font": {"judul": "elegan"}})
+    assert p["nama"] == "kustom" and p["dasar"] == "hype" and p["editing"] == gaya.muat("hype")["editing"]
+    assert p["tema"]["warna"]["aksen"] == "#B91C1C" and p["tema"]["font"] == {"judul": "elegan"}
+    assert p["tema"]["gerak"] == "tegas", "yang tidak diubah ikut preset dasar"
+    q, sumber = gaya.pilih(None, "DM A")
+    assert (q["nama"], sumber) == ("kustom", "profil") and q["tema"] == p["tema"]
+    assert gaya.pilih(None, "DM B")[0]["nama"] == "klasik", "kustom chat lain tidak berlaku"
+
+
+def test_kustom_bertahap_dan_bisa_kembali_setelah_ganti_preset():
+    gaya.simpan_kustom("DM A", "hype", {"warna": {"aksen": "#B91C1C"}})
+    p = gaya.simpan_kustom("DM A", None, {"font": {"judul": "elegan"}})
+    assert p["tema"]["warna"]["aksen"] == "#B91C1C" and p["dasar"] == "hype", "ubahan kedua menambah, bukan mengganti"
+    gaya.simpan_gaya("DM A", "bersih")
+    assert gaya.pilih(None, "DM A")[0]["nama"] == "bersih"
+    gaya.simpan_gaya("DM A", "kustom")
+    assert gaya.pilih(None, "DM A")[0]["tema"]["warna"]["aksen"] == "#B91C1C"
+
+
+@pytest.mark.parametrize("ubahan", [
+    {"warna": {"aksen": "url(http://evil.example/x)"}},
+    {"warna": {"teks": "#111111"}},                         # teks gelap di kartu gelap: tak terbaca
+    {"font": {"judul": "Comic Sans"}},
+    {"sudut": 5},
+])
+def test_kustom_tidak_sah_ditolak_dan_profil_tidak_berubah(ubahan):
+    gaya.simpan_gaya("DM A", "hype")
+    with pytest.raises(gaya.GayaError):
+        gaya.simpan_kustom("DM A", "hype", ubahan)
+    assert gaya.profil("DM A").get("gaya") == "hype" and "kustom" not in gaya.profil("DM A")
+
+
+def test_kustom_yang_dasarnya_hilang_tidak_menggagalkan_render():
+    gaya.simpan_kustom("DM A", "hype", {"warna": {"aksen": "#B91C1C"}})
+    path = gaya._berkas_profil("DM A")
+    data = json.load(open(path))
+    data["kustom"]["dasar"] = "sudah_dihapus"
+    json.dump(data, open(path, "w"))
+    assert gaya.pilih(None, "DM A")[1] == "bawaan_profil_tidak_berlaku"
+
+
+def test_cli_kustom_menyimpan_dan_memberi_pratinjau(monkeypatch, capsys):
+    monkeypatch.setattr(orr, "render_pratinjau_gaya", lambda presets, out: open(out, "wb").write(b"jpg") and out)
+    assert gaya.main(["kustom", "--chat-id", "DM A", "--dasar", "elegan", "--aksen", "#0EA5E9", "--cahaya", "on"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["gaya"]["nama"] == "kustom" and out["dasar"] == "elegan" and out["tema"]["cahaya"] is True
+    assert out["gambar"] and os.path.exists(out["gambar"])
+    assert gaya.main(["kustom", "--chat-id", "DM A"]) == 1, "tanpa ubahan ditolak"
+    capsys.readouterr()
+    assert gaya.main(["lihat", "--chat-id", "DM A"]) == 0
+    assert json.loads(capsys.readouterr().out)["tema"]["warna"]["aksen"] == "#0EA5E9"
+
+
+def test_render_memakai_tema_kustom_dari_profil(monkeypatch, tmp_path):
+    monkeypatch.delenv("GAYA_TEMA", raising=False)
+    gaya.simpan_kustom("DM A", "hype", {"warna": {"aksen": "#B91C1C"}})
+    _, t = _main(monkeypatch, tmp_path, [])
+    assert t["GAYA_NAMA"] == "kustom" and json.loads(t["GAYA_TEMA"])["warna"]["aksen"] == "#B91C1C"
+    assert t["SUBTITLE_STYLE"] == "dinamis", "editing ikut preset dasar (hype)"
