@@ -959,3 +959,17 @@ orang lain).
   (milik user). Nama field diambil dari dokumentasi lewat ringkasan, jadi langkah pertama saat key
   ada: `terbit.py periksa` (hanya membaca), lalu satu posting DRAF TikTok.
 - Jalur Telegram (dengan baris Source) belum teruji.
+
+## 3 Okt — keadaan setelah user mengubah pengaturan
+
+- `.env` repo sudah memakai rantai hidup (`space-bunny-alpha` + cadangan); `cek_kuota.py`: model utama
+  menjawab, `bisa_jalan: true`. Catatan "`.env` masih rantai mati" di atas tidak berlaku lagi.
+- Caveman 9Router dimatikan user. Terukur di catatan router, permintaan "ok" yang sama: 564 → 157
+  token masuk, jadi caveman memakan **407 token per permintaan** (perkiraan ±555 sebelumnya terlalu
+  tinggi). 6 sampel "Bisa buat konten sekarang?": 0/6 huruf asing/istilah teknis, kalimat utuh.
+  Bukan A/B bersih: hari ini model utama hidup sehingga jawabannya memang lebih sederhana. Masih ada
+  salah ketik kecil dari modelnya sendiri di 3/6 sampel ("Bisa,Aku", "bruntikan").
+- Ponytail 9Router TIDAK dinyalakan: isinya instruksi "lazy senior developer / YAGNI / code first"
+  untuk agent penulis kode, tidak relevan untuk Klipa.
+- Zernio: `terbit.py periksa` dijalankan user dengan key asli -> `ok: true`, 0 akun. Autentikasi dan
+  `GET /accounts` terbukti jalan; akun Instagram/TikTok belum dihubungkan.
