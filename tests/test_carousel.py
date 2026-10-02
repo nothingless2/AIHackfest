@@ -288,7 +288,7 @@ def test_render_nyata_judul_tidak_menimpa_wajah(lingkungan, monkeypatch):
 
 
 def test_render_nyata_judul_lebar_tidak_keluar_kotak(lingkungan):
-    """Regresi 3 Okt (carousel user): "Perintah AI yang / Langsung Kepakai" -- dua baris sama-sama 16
+    """Regresi 2 Okt (carousel user): "Perintah AI yang / Langsung Kepakai" -- dua baris sama-sama 16
     karakter, tapi baris kedua lebih LEBAR; ukuran huruf dihitung dari baris pertama saja, sehingga
     baris kedua terpotong di tepi kanan."""
     naskah = _naskah()
@@ -334,7 +334,7 @@ def _gambar_terang(path):
 
 
 def test_latar_user_dipakai_semua_slide_dan_tetap_terbaca(lingkungan, monkeypatch):
-    """Termasuk regresi 3 Okt: angka statistik preset bersih di atas latar terang kontras 2,7."""
+    """Termasuk regresi 2 Okt: angka statistik preset bersih di atas latar terang kontras 2,7."""
     import hermes_render
     monkeypatch.setattr(hermes_render, "MEDIA_ROOTS", [str(lingkungan)])
     tangkap = _tangkap_render(monkeypatch)

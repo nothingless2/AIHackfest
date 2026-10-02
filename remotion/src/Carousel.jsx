@@ -36,7 +36,7 @@ const palet = (T) => {
     aksen2,
     sorot: w.sorot ?? '#C4B5FD',
     // Latar terang: aksen PENUH. Gradien ke aksen2 (biasanya lebih muda) terukur kontras 2,7 di atas
-    // latar foto + putih (3 Okt), di bawah ambang 3.
+    // latar foto + putih (2 Okt), di bawah ambang 3.
     kunci: terang ? gradien([aksen]) : gradien(w.kunci || ['#FFF4B8', '#F7CC55', '#C98E22']),
     r: (px) => px * T.sudut,
   };

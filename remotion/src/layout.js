@@ -21,7 +21,7 @@ function bagi(words, n) {
 // Pilih jumlah baris (1-3) yang memberi huruf terbesar tapi TIDAK melebihi `maks` piksel.
 // Diukur dengan font sungguhan (fitText), bukan diperkirakan dari jumlah karakter.
 // ukurSemua: ukur SETIAP baris, bukan hanya yang karakternya terbanyak. Dua baris sama panjang
-// karakternya bisa berbeda lebar ("Perintah AI yang" vs "Langsung Kepakai", 3 Okt: baris kedua
+// karakternya bisa berbeda lebar ("Perintah AI yang" vs "Langsung Kepakai", 2 Okt: baris kedua
 // terpotong di tepi slide). Opsional supaya pemanggil lama (overlay video) tetap identik piksel.
 export function susunBaris({text, lebar, fontFamily, fontWeight, maks, upper, ukurSemua = false}) {
   const words = (upper ? text.toUpperCase() : text).split(/\s+/).filter(Boolean);

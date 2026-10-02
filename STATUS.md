@@ -960,7 +960,7 @@ orang lain).
   ada: `terbit.py periksa` (hanya membaca), lalu satu posting DRAF TikTok.
 - Jalur Telegram (dengan baris Source) belum teruji.
 
-## 3 Okt — keadaan setelah user mengubah pengaturan
+## 2 Okt (pagi) — keadaan setelah user mengubah pengaturan
 
 - `.env` repo sudah memakai rantai hidup (`space-bunny-alpha` + cadangan); `cek_kuota.py`: model utama
   menjawab, `bisa_jalan: true`. Catatan "`.env` masih rantai mati" di atas tidak berlaku lagi.
