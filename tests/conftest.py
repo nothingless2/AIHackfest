@@ -30,8 +30,10 @@ for _d in (SCRIPTS_DIR, RENDER_DIR):
 # Dikosongkan SEBELUM modul test (dan common.py) diimpor. Anak proses yang di-spawn
 # test juga mewarisi os.environ ini, jadi mereka ikut aman.
 # ALLOWED_CHAT_IDS ikut dikosongkan supaya daftar chat ASLI di .env tidak pernah
-# mempengaruhi hasil test. Kosong = gagal-tertutup, jadi test yang memang perlu
-# lolos allowlist harus menyetelnya sendiri secara eksplisit.
+# mempengaruhi hasil test. CATATAN 3 Okt: tidak ada lagi kode produksi yang MEMBACA
+# variabel ini (gerbangnya dibuang, lihat scripts/hermes_render.py:499-503), jadi
+# pengosongan ini kini hanya jaring pengaman untuk gerbang pengganti nanti --
+# bukan bukti bahwa ada pembatasan akses yang sedang ditegakkan.
 _TELEGRAM_ENV_KEYS = (
     "TELEGRAM_BOT_TOKEN",
     "TELEGRAM_CHAT_ID",
