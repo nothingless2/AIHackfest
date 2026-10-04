@@ -1,0 +1,49 @@
+# Versi PERSIS yang lolos suite penuh di image Docker (Ubuntu 22.04, Python 3.10), 3 Okt 2026.
+# Dibuat dari venv container (pip freeze --all) ditambah httpx>=0.27 (lihat requirements.txt).
+# deploy/bootstrap.sh memakai berkas ini bila ada. Perbarui dengan sengaja, bukan otomatis:
+#   docker run --rm klipa:local /opt/klipa-venv/bin/pip freeze --all
+aiohappyeyeballs==2.7.1
+aiohttp==3.14.3
+aiosignal==1.4.0
+annotated-types==0.8.0
+anyio==4.15.1
+async-timeout==5.0.1
+attrs==26.1.0
+certifi==2026.7.22
+decorator==5.3.1
+edge-tts==7.2.8
+exceptiongroup==1.3.1
+frozenlist==1.8.0
+h11==0.16.0
+httpcore==1.0.9
+httpcore2==2.13.1
+httpx==0.28.1
+httpx2==2.13.1
+idna==3.20
+ImageIO==2.38.0
+imageio-ffmpeg==0.6.0
+iniconfig==2.3.0
+jiter==0.17.0
+moviepy==2.2.1
+multidict==6.9.1
+numpy==2.2.6
+openai==3.24.0
+opencv-python-headless==4.14.0.94
+packaging==26.3
+pillow==11.3.0
+pluggy==1.6.0
+proglog==0.1.12
+propcache==0.5.4
+pydantic==2.13.5
+pydantic_core==2.46.5
+Pygments==2.21.0
+pytest==9.1.1
+python-dotenv==1.2.4
+sniffio==1.3.1
+tabulate==0.10.0
+tomli==2.4.1
+tqdm==4.70.1
+truststore==0.10.4
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+yarl==1.25.1

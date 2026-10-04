@@ -1,0 +1,11 @@
+# Konteks build hanya berisi kode. Rahasia dan data pengguna TIDAK boleh ikut masuk image.
+.git
+.env
+.env.*
+!.env.example
+workspace
+**/node_modules
+**/__pycache__
+.pytest_cache
+remotion/.bundle-cache
+*.log

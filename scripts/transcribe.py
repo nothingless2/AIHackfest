@@ -95,11 +95,13 @@ TRANSCRIBE_MAX_SECONDS = int(os.getenv("TRANSCRIBE_MAX_SECONDS", "600"))
 #   dengan prompt: "dan ketika semua lead masuk"
 # `language` TIDAK dipaksa -- diuji tidak menambah apa pun, dan memaksanya justru
 # berisiko untuk bahan yang campur dua bahasa.
-TRANSCRIBE_VOCAB = os.getenv(
-    "TRANSCRIBE_VOCAB",
+# "or", bukan argumen default getenv: .env.example menulis TRANSCRIBE_VOCAB= kosong, dan getenv(k, default)
+# mengembalikan "" (BUKAN default) untuk nilai kosong -> kosakata bawaan hilang diam-diam dan
+# "leads" kembali ditranskrip "lid" (terukur 3 Okt: 2 tes test_transcribe gagal di image Docker).
+TRANSCRIBE_VOCAB = os.getenv("TRANSCRIBE_VOCAB") or (
     "Istilah yang sering dipakai: leads, listing, website, spreadsheet, follow up, "
     "closing, database, CRM, marketing, konten, brand, engagement, konversi, "
-    "landing page, e-commerce, digital, online, offline, target, budget.",
+    "landing page, e-commerce, digital, online, offline, target, budget."
 )
 # Batas prompt Whisper ~224 token; dipotong aman jauh di bawahnya.
 TRANSCRIBE_PROMPT_MAX_CHARS = 700

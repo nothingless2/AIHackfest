@@ -8,3 +8,6 @@ pytest>=7.0
 # Deteksi wajah (scripts/wajah.py): pusat zoom punch-in, posisi kartu logo, pilihan frame cover.
 # Dikunci ke 4.x: 5.0 mengubah paket model Haar yang dipakai di sini.
 opencv-python-headless>=4.9,<5
+# Diimpor langsung oleh tests/test_rantai_model.py. openai 3.x tidak lagi membawa httpx (memakai httpx2),
+# jadi tanpa baris ini tes gagal dikumpulkan di lingkungan baru.
+httpx>=0.27
