@@ -17,8 +17,9 @@ if (!masukan) {
   process.exit(2);
 }
 const {props, pekerjaan, komposisi = 'TextOverlay'} = JSON.parse(fs.readFileSync(masukan, 'utf8'));
+const isWin = process.platform === "win32";
 const chromium = process.env.REMOTION_CHROMIUM
-  || '/root/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell';
+  || (isWin ? undefined : '/root/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell');
 
 // Bundel di-cache per isi src/ (bundle ~4 dtk; tidak perlu diulang tiap render).
 const cacheDir = path.join(DIR, '.bundle-cache');
@@ -33,8 +34,10 @@ if (!fs.existsSync(penanda) || fs.readFileSync(penanda, 'utf8') !== sidik) {
 }
 
 const t0 = Date.now();
-const browser = await openBrowser('chrome', {browserExecutable: chromium,
-  chromiumOptions: {gl: 'swangle'}});
+const opts = { chromiumOptions: isWin ? {} : {gl: 'swangle'} };
+if (chromium) opts.browserExecutable = chromium;
+
+const browser = await openBrowser('chrome', opts);
 try {
   const composition = await selectComposition({serveUrl: cacheDir, id: komposisi,
     inputProps: props, puppeteerInstance: browser});
@@ -49,6 +52,9 @@ try {
       await renderFrames({...umum, imageFormat: 'png', outputDir: p.out, frameRange: [p.dari, p.sampai],
         onStart: () => {}, onFrameUpdate: () => {},
         concurrency: Number(process.env.REMOTION_CONCURRENCY || 4)});
+    } else if (p.jenis === 'mp4') {
+      await renderMedia({...umum, codec: 'h264', imageFormat: 'jpeg',
+        outputLocation: p.out, concurrency: Number(process.env.REMOTION_CONCURRENCY || 4)});
     } else {
       await renderMedia({...umum, codec: 'prores', proResProfile: '4444', imageFormat: 'png',
         pixelFormat: 'yuva444p10le', muted: true, frameRange: [p.dari, p.sampai],

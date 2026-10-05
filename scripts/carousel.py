@@ -421,7 +421,7 @@ def terapkan_gaya(preset, *, platform=None, jumlah=None, stok=None, latar=None, 
 
 
 def buat(*, chat_id, teks="", dari_run=None, foto=(), stiker=(), stok=None, latar=None, nama_gaya=None, platform=None,
-         jumlah=None, ikon=None, watermark=None, chat=None):
+         jumlah=None, ikon=None, watermark=None, video=False, chat=None):
     """Bangun carousel; kembalikan dict hasil (ok True) atau melempar CarouselError."""
     import overlay_remotion as orr
     from PIL import Image
@@ -528,14 +528,23 @@ def buat(*, chat_id, teks="", dari_run=None, foto=(), stiker=(), stok=None, lata
                 png, png_teks = orr.render_carousel(props_slide, kotak, preset["tema"], plat, W, H,
                                                     os.path.join(kerja, plat), watermark=atur["watermark"])
                 jalur, qa = [], []
-                for i, (a, b) in enumerate(zip(png, png_teks)):
-                    penuh = np.asarray(Image.open(a).convert("RGB"))
-                    lapis = np.asarray(Image.open(b).convert("RGBA"))
-                    ukur = periksa_slide(penuh, lapis, kotak[i], plat, wajah[i])
-                    qa.append({"slide": i + 1, **ukur})
-                    tujuan = os.path.join(keluar, f"{plat}_{i + 1:02d}.jpg")
-                    Image.fromarray(penuh).save(tujuan, "JPEG", quality=92)
+                if video:
+                    # Render MP4 if video is True
+                    mp4 = orr.render_carousel_video(props_slide, kotak, preset["tema"], plat, W, H,
+                                                    os.path.join(kerja, plat), watermark=atur["watermark"])
+                    import shutil
+                    tujuan = os.path.join(keluar, f"{plat}_video.mp4")
+                    shutil.copyfile(mp4, tujuan)
                     jalur.append(tujuan)
+                else:
+                    for i, (a, b) in enumerate(zip(png, png_teks)):
+                        penuh = np.asarray(Image.open(a).convert("RGB"))
+                        lapis = np.asarray(Image.open(b).convert("RGBA"))
+                        ukur = periksa_slide(penuh, lapis, kotak[i], plat, wajah[i])
+                        qa.append({"slide": i + 1, **ukur})
+                        tujuan = os.path.join(keluar, f"{plat}_{i + 1:02d}.jpg")
+                        Image.fromarray(penuh).save(tujuan, "JPEG", quality=92)
+                        jalur.append(tujuan)
                 hasil["slide"][plat] = jalur
                 hasil["qa"][plat] = {"lolos": not any(q["masalah"] for q in qa), "per_slide": qa}
     except FileLockBusyError as e:
@@ -569,10 +578,11 @@ def main(argv=None):
     ap.add_argument("--platform", default=None, choices=["ig", "tiktok", "keduanya"])
     ap.add_argument("--jumlah", type=int, default=None)
     ap.add_argument("--watermark", default=None, help="Teks watermark pendek, misal '@username'.")
+    ap.add_argument("--video", action="store_true", help="Render hasil sebagai animasi video MP4.")
     a = ap.parse_args(argv)
     try:
         out = buat(chat_id=a.chat_id, teks=a.teks, dari_run=a.dari_run, foto=a.foto, stiker=a.stiker, stok=a.stok, latar=a.latar,
-                   nama_gaya=a.gaya, platform=a.platform, jumlah=a.jumlah, watermark=a.watermark)
+                   nama_gaya=a.gaya, platform=a.platform, jumlah=a.jumlah, watermark=a.watermark, video=a.video)
     except CarouselError as e:
         out = {"ok": False, "kode": e.kode, "alasan": str(e)}
     except gaya.GayaError as e:

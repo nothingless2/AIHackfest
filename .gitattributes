@@ -1,6 +1,2 @@
-# Skrip shell harus LF di semua mesin. Windows (core.autocrlf=true) mengubahnya jadi CRLF
-# dan skripnya gagal di Linux (bad interpreter / carriage return di akhir baris).
 *.sh text eol=lf
-
-# .env.example disalin jadi .env; CRLF di sana ikut jadi isi nilai dan merusak pembacaan oleh skrip.
 .env.example text eol=lf

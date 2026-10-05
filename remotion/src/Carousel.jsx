@@ -1,5 +1,5 @@
 import React from 'react';
-import {AbsoluteFill, Img, useCurrentFrame, useVideoConfig, delayRender, continueRender} from 'remotion';
+import {AbsoluteFill, Img, useCurrentFrame, useVideoConfig, delayRender, continueRender, spring} from 'remotion';
 import {bacaTema, gradien, muatFont} from './tema.js';
 import {susunBaris} from './layout.js';
 
@@ -107,7 +107,28 @@ const Paragraf = ({teks, ukuran, warna, berat = 500}) => (
 // meluap ke atas wajah (terukur 1 Okt: judul hook menimpa dagu di slide berfoto).
 const KEBUTUHAN = {hook: 0.66, isi: 0.62, daftar: 0.78, statistik: 0.5, kutipan: 0.62, cta: 0.6};
 
-const Slide = ({s, i, n, W, H, F, p, kotak, hanyaTeks, platform, watermark}) => {
+const Animasi = ({children, delay = 0, aktif = false}) => {
+  const frame = useCurrentFrame();
+  const {fps} = useVideoConfig();
+  if (!aktif) return <>{children}</>;
+  
+  const v = spring({
+    frame: frame - delay,
+    fps,
+    config: {damping: 14, stiffness: 100},
+  });
+  
+  return (
+    <div style={{
+      opacity: v,
+      transform: `translateY(${(1 - v) * 30}px)`
+    }}>
+      {children}
+    </div>
+  );
+};
+
+const Slide = ({s, i, n, W, H, F, p, kotak, hanyaTeks, platform, watermark, animasiVideo}) => {
   const lebar = kotak.w;
   const skala = Math.min(1, kotak.h / (W * (KEBUTUHAN[s.jenis] || 0.62)));
   const besar = W * (s.jenis === 'hook' ? 0.13 : 0.095) * skala;
@@ -128,33 +149,49 @@ const Slide = ({s, i, n, W, H, F, p, kotak, hanyaTeks, platform, watermark}) => 
   if (s.jenis === 'hook') {
     badan = (
       <>
-        {lencana}
-        <Judul teks={s.judul} sorot={s.sorot} F={F} p={p} lebar={lebar} maks={besar} />
-        {s.sub ? <div style={{marginTop: H * 0.025}}><Paragraf teks={s.sub} ukuran={isi * 1.05} warna={p.sub} /></div> : null}
+        <Animasi aktif={animasiVideo} delay={0}>{lencana}</Animasi>
+        <Animasi aktif={animasiVideo} delay={10}>
+          <Judul teks={s.judul} sorot={s.sorot} F={F} p={p} lebar={lebar} maks={besar} />
+        </Animasi>
+        {s.sub ? (
+          <Animasi aktif={animasiVideo} delay={25}>
+            <div style={{marginTop: H * 0.025}}><Paragraf teks={s.sub} ukuran={isi * 1.05} warna={p.sub} /></div>
+          </Animasi>
+        ) : null}
       </>
     );
   } else if (s.jenis === 'isi') {
     badan = (
       <>
         {/* Ikon menggantikan garis aksen: dua-duanya penanda pembuka yang sama. */}
-        {lencana || <div style={{width: W * 0.09, height: W * 0.014, borderRadius: W * 0.007, background: p.aksen,
-          marginBottom: H * 0.025}} />}
-        <Judul teks={s.judul} F={F} p={p} lebar={lebar} maks={besar} />
-        <div style={{marginTop: H * 0.025}}><Paragraf teks={s.isi} ukuran={isi} warna={p.sub} /></div>
+        <Animasi aktif={animasiVideo} delay={0}>
+          {lencana || <div style={{width: W * 0.09, height: W * 0.014, borderRadius: W * 0.007, background: p.aksen,
+            marginBottom: H * 0.025}} />}
+        </Animasi>
+        <Animasi aktif={animasiVideo} delay={10}>
+          <Judul teks={s.judul} F={F} p={p} lebar={lebar} maks={besar} />
+        </Animasi>
+        <Animasi aktif={animasiVideo} delay={20}>
+          <div style={{marginTop: H * 0.025}}><Paragraf teks={s.isi} ukuran={isi} warna={p.sub} /></div>
+        </Animasi>
       </>
     );
   } else if (s.jenis === 'daftar') {
     badan = (
       <>
-        <Judul teks={s.judul} F={F} p={p} lebar={lebar} maks={besar} />
+        <Animasi aktif={animasiVideo} delay={0}>
+          <Judul teks={s.judul} F={F} p={p} lebar={lebar} maks={besar} />
+        </Animasi>
         <div style={{marginTop: H * 0.03, display: 'flex', flexDirection: 'column', gap: H * 0.022}}>
           {s.butir.map((b, k) => (
-            <div key={k} style={{display: 'flex', alignItems: 'flex-start', gap: W * 0.035}}>
-              <div style={{flex: 'none', width: isi * 1.7, height: isi * 1.7, borderRadius: '50%', background: p.aksen,
-                color: '#FFFFFF', fontFamily: ISI, fontWeight: 800, fontSize: isi * 0.9, display: 'flex',
-                alignItems: 'center', justifyContent: 'center'}}>{k + 1}</div>
-              <Paragraf teks={b} ukuran={isi} warna={p.teks} berat={600} />
-            </div>
+            <Animasi aktif={animasiVideo} delay={15 + (k * 10)} key={k}>
+              <div style={{display: 'flex', alignItems: 'flex-start', gap: W * 0.035}}>
+                <div style={{flex: 'none', width: isi * 1.7, height: isi * 1.7, borderRadius: '50%', background: p.aksen,
+                  color: '#FFFFFF', fontFamily: ISI, fontWeight: 800, fontSize: isi * 0.9, display: 'flex',
+                  alignItems: 'center', justifyContent: 'center'}}>{k + 1}</div>
+                <Paragraf teks={b} ukuran={isi} warna={p.teks} berat={600} />
+              </div>
+            </Animasi>
           ))}
         </div>
       </>
@@ -162,29 +199,41 @@ const Slide = ({s, i, n, W, H, F, p, kotak, hanyaTeks, platform, watermark}) => 
   } else if (s.jenis === 'statistik') {
     badan = (
       <>
-        <div style={{fontFamily: `"${F.family}", sans-serif`, fontWeight: F.weight, fontSize: W * 0.26 * skala, lineHeight: 1,
-          backgroundImage: p.kunci, WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent',
-          whiteSpace: 'nowrap'}}>{s.angka}</div>
-        <div style={{marginTop: H * 0.025}}><Paragraf teks={s.label} ukuran={isi * 1.1} warna={p.teks} berat={600} /></div>
+        <Animasi aktif={animasiVideo} delay={0}>
+          <div style={{fontFamily: `"${F.family}", sans-serif`, fontWeight: F.weight, fontSize: W * 0.26 * skala, lineHeight: 1,
+            backgroundImage: p.kunci, WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent',
+            whiteSpace: 'nowrap'}}>{s.angka}</div>
+        </Animasi>
+        <Animasi aktif={animasiVideo} delay={15}>
+          <div style={{marginTop: H * 0.025}}><Paragraf teks={s.label} ukuran={isi * 1.1} warna={p.teks} berat={600} /></div>
+        </Animasi>
       </>
     );
   } else if (s.jenis === 'kutipan') {
     badan = (
-      <>
+      <Animasi aktif={animasiVideo} delay={0}>
         <div style={{fontFamily: `"${F.family}", serif`, fontWeight: F.weight, fontSize: W * 0.3 * skala, lineHeight: 0.75,
           height: W * 0.16 * skala, color: p.aksen}}>“</div>
         <Judul teks={s.teks} F={F} p={p} lebar={lebar} maks={W * 0.075 * skala} />
         {s.oleh ? <div style={{marginTop: H * 0.025}}><Paragraf teks={`— ${s.oleh}`} ukuran={isi * 0.85} warna={p.sub} /></div> : null}
-      </>
+      </Animasi>
     );
   } else {
     badan = (
       <>
-        <Judul teks={s.judul} F={F} p={p} lebar={lebar} maks={besar} />
-        {s.sub ? <div style={{marginTop: H * 0.022}}><Paragraf teks={s.sub} ukuran={isi} warna={p.sub} /></div> : null}
-        <div style={{marginTop: H * 0.035, alignSelf: 'flex-start', padding: `${H * 0.014}px ${W * 0.05}px`,
-          borderRadius: p.r(999), background: `linear-gradient(135deg, ${p.aksen}, ${p.aksen2})`, color: '#FFFFFF',
-          fontFamily: ISI, fontWeight: 800, fontSize: isi * 0.95}}>{s.tombol || 'Simpan & bagikan'}</div>
+        <Animasi aktif={animasiVideo} delay={0}>
+          <Judul teks={s.judul} F={F} p={p} lebar={lebar} maks={besar} />
+        </Animasi>
+        {s.sub ? (
+          <Animasi aktif={animasiVideo} delay={10}>
+            <div style={{marginTop: H * 0.022}}><Paragraf teks={s.sub} ukuran={isi} warna={p.sub} /></div>
+          </Animasi>
+        ) : null}
+        <Animasi aktif={animasiVideo} delay={20}>
+          <div style={{marginTop: H * 0.035, alignSelf: 'flex-start', padding: `${H * 0.014}px ${W * 0.05}px`,
+            borderRadius: p.r(999), background: `linear-gradient(135deg, ${p.aksen}, ${p.aksen2})`, color: '#FFFFFF',
+            fontFamily: ISI, fontWeight: 800, fontSize: isi * 0.95}}>{s.tombol || 'Simpan & bagikan'}</div>
+        </Animasi>
       </>
     );
   }
@@ -236,7 +285,7 @@ const Slide = ({s, i, n, W, H, F, p, kotak, hanyaTeks, platform, watermark}) => 
   );
 };
 
-export const Carousel = ({slides, kotak, tema, hanyaTeks = false, platform = 'ig', watermark}) => {
+export const Carousel = ({slides, kotak, tema, hanyaTeks = false, platform = 'ig', watermark, slideIndex}) => {
   const frame = useCurrentFrame();
   const {width, height} = useVideoConfig();
   const T = bacaTema(tema);
@@ -248,7 +297,8 @@ export const Carousel = ({slides, kotak, tema, hanyaTeks = false, platform = 'ig
     muatFont(F).then(() => { setSiap(true); continueRender(h); }).catch((e) => { throw e; });
   }, []);
   if (!siap) return null;
-  const i = Math.min(frame, slides.length - 1);
+  const i = slideIndex !== undefined ? slideIndex : Math.min(frame, slides.length - 1);
   return <Slide s={slides[i]} i={i} n={slides.length} W={width} H={height} F={F} p={p}
-    kotak={kotak[i]} hanyaTeks={hanyaTeks} platform={platform} watermark={watermark} />;
+    kotak={kotak[i]} hanyaTeks={hanyaTeks} platform={platform} watermark={watermark} 
+    animasiVideo={slideIndex !== undefined} />;
 };

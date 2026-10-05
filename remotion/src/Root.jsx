@@ -7,6 +7,7 @@ import {Panggung} from './Panggung.jsx';
 import {Sampul} from './Sampul.jsx';
 import {PratinjauGaya} from './PratinjauGaya.jsx';
 import {Carousel} from './Carousel.jsx';
+import {CarouselVideo} from './CarouselVideo.jsx';
 
 const metadata = ({props}) => ({
   durationInFrames: Math.max(2, Math.ceil((props.durasi || 2) * (props.fps || 24))),
@@ -85,6 +86,17 @@ export const Root = () => (
       durationInFrames={2}
       defaultProps={{slides: [{jenis: 'hook', judul: 'Contoh carousel'}],
         kotak: [{x: 76, y: 148, w: 928, h: 1094, zona: 'tengah'}], tema: {}, platform: 'ig'}}
+      calculateMetadata={metadata}
+    />
+    <Composition
+      id="CarouselVideo"
+      component={CarouselVideo}
+      width={1080}
+      height={1920}
+      fps={24}
+      durationInFrames={120}
+      defaultProps={{slides: [{jenis: 'hook', judul: 'Contoh carousel'}],
+        kotak: [{x: 76, y: 148, w: 928, h: 1094, zona: 'tengah'}], tema: {}, platform: 'tiktok'}}
       calculateMetadata={metadata}
     />
   </>

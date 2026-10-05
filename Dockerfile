@@ -34,7 +34,6 @@ COPY . /opt/klipa
 RUN { [ -L remotion/public/fonts ] || { rm -rf remotion/public/fonts && ln -s ../../assets/fonts remotion/public/fonts; }; } \
  && ln -sfn /opt/klipa /root/AIHackfest
 
-# python3 di PATH harus venv proyek.
 ENV PATH="/opt/klipa-venv/bin:/opt/node/bin:${PATH}"
 
 CMD ["bash", "deploy/verify.sh"]

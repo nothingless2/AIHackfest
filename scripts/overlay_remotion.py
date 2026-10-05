@@ -479,3 +479,22 @@ def render_carousel(slides, kotak, tema, platform, lebar, tinggi, folder, waterm
             raise OverlayError(f"slide carousel {len(png)} dari {n}")
         hasil.append(png)
     return hasil[0], hasil[1]
+
+def render_carousel_video(slides, kotak, tema, platform, lebar, tinggi, folder, watermark=None):
+    """Render CarouselVideo menjadi satu file MP4 animasi."""
+    fps = 24
+    durasi_per_slide = 3
+    n = len(slides)
+    total_frames = n * durasi_per_slide * fps
+    
+    props = {"lebar": lebar, "tinggi": tinggi, "fps": fps, "durasi": total_frames / fps, "slides": slides,
+             "kotak": kotak, "tema": tema or {}, "platform": platform, "hanyaTeks": False,
+             "watermark": watermark or None}
+    
+    out_mp4 = os.path.join(folder, "carousel_animasi.mp4")
+    _jalankan_node(props, [{"jenis": "mp4", "dari": 0, "sampai": total_frames - 1, "out_dir": out_mp4}],
+                   folder, komposisi="CarouselVideo", batas=CAROUSEL_BATAS_DETIK * 2)
+    
+    if not os.path.exists(out_mp4):
+        raise OverlayError("Gagal merender video carousel")
+    return out_mp4
