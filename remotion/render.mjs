@@ -18,8 +18,7 @@ if (!masukan) {
 }
 const {props, pekerjaan, komposisi = 'TextOverlay'} = JSON.parse(fs.readFileSync(masukan, 'utf8'));
 const isWin = process.platform === "win32";
-const chromium = process.env.REMOTION_CHROMIUM
-  || (isWin ? undefined : '/root/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell');
+const chromium = process.env.REMOTION_CHROMIUM;
 
 // Bundel di-cache per isi src/ (bundle ~4 dtk; tidak perlu diulang tiap render).
 const cacheDir = path.join(DIR, '.bundle-cache');
