@@ -1,4 +1,3 @@
-# Konteks build hanya berisi kode. Rahasia dan data pengguna TIDAK boleh ikut masuk image.
 .git
 .env
 .env.*

@@ -29,6 +29,7 @@ from overlay_remotion import animasi_diminta
 from common import (
     BRIEF_PATH,
     brief_path_for_run,
+    jalur_kirim,
     write_json,
     draft_thumb_path_for_run,
     draft_video_path_for_run,
@@ -362,6 +363,7 @@ def _selesai_draf(run_id, chat_id, run_prefix, nama_bahan, args, media_paths, ga
         "gaya_tampilan": gaya_tampilan,
         "biaya": ringkasan_biaya(run_id),
     }
+    hasil["kirim"] = jalur_kirim(hasil)
     print(json.dumps(hasil, ensure_ascii=False))
     log_event("draft_ready", run_id, chat_id=chat_id)
     return 0
@@ -631,6 +633,9 @@ def main(argv=None):
     gaya.pasang(preset_gaya, args)
     kamus.pasang(chat_id or "")
     info_gaya = {"nama": preset_gaya["nama"], "label": preset_gaya["label"], "sumber": sumber_gaya}
+    audio_gaya = gaya.audio_terpasang(preset_gaya, args)
+    if audio_gaya:
+        info_gaya["audio"] = audio_gaya       # hanya gaya buatan user yang mengatur audio
 
     try:
         resolve_canvas()
@@ -721,6 +726,7 @@ def main(argv=None):
         if args.ganti_musik and lama and baru == lama:
             hasil["perubahan"] = [p for p in perubahan if p != "musik diganti"] + [
                 "musik TIDAK berubah (tidak ada lagu lain yang cocok)"]
+    hasil["kirim"] = jalur_kirim(hasil)
     print(json.dumps(hasil, ensure_ascii=False))
     log_event("delivered", run_id, chat_id=chat_id)
     return 0

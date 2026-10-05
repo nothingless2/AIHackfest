@@ -457,14 +457,18 @@ def render_pratinjau_gaya(presets, out_jpg):
 CAROUSEL_BATAS_DETIK = int(os.getenv("CAROUSEL_TIMEOUT", "240"))
 
 
-def render_carousel(slides, kotak, tema, platform, lebar, tinggi, folder):
+def render_carousel(slides, kotak, tema, platform, lebar, tinggi, folder, watermark=None):
     """Semua slide dalam SATU sesi Chromium per lapisan: (png_penuh, png_lapisan_teks), terurut.
-    Lapisan teks (latar transparan) hanya untuk diukur scripts/carousel.periksa_slide."""
+    Lapisan teks (latar transparan) hanya untuk diukur scripts/carousel.periksa_slide.
+
+    Watermark SENGAJA tidak ikut lapisan teks: ia di luar kotak aman dan sudah diredupkan, jadi
+    kalau diukur ia akan selalu dilaporkan "teks keluar dari kotak aman" dan QA gagal palsu."""
     n = len(slides)
     hasil = []
     for nama, hanya_teks in (("penuh", False), ("teks", True)):
         props = {"lebar": lebar, "tinggi": tinggi, "fps": 24, "durasi": n / 24, "slides": slides,
-                 "kotak": kotak, "tema": tema or {}, "platform": platform, "hanyaTeks": hanya_teks}
+                 "kotak": kotak, "tema": tema or {}, "platform": platform, "hanyaTeks": hanya_teks,
+                 "watermark": None if hanya_teks else (watermark or None)}
         sub = os.path.join(folder, nama)
         os.makedirs(sub, exist_ok=True)
         out_dir = os.path.join(sub, "png")

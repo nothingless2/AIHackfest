@@ -20,6 +20,10 @@ CLI untuk agent (satu baris JSON):
   python3 scripts/gaya.py pakai --chat-id "<label chat>" --gaya hype
   python3 scripts/gaya.py lihat --chat-id "<label chat>"
   python3 scripts/gaya.py lupakan --chat-id "<label chat>"
+  python3 scripts/gaya.py pilihan
+  python3 scripts/gaya.py buat --chat-id "<label chat>" --nama kopi-senja [--dasar hype] [--aksen "#B45309"] \\
+      [--subtitle-style kata] [--musik on] [--suasana-musik tenang] [--carousel-jumlah 7] ...
+  python3 scripts/gaya.py hapus --chat-id "<label chat>" --nama kopi-senja
 """
 
 import argparse
@@ -32,7 +36,7 @@ import shutil
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import PROJECT_ROOT, STATE_DIR, read_json, write_json  # noqa: E402
+from common import PROJECT_ROOT, STATE_DIR, jalur_kirim, read_json, write_json  # noqa: E402
 from overlay_remotion import ANIMASI  # noqa: E402
 from style import COLOR_FILTERS, TEXT_FONTS, TEXT_POSITIONS, StyleError  # noqa: E402
 
@@ -68,10 +72,36 @@ EDITING = {
     "logo_merek": ("LOGO_MEREK", ("on", "off")),
     "cover": ("COVER", ("desain", "frame")),
     "motion": ("MOTION_GRAPHIC", ("sedang", "mati")),
+    "potong_pengisi": ("POTONG_PENGISI", ("on", "off")),
 }
 # Suasana musik SENGAJA tidak termasuk: ia bergantung pada isi konten dan isi pustaka musik, bukan
 # tampilan. Uji nyata 1 Okt: preset "hype" (energik) membuat render DITOLAK karena pustaka hanya
 # punya lagu tenang, dan di revisi ia akan mengganti lagu video yang user cuma minta ganti gayanya.
+#
+# Gaya BUATAN USER boleh mengatur audio (bagian `audio`, bukan `editing`), karena dua sebab di atas
+# ditangani di sana: suasana dicek terhadap pustaka SAAT gaya disimpan (ditolak di depan, bukan saat
+# render), dan di revisi suasana gaya tidak dipasang kecuali user memang minta ganti lagu.
+MOODS = ("tenang", "santai", "upbeat", "energik")     # = music_mood.MOODS (dijaga tes; modul itu butuh numpy)
+# Level musik = berapa dB di bawah ucapan. 10 adalah bawaan yang DIUKUR (lihat music.py); 14 dan 7
+# adalah langkah di sekitarnya dan BELUM diuji dengar -- music.py mencatat 18 dB sudah tak terdengar.
+LEVEL_MUSIK = {"pelan": 14.0, "sedang": 10.0, "keras": 7.0}
+# kunci -> (env, nilai sah, dest flag hermes_render yang mengalahkannya | None)
+AUDIO = {
+    "musik": ("CONTENT_FACTORY_MUSIC", ("on", "off"), "music"),
+    "suasana_musik": ("CONTENT_FACTORY_MUSIC_MOOD", MOODS, "music_mood"),
+    "level_musik": ("MUSIC_BELOW_SPEECH_DB", tuple(LEVEL_MUSIK), None),
+    "bersih_suara": ("BERSIH_SUARA", ("on", "off"), "bersih_suara"),
+    "suara_narasi": ("TTS_VOICE_GENDER", ("pria", "wanita"), "voice"),
+}
+# Bawaan carousel untuk gaya ini. Batas slide = carousel.SLIDE_MIN/MAX (dijaga tes; carousel
+# mengimpor modul ini, jadi tidak bisa diimpor balik).
+CAROUSEL_SLIDE = (3, 10)
+CAROUSEL = {
+    "platform": ("ig", "tiktok", "keduanya"),
+    "latar": ("stok", "polos"),
+    "foto_stok": ("on", "off"),
+}
+MAKS_GAYA_SAYA = 12          # per pemilik: profil tetap kecil dan daftar tetap terbaca di chat
 
 
 class GayaError(StyleError):
@@ -165,6 +195,53 @@ def validasi_editing(editing):
     return hasil
 
 
+def validasi_audio(audio):
+    if audio in (None, {}):
+        return {}
+    if not isinstance(audio, dict):
+        raise GayaError("audio harus objek")
+    hasil = {}
+    for k, v in audio.items():
+        if k not in AUDIO:
+            raise GayaError(f"pengaturan audio tidak dikenal: {k}")
+        if v not in AUDIO[k][1]:
+            raise GayaError(f"audio.{k} {v!r} tidak sah. Pilihan: {', '.join(AUDIO[k][1])}")
+        hasil[k] = v
+    return hasil
+
+
+def validasi_carousel(carousel):
+    if carousel in (None, {}):
+        return {}
+    if not isinstance(carousel, dict):
+        raise GayaError("carousel harus objek")
+    hasil = {}
+    for k, v in carousel.items():
+        if k == "jumlah":
+            if isinstance(v, bool) or not isinstance(v, int) or not CAROUSEL_SLIDE[0] <= v <= CAROUSEL_SLIDE[1]:
+                raise GayaError(f"carousel.jumlah harus bilangan {CAROUSEL_SLIDE[0]}-{CAROUSEL_SLIDE[1]}")
+        elif k not in CAROUSEL:
+            raise GayaError(f"pengaturan carousel tidak dikenal: {k}")
+        elif v not in CAROUSEL[k]:
+            raise GayaError(f"carousel.{k} {v!r} tidak sah. Pilihan: {', '.join(CAROUSEL[k])}")
+        hasil[k] = v
+    return hasil
+
+
+def _cek_suasana_musik(suasana):
+    """Suasana gaya harus ADA di pustaka saat gaya disimpan: ditolak di sini dengan alasan yang bisa
+    dibaca user, bukan nanti saat render (uji 1 Okt). Aturan cocoknya sama dengan music.pick_track."""
+    import music
+    tracks = music.list_tracks()
+    if not tracks:
+        raise GayaError("Pustaka musik masih kosong, jadi suasana musik belum bisa dipasang ke gaya. "
+                        "Tambahkan lagu ke pustaka dulu.")
+    if any(suasana in os.path.basename(t).lower() for t in tracks) or music._cocok_lewat_analisis(tracks, suasana):
+        return
+    raise GayaError(f"Pustaka musik belum punya lagu bernuansa {suasana}. Tersedia: "
+                    f"{', '.join(os.path.basename(t) for t in tracks[:8])}.")
+
+
 def validasi(data, nama):
     if not isinstance(data, dict):
         raise GayaError(f"preset {nama!r} bukan objek")
@@ -221,11 +298,12 @@ def profil(pemilik):
 
 
 def simpan_gaya(pemilik, nama):
-    if str(nama or "").strip().lower() == KUSTOM:
-        # Kembali ke gaya kustom yang sudah pernah dibuat (bukan membuat baru).
-        data = profil(pemilik)
-        _preset_kustom(data)
-        data.update(gaya=KUSTOM, diubah=dt.datetime.now(dt.timezone.utc).isoformat())
+    n = str(nama or "").strip().lower()
+    data = profil(pemilik)
+    if n == KUSTOM or n in _milik(data):
+        # Kembali ke gaya buatan sendiri yang sudah pernah dibuat (bukan membuat baru).
+        _preset_milik(data, n)
+        data.update(gaya=n, diubah=dt.datetime.now(dt.timezone.utc).isoformat())
         write_json(_berkas_profil(pemilik), data)
         return data
     preset = muat(nama)
@@ -275,55 +353,157 @@ def _gabung_tema(dasar, ubahan):
     return hasil
 
 
-def _preset_kustom(data):
-    """Preset dari catatan kustom di profil: preset dasar + ubahan user, divalidasi ULANG."""
-    k = data.get("kustom")
+def _milik(data):
+    """Nama gaya buatan pemilik profil ini (tanpa `kustom` lama, yang punya kuncinya sendiri)."""
+    g = data.get("gaya_saya")
+    return sorted(n for n in g if _NAMA.match(str(n))) if isinstance(g, dict) else []
+
+
+def _catatan(data, nama):
+    return data.get("kustom") if nama == KUSTOM else (data.get("gaya_saya") or {}).get(nama)
+
+
+def _label_milik(nama):
+    return nama.replace("-", " ").replace("_", " ").title()
+
+
+def _preset_milik(data, nama):
+    """Preset dari catatan gaya buatan user: preset dasar + ubahan user, SEMUA bagian divalidasi
+    ULANG (profil adalah berkas di disk; isinya tidak dipercaya begitu saja)."""
+    k = _catatan(data, nama)
     if not isinstance(k, dict):
-        raise GayaError("Chat ini belum punya gaya kustom. Buat dulu (gaya.py kustom).")
+        if nama == KUSTOM:
+            raise GayaError("Chat ini belum punya gaya kustom. Buat dulu (gaya.py kustom).")
+        raise GayaError(f"Chat ini belum punya gaya bernama {nama!r}.")
     dasar = muat(k.get("dasar") or BAWAAN)
     tema = validasi_tema(_gabung_tema(dasar["tema"], k.get("tema") or {}))
-    return {"nama": KUSTOM, "label": f"Kustom (dasar {dasar['label']})", "deskripsi": "Gaya racikanmu sendiri.",
-            "tema": tema, "editing": dasar["editing"], "dasar": dasar["nama"]}
+    editing = validasi_editing({**dasar["editing"], **(k.get("editing") or {})})
+    label = f"Kustom (dasar {dasar['label']})" if nama == KUSTOM else _label_milik(nama)
+    return {"nama": nama, "label": label, "deskripsi": f"Gaya racikanmu sendiri (dasar {dasar['label']}).",
+            "tema": tema, "editing": editing, "audio": validasi_audio(k.get("audio")),
+            "carousel": validasi_carousel(k.get("carousel")), "dasar": dasar["nama"], "milik_sendiri": True}
+
+
+def _preset_kustom(data):
+    return _preset_milik(data, KUSTOM)
+
+
+def _timpa(lama, baru):
+    """Gabung pengaturan datar; nilai None di `baru` MENGHAPUS kuncinya (kembali ke gaya dasar)."""
+    hasil = {**(lama or {}), **(baru or {})}
+    return {k: v for k, v in hasil.items() if v is not None}
+
+
+def simpan_gaya_saya(pemilik, nama, dasar=None, ubahan=None):
+    """Buat atau ubah gaya buatan pemilik, lalu jadikan gayanya. `ubahan` = {tema, editing, audio,
+    carousel}, masing-masing parsial: yang tidak disebut tetap seperti sebelumnya. Di tema,
+    `warna.aksen` saja sudah cukup (pendampingnya diturunkan kode). Tidak sah -> GayaError, profil
+    TIDAK berubah."""
+    if not str(pemilik or "").strip():
+        raise GayaError("pemilik profil tidak diketahui")
+    n = str(nama or "").strip().lower()
+    if not _NAMA.match(n):
+        raise GayaError("Nama gaya harus 2-31 karakter: huruf kecil, angka, '-' atau '_', diawali huruf.")
+    if n != KUSTOM and n in daftar():
+        raise GayaError(f"Nama {n!r} sudah dipakai gaya bawaan. Pilih nama lain.")
+    data = profil(pemilik)
+    lama = _catatan(data, n) or {}
+    if n != KUSTOM and not lama and len(_milik(data)) >= MAKS_GAYA_SAYA:
+        raise GayaError(f"Chat ini sudah punya {MAKS_GAYA_SAYA} gaya buatan sendiri. Hapus salah satu dulu.")
+    # Dasar: yang disebut > dasar gaya ini sebelumnya > preset yang sedang dipakai > bawaan.
+    # Dasar yang disebut atau tersimpan tapi sudah tidak ada -> GayaError (bukan diam-diam ganti dasar).
+    if dasar or lama.get("dasar"):
+        nama_dasar = muat(dasar or lama["dasar"])["nama"]
+    else:
+        aktif = str(data.get("gaya") or "").lower()
+        nama_dasar = aktif if aktif in daftar() else BAWAAN
+    ubahan = dict(ubahan or {})
+    asing = set(ubahan) - {"tema", "editing", "audio", "carousel"}
+    if asing:
+        raise GayaError(f"bagian gaya tidak dikenal: {', '.join(sorted(asing))}")
+    tema = dict(ubahan.get("tema") or {})
+    warna = dict(tema.get("warna") or {})
+    if "aksen" in warna:
+        warna = {**palet_dari_aksen(warna["aksen"]), **warna}
+    catatan = {"dasar": nama_dasar,
+               "tema": _gabung_tema(lama.get("tema") or {}, {**tema, **({"warna": warna} if warna else {})})}
+    for bagian in ("editing", "audio", "carousel"):
+        isi = _timpa(lama.get(bagian), ubahan.get(bagian))
+        if isi:
+            catatan[bagian] = isi
+    preset = _preset_milik({"kustom": catatan} if n == KUSTOM else {"gaya_saya": {n: catatan}}, n)
+    suasana = (ubahan.get("audio") or {}).get("suasana_musik")
+    if suasana:
+        _cek_suasana_musik(suasana)
+    data = {**data, "pemilik": str(pemilik).strip(), "gaya": n,
+            "diubah": dt.datetime.now(dt.timezone.utc).isoformat()}
+    if n == KUSTOM:
+        data["kustom"] = catatan
+    else:
+        data["gaya_saya"] = {**{m: (data.get("gaya_saya") or {})[m] for m in _milik(data)}, n: catatan}
+    write_json(_berkas_profil(pemilik), data)
+    return preset
 
 
 def simpan_kustom(pemilik, dasar=None, ubahan=None):
-    """Simpan gaya kustom pemilik dan jadikan gayanya. `ubahan` = tema parsial; `warna.aksen` saja
-    sudah cukup (pendampingnya diturunkan kode, kecuali disebut sendiri). Tidak sah -> GayaError,
-    profil tidak berubah."""
-    if not str(pemilik or "").strip():
-        raise GayaError("pemilik profil tidak diketahui")
-    lama = profil(pemilik).get("kustom") or {}
-    # Dasar: yang disebut > dasar kustom lama > preset yang sedang dipakai > bawaan.
-    kandidat = dasar or lama.get("dasar") or profil(pemilik).get("gaya")
-    nama_dasar = muat(kandidat if kandidat and str(kandidat).lower() != KUSTOM else BAWAAN)["nama"]
-    ubahan = dict(ubahan or {})
-    warna = dict(ubahan.get("warna") or {})
-    if "aksen" in warna:
-        warna = {**palet_dari_aksen(warna["aksen"]), **warna}
-    tema_baru = _gabung_tema(lama.get("tema") or {}, {**ubahan, **({"warna": warna} if warna else {})})
-    catatan = {"dasar": nama_dasar, "tema": tema_baru}
-    preset = _preset_kustom({"kustom": catatan})          # validasi gabungan (hex, font, kontras)
-    data = {**profil(pemilik), "pemilik": str(pemilik).strip(), "gaya": KUSTOM, "kustom": catatan,
-            "diubah": dt.datetime.now(dt.timezone.utc).isoformat()}
+    """Gaya kustom tanpa nama (satu per chat). `ubahan` = tema parsial."""
+    return simpan_gaya_saya(pemilik, KUSTOM, dasar, {"tema": ubahan or {}})
+
+
+def hapus_gaya_saya(pemilik, nama):
+    """(dihapus, gaya_aktif_dilepas). Gaya yang sedang dipakai dilepas: chat kembali ke bawaan."""
+    n = str(nama or "").strip().lower()
+    data = profil(pemilik)
+    if n == KUSTOM:
+        ada = data.pop("kustom", None) is not None
+    else:
+        sisa = {m: data["gaya_saya"][m] for m in _milik(data) if m != n}
+        ada = n in _milik(data)
+        if ada:
+            data["gaya_saya"] = sisa
+    if not ada:
+        return False, False
+    dilepas = data.get("gaya") == n
+    if dilepas:
+        data.pop("gaya")
     write_json(_berkas_profil(pemilik), data)
-    return preset
+    return True, dilepas
+
+
+def daftar_milik(pemilik):
+    """Gaya buatan pemilik yang MASIH sah (yang rusak/dasarnya hilang tidak ditawarkan)."""
+    data = profil(pemilik)
+    hasil = []
+    for n in _milik(data) + ([KUSTOM] if isinstance(data.get("kustom"), dict) else []):
+        try:
+            hasil.append(_preset_milik(data, n))
+        except GayaError:
+            continue
+    return hasil
 
 
 def pilih(eksplisit, pemilik):
     """(preset, sumber). sumber: 'diminta' | 'profil' | 'bawaan' (| 'bawaan_profil_tidak_berlaku').
 
     Nama eksplisit yang salah -> GayaError (user/agent harus tahu). Gaya di profil yang presetnya
-    sudah dihapus (atau kustom yang tak lagi sah) TIDAK menggagalkan render: jatuh ke bawaan dan
-    sumbernya menyebutkan itu."""
-    if eksplisit:
-        if str(eksplisit).strip().lower() == KUSTOM:
-            return _preset_kustom(profil(pemilik)), "diminta"
-        return muat(eksplisit), "diminta"
+    sudah dihapus (atau buatan sendiri yang tak lagi sah) TIDAK menggagalkan render: jatuh ke bawaan
+    dan sumbernya menyebutkan itu. Gaya buatan sendiri hanya terlihat oleh pemiliknya."""
     data = profil(pemilik)
+    if eksplisit:
+        n = str(eksplisit).strip().lower()
+        if n == KUSTOM or n in _milik(data):
+            return _preset_milik(data, n), "diminta"
+        try:
+            return muat(eksplisit), "diminta"
+        except GayaError:
+            milik = [p["nama"] for p in daftar_milik(pemilik)]
+            raise GayaError(f"Gaya {eksplisit!r} tidak dikenal. Pilihan: {', '.join(daftar() + milik)}.")
     di_profil = data.get("gaya")
     if di_profil:
         try:
-            return (_preset_kustom(data) if di_profil == KUSTOM else muat(di_profil)), "profil"
+            if di_profil == KUSTOM or di_profil in _milik(data):
+                return _preset_milik(data, di_profil), "profil"
+            return muat(di_profil), "profil"
         except GayaError:
             return muat(BAWAAN), "bawaan_profil_tidak_berlaku"
     return muat(BAWAAN), "bawaan"
@@ -334,10 +514,37 @@ def env_editing(preset, args):
     return {EDITING[k][0]: v for k, v in preset["editing"].items() if getattr(args, k, None) is None}
 
 
+def audio_terpasang(preset, args):
+    """{kunci: nilai} pengaturan audio gaya yang BERLAKU di run ini (yang tidak diisi user sendiri).
+
+    Dua pengecualian, keduanya supaya gaya tidak mengalahkan permintaan user yang lebih spesifik:
+    - user mengirim lagunya sendiri (`music_file`): `musik` dan `suasana_musik` gaya tidak dipasang;
+    - revisi tanpa "ganti lagu": `suasana_musik` tidak dipasang, supaya lagu video yang direvisi
+      tidak berganti hanya karena gayanya diganti (lihat catatan di EDITING)."""
+    hasil = {}
+    for k, v in (preset.get("audio") or {}).items():
+        dest = AUDIO[k][2]
+        if dest and getattr(args, dest, None) is not None:
+            continue
+        if k in ("musik", "suasana_musik") and getattr(args, "music_file", None):
+            continue
+        if k == "suasana_musik" and getattr(args, "revisi", None) and not getattr(args, "ganti_musik", False):
+            continue
+        hasil[k] = v
+    return hasil
+
+
+def env_audio(preset, args):
+    """{ENV: nilai} dari audio_terpasang()."""
+    return {AUDIO[k][0]: (f"{LEVEL_MUSIK[v]:g}" if k == "level_musik" else v)
+            for k, v in audio_terpasang(preset, args).items()}
+
+
 def pasang(preset, args, environ=None):
     """Pasang preset ke env proses render (diwarisi semua tahap)."""
     env = os.environ if environ is None else environ
     env.update(env_editing(preset, args))
+    env.update(env_audio(preset, args))
     env["GAYA_NAMA"] = preset["nama"]
     if preset["tema"]:
         env["GAYA_TEMA"] = json.dumps(preset["tema"], ensure_ascii=False)
@@ -405,60 +612,119 @@ def _ringkas(p):
     return {"nama": p["nama"], "label": p["label"], "deskripsi": p["deskripsi"]}
 
 
+def _rinci(p):
+    """Isi lengkap gaya buatan sendiri, untuk dibacakan agent ke user."""
+    return {"gaya": _ringkas(p), "dasar": p["dasar"], "tema": p["tema"], "editing": p["editing"],
+            "audio": p["audio"], "carousel": p["carousel"]}
+
+
+LEPAS = "bawaan"             # nilai flag: hapus pengaturan ini dari gaya (kembali ke gaya dasar)
+
+
+def _flag(nama):
+    return "--" + nama.replace("_", "-")
+
+
+def _bagian_dari_argumen(a, tabel, awalan=""):
+    hasil = {}
+    for k in tabel:
+        v = getattr(a, (awalan + k), None)
+        if v is not None:
+            hasil[k] = None if str(v).strip().lower() == LEPAS else str(v).strip().lower()
+    return hasil
+
+
 def _ubahan_dari_argumen(a):
-    """Flag CLI `kustom` -> tema parsial. Nilai dicek validasi_tema saat disimpan."""
+    """Flag CLI `buat`/`kustom` -> ubahan per bagian. Nilai dicek validasi_* saat disimpan."""
     warna = {k: v for k, v in (("aksen", a.aksen), ("aksen2", a.aksen2), ("sorot", a.sorot), ("teks", a.teks),
                                ("teks_sub", a.teks_sub), ("kartu", a.kartu), ("latar", a.latar)) if v}
     if a.kunci:
         warna["kunci"] = [w.strip() for w in a.kunci.split(",") if w.strip()]
-    ubahan = {"warna": warna} if warna else {}
+    tema = {"warna": warna} if warna else {}
     if a.font:
-        ubahan["font"] = {"judul": a.font.strip().lower()}
+        tema["font"] = {"judul": a.font.strip().lower()}
     if a.sudut is not None:
-        ubahan["sudut"] = a.sudut
+        tema["sudut"] = a.sudut
     if a.cahaya:
-        ubahan["cahaya"] = a.cahaya == "on"
+        tema["cahaya"] = a.cahaya == "on"
     if a.gerak:
-        ubahan["gerak"] = a.gerak
-    return ubahan
+        tema["gerak"] = a.gerak
+    carousel = _bagian_dari_argumen(a, CAROUSEL, "carousel_")
+    if a.carousel_jumlah is not None:
+        if str(a.carousel_jumlah).strip().lower() == LEPAS:
+            carousel["jumlah"] = None
+        else:
+            try:
+                carousel["jumlah"] = int(a.carousel_jumlah)
+            except ValueError:
+                raise GayaError(f"carousel.jumlah harus bilangan {CAROUSEL_SLIDE[0]}-{CAROUSEL_SLIDE[1]}")
+    ubahan = {"tema": tema, "editing": _bagian_dari_argumen(a, EDITING),
+              "audio": _bagian_dari_argumen(a, AUDIO), "carousel": carousel}
+    return {k: v for k, v in ubahan.items() if v}
+
+
+def pilihan():
+    """Semua nilai yang sah, supaya agent tidak menebak (nilai di luar daftar ini ditolak)."""
+    return {"dasar": daftar(), "font": list(TEXT_FONTS), "gerak": list(GERAK), "sudut": list(SUDUT),
+            "editing": {k: list(v[1]) for k, v in EDITING.items()},
+            "audio": {k: list(v[1]) for k, v in AUDIO.items()},
+            "carousel": {**{k: list(v) for k, v in CAROUSEL.items()}, "jumlah": list(CAROUSEL_SLIDE)},
+            "lepas": LEPAS, "maks_gaya_saya": MAKS_GAYA_SAYA}
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Preset gaya tampilan + editing")
-    ap.add_argument("perintah", choices=["daftar", "pratinjau", "pakai", "lihat", "lupakan", "kustom"])
+    ap.add_argument("perintah", choices=["daftar", "pratinjau", "pakai", "lihat", "lupakan", "kustom",
+                                         "buat", "hapus", "pilihan"])
     ap.add_argument("--chat-id", default="")
     ap.add_argument("--gaya", default="")
-    # kustom: racik gaya sendiri di atas preset --dasar. Warna hex #RRGGBB; --aksen saja sudah cukup.
+    ap.add_argument("--nama", default="", help="buat/hapus: nama gaya buatan sendiri.")
+    # kustom/buat: racik gaya sendiri di atas preset --dasar. Warna hex #RRGGBB; --aksen saja sudah cukup.
     ap.add_argument("--dasar", default=None)
     for nama in ("aksen", "aksen2", "sorot", "teks", "teks-sub", "kartu", "latar", "kunci", "font", "gerak"):
         ap.add_argument(f"--{nama}", default=None)
     ap.add_argument("--sudut", type=float, default=None)
     ap.add_argument("--cahaya", choices=["on", "off"], default=None)
+    # Editing, audio, carousel: nilainya dicek validasi_* (pesan tolak menyebut pilihan yang sah).
+    for k in list(EDITING) + list(AUDIO):
+        ap.add_argument(_flag(k), default=None)
+    for k in list(CAROUSEL) + ["jumlah"]:
+        ap.add_argument(_flag("carousel_" + k), default=None)
     a = ap.parse_args(argv)
     try:
         if a.perintah == "daftar":
             out = {"ok": True, "gaya": [_ringkas(muat(n)) for n in daftar()], "bawaan": BAWAAN}
+            if a.chat_id.strip():
+                out["gaya_saya"] = [{**_ringkas(p), "dasar": p["dasar"]} for p in daftar_milik(a.chat_id)]
+                out["aktif"] = profil(a.chat_id).get("gaya")
+        elif a.perintah == "pilihan":
+            out = {"ok": True, **pilihan()}
         elif a.perintah == "pratinjau":
             out = {"ok": True, "gambar": pratinjau(), "gaya": [_ringkas(muat(n)) for n in daftar()]}
         elif a.perintah == "pakai":
-            data = simpan_gaya(a.chat_id, a.gaya)
-            out = {"ok": True, "gaya": _ringkas(muat(data["gaya"]))}
-        elif a.perintah == "kustom":
+            simpan_gaya(a.chat_id, a.gaya)
+            out = {"ok": True, "gaya": _ringkas(pilih(None, a.chat_id)[0])}
+        elif a.perintah in ("kustom", "buat"):
+            nama = KUSTOM if a.perintah == "kustom" else a.nama
             ubahan = _ubahan_dari_argumen(a)
             if not ubahan and not a.dasar:
                 raise GayaError("Sebutkan yang mau diubah, mis. --aksen \"#B91C1C\" atau --font elegan.")
-            preset = simpan_kustom(a.chat_id, a.dasar, ubahan)
-            out = {"ok": True, "gaya": _ringkas(preset), "dasar": preset["dasar"], "tema": preset["tema"], "gambar": None}
+            preset = simpan_gaya_saya(a.chat_id, nama, a.dasar, ubahan)
+            out = {"ok": True, **_rinci(preset), "gambar": None}
             try:
                 out["gambar"] = pratinjau_satu(preset)
             except Exception as e:  # noqa: BLE001  (gaya sudah tersimpan; pratinjau gagal dilaporkan)
                 out["pratinjau_gagal"] = f"{type(e).__name__}: {str(e)[:160]}"
+        elif a.perintah == "hapus":
+            dihapus, dilepas = hapus_gaya_saya(a.chat_id, a.nama)
+            if not dihapus:
+                raise GayaError(f"Chat ini tidak punya gaya buatan sendiri bernama {a.nama!r}.")
+            out = {"ok": True, "dihapus": a.nama.strip().lower(), "gaya_aktif_dilepas": dilepas}
         elif a.perintah == "lihat":
             data = profil(a.chat_id)
             nama = data.get("gaya")
-            if nama == KUSTOM:
-                preset = _preset_kustom(data)
-                out = {"ok": True, "gaya": _ringkas(preset), "dasar": preset["dasar"], "tema": preset["tema"]}
+            if nama == KUSTOM or nama in _milik(data):
+                out = {"ok": True, **_rinci(_preset_milik(data, nama))}
             else:
                 out = {"ok": True, "gaya": _ringkas(muat(nama)) if nama else None, "bawaan": BAWAAN}
         else:
@@ -467,6 +733,8 @@ def main(argv=None):
         out = {"ok": False, "alasan": str(e)}
     except Exception as e:  # noqa: BLE001  (render pratinjau bisa gagal karena Chromium)
         out = {"ok": False, "alasan": f"{type(e).__name__}: {str(e)[:200]}"}
+    if out["ok"] and out.get("gambar"):
+        out["kirim"] = jalur_kirim(out["gambar"])
     print(json.dumps(out, ensure_ascii=False))
     return 0 if out["ok"] else 1
 

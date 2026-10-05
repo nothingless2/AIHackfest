@@ -30,6 +30,44 @@ RUN_LOG_PATH = os.path.join(STATE_DIR, "run_log.jsonl")
 
 DRAFT_VIDEO_PATH = os.path.join(DRAFTS_DIR, "video_output.mp4")
 
+WORKSPACE_DIR = os.path.join(PROJECT_ROOT, "workspace")
+MEDIA_EXT = (".jpg", ".jpeg", ".png", ".mp4", ".mp3", ".m4a", ".wav", ".ogg")
+
+
+def jalur_kirim(data):
+    """Daftar path berkas hasil di `data` (dict/list hasil skrip) dalam bentuk yang bisa dikirim
+    gateway sebagai `MEDIA:<path>`, urut seperti muncul, tanpa duplikat.
+
+    Pipeline berjalan di container (workspace = /opt/klipa/workspace), sedangkan gateway Hermes
+    berjalan di komputer user. Di Windows gateway TIDAK bisa menerjemahkan path container Linux
+    (Path('/opt/...').is_absolute() False -> dibuang diam-diam; terukur 4 Okt: bot menulis
+    MEDIA:/root/x.html lalu "Skipping MEDIA directive path (not found on this host)"). Maka bila
+    KLIPA_HOST_WORKSPACE diisi (path folder workspace yang sama DI KOMPUTER, mis.
+    D:/AIHackfest/workspace), awalan workspace diganti ke situ. Kosong (Linux asli) -> path apa adanya.
+
+    Hanya berkas media yang benar-benar ada DAN berada di dalam workspace; model tidak ikut menentukan
+    isi daftar ini."""
+    akar = os.path.realpath(WORKSPACE_DIR)
+    host = (os.getenv("KLIPA_HOST_WORKSPACE") or "").strip().replace("\\", "/").rstrip("/")
+    hasil = []
+
+    def jelajah(v):
+        if isinstance(v, dict):
+            for x in v.values():
+                jelajah(x)
+        elif isinstance(v, (list, tuple)):
+            for x in v:
+                jelajah(x)
+        elif isinstance(v, str) and v.lower().endswith(MEDIA_EXT) and os.path.isabs(v):
+            nyata = os.path.realpath(v)
+            if os.path.isfile(nyata) and os.path.commonpath([akar, nyata]) == akar:
+                p = nyata if not host else host + "/" + os.path.relpath(nyata, akar).replace(os.sep, "/")
+                if p not in hasil:
+                    hasil.append(p)
+
+    jelajah(data)
+    return hasil
+
 
 def draft_video_path_for_run(run_id):
     """Path video hasil akhir milik satu run spesifik — dibaca oleh apa pun

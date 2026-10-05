@@ -26,6 +26,35 @@ hasilnya cuma copy/remux mentah yang terlihat "berhasil" padahal tidak diedit
 sama sekali. WAJIB lewat `scripts/inspect_media.py` lalu `scripts/hermes_render.py`
 persis seperti Langkah 1-4 di bawah, setiap kali, tanpa kecuali.
 
+## Aturan keras untuk SEMUA permintaan konten (video maupun carousel)
+
+1. **Hanya lewat skrip pipeline.** Carousel = `scripts/carousel.py`. Gaya = `scripts/gaya.py`. Video =
+   `inspect_media.py` + `hermes_render.py`. JANGAN menulis HTML/gambar/berkas sendiri sebagai
+   pengganti, JANGAN membuat atau mengubah skill (`skill_manage`), JANGAN menyuruh user "buka
+   filenya". (4 Okt: agent menulis `/root/ai-carousel-pemula.html` sendiri, berkas itu tidak pernah
+   terkirim ke Telegram, lalu ia mengklaim "sudah verified".)
+2. **Tanya GAYA dulu, sebelum membuat apa pun.** Lewati pertanyaan ini hanya bila user sudah
+   menyebut gayanya di pesannya, atau `gaya.py lihat --chat-id "<label chat>"` menunjukkan gaya
+   tersimpan (sebut singkat gaya yang akan dipakai, user boleh menggantinya). Caranya:
+   1) `gaya.py daftar --chat-id "<label chat>"` (isi `gaya` = bawaan, `gaya_saya` = buatan user ini);
+   2) `gaya.py pratinjau`, kirim gambarnya (`MEDIA:<path gambar>`);
+   3) tanyakan dalam satu pertanyaan: pilih salah satu gaya itu, ATAU "buat gaya baru" (lihat
+      "Gaya buatan sendiri"). Untuk VIDEO, setelah gaya, tanyakan juga editingnya (subtitle, musik,
+      suara) sesuai Langkah 2 — jangan menebak.
+3. **Jangan menanyai hal yang bisa disimpulkan.** Topik dan sudut diambil dari pesan user; jumlah
+   slide bawaan 6 (atau dari gaya). Tanya sudut/jumlah hanya kalau pesannya benar-benar tidak cukup.
+   Maksimal dua pertanyaan sebelum mengerjakan.
+4. **Mengirim hasil = menulis `MEDIA:<path>` di balasan**, satu baris per berkas, berurutan, dengan
+   path PERSIS dari daftar `kirim` di hasil skrip (carousel.py, gaya.py, hermes_render.py semuanya
+   menyediakannya). JANGAN memakai path dari kolom lain (`slide`, `gambar`, `video_path`) dan JANGAN
+   menulis path sendiri: path container (`/opt/...`, `/root/...`, `/tmp/...`) DIBUANG diam-diam oleh
+   gateway di Windows dan user tidak menerima apa pun. `kirim` kosong atau tidak ada -> katakan
+   terus terang bahwa berkasnya belum bisa dikirim. Jangan bilang "ini filenya" atau "sudah
+   dikirim" sebelum tag `MEDIA:` ditulis.
+5. **Lapor apa adanya.** Skrip `ok: false` -> sampaikan `alasan`. Jangan menulis "verified" untuk
+   sesuatu yang tidak kamu jalankan. Jangan menyebut nama berkas internal (CLAUDE.md, SKILL.md,
+   aturan nomor berapa) kepada user.
+
 Pipeline ffmpeg + LLM yang berjalan lokal di mesin ini (`/root/AIHackfest`). Mengedit
 bahan MILIK USER — bukan membuat video sintesis AI dari nol.
 
@@ -117,6 +146,48 @@ Daftar dan penjelasannya: `python3 /root/AIHackfest/scripts/gaya.py daftar`.
   gaya tersimpan sudah tidak ada, video memakai Klasik: beri tahu user.
 - Ke user sebut LABEL-nya (Hype, Elegan), bukan flag atau nama berkas.
 
+### Gaya buatan sendiri (bernama, boleh banyak)
+
+User ingin gaya BARU miliknya ("buat gaya baru namanya kopi senja", "simpan ini jadi gaya promo
+kilat", "gayaku: subtitle per kata, musik tenang pelan, carousel 8 slide"), atau ingin mengatur
+musik/suara/editing/carousel sebagai kebiasaan, bukan untuk satu video saja:
+
+```
+python3 /root/AIHackfest/scripts/gaya.py buat --chat-id "<label chat yang SAMA PERSIS>" --nama <nama> \
+  [--dasar klasik|bersih|edukatif|elegan|hype|promo] \
+  [tampilan: --aksen "#RRGGBB" --font ... --sudut 0-2 --cahaya on|off --gerak ... --kartu ... --teks ...] \
+  [editing: --subtitle-style ... --color-filter ... --text-font ... --text-position ... --text-animation ... \
+            --sfx on|off --zoom-wajah on|off --logo-merek on|off --cover desain|frame --motion sedang|mati \
+            --potong-pengisi on|off] \
+  [audio: --musik on|off --suasana-musik tenang|santai|upbeat|energik --level-musik pelan|sedang|keras \
+          --bersih-suara on|off --suara-narasi pria|wanita] \
+  [carousel: --carousel-jumlah 3-10 --carousel-platform ig|tiktok|keduanya --carousel-latar stok|polos \
+             --carousel-stok on|off]
+```
+
+- `--nama`: huruf kecil/angka/`-`/`_`, 2-31 karakter, diawali huruf ("Kopi Senja" -> `kopi-senja`).
+  Nama gaya bawaan tidak boleh dipakai. Maksimal 12 gaya per chat.
+- Nilai yang sah untuk tiap flag: `python3 /root/AIHackfest/scripts/gaya.py pilihan`. JANGAN menebak
+  nilai di luar daftar itu; permintaan user yang tidak ada padanannya -> katakan terus terang.
+- Nama yang SUDAH ada = mengubah gaya itu (yang tidak disebut tetap). Melepas satu pengaturan
+  (kembali ke gaya dasarnya): beri nilai `bawaan`, mis. `--level-musik bawaan`.
+- Hasil `ok: true` berisi `tema`, `editing`, `audio`, `carousel`, dan `gambar` (pratinjau tampilan):
+  kirim gambarnya, lalu ringkas isi gaya dengan kata biasa. Gaya itu langsung jadi gaya chat ini.
+- `ok: false` -> sampaikan `alasan` apa adanya. Yang sering: suasana musik yang lagunya belum ada di
+  pustaka ("Pustaka musik belum punya lagu bernuansa ...") -> tawarkan suasana yang tersedia atau
+  minta user mengirim lagunya; JANGAN memilih suasana lain sendiri.
+- Daftar gaya milik chat ini: `gaya.py daftar --chat-id "<label chat>"` (`gaya_saya`, `aktif`).
+  Memakai: `pakai --gaya <nama>` atau `--gaya <nama>` saat render/carousel. Menghapus:
+  `gaya.py hapus --chat-id "<label chat>" --nama <nama>` (hanya atas permintaan user).
+- Gaya buatan sendiri hanya berlaku untuk chat yang membuatnya.
+- Permintaan user DI RUN INI selalu menang atas gayanya (mis. gaya bermusik tapi user bilang "yang
+  ini tanpa musik" -> `--music off`). Lagu kiriman user juga menang atas suasana musik gaya. Di
+  revisi, suasana musik gaya tidak mengganti lagu kecuali user minta ganti lagu (`--ganti-musik`).
+- `gaya_tampilan.audio` di hasil render = pengaturan audio gaya yang benar-benar dipakai; sebut
+  singkat ("musik tenang, pelan — dari gayamu").
+- `--level-musik` keras/pelan belum diuji dengar di banyak bahan: kalau user bilang musiknya
+  kebesaran/kekecilan, ubah gayanya, jangan membela hasilnya.
+
 ## Kamus istilah (nama, merek, istilah yang salah tulis di subtitle)
 
 User bilang tulisannya salah ("harusnya OpenClaw, bukan Open Cloud", "namaku ditulis salah"):
@@ -148,9 +219,14 @@ WAJIB latar belakang (±1 menit), sama seperti render:
 ```
 python3 /root/AIHackfest/scripts/carousel.py --chat-id "<label chat yang SAMA PERSIS>" \
   --teks "<topik / poin / naskah dari user, apa adanya>" \
-  [--dari-run "<run_id video yang didaur ulang>"] [--foto "<path foto user>"]... [--stok] \
-  [--gaya <nama>] [--platform ig|tiktok|keduanya] [--jumlah 3-10]
+  [--dari-run "<run_id video yang didaur ulang>"] [--foto "<path foto user>"]... [--stok|--tanpa-stok] \
+  [--latar <path>|stok|polos] [--gaya <nama>] [--platform ig|tiktok|keduanya] [--jumlah 3-10]
 ```
+
+Flag yang TIDAK ditulis diisi dari bagian carousel gaya chat ini (kalau gayanya buatan sendiri dan
+mengaturnya), lalu bawaan (`ig`, 6 slide, tanpa foto stok). Jadi JANGAN menulis `--platform ig` atau
+`--jumlah 6` kalau user tidak memintanya: itu mengalahkan gaya user. Hasil
+`gaya_tampilan.pengaturan_carousel` menyebut pengaturan mana yang diambil dari gaya.
 
 | Permintaan user | Flag |
 |---|---|
@@ -158,13 +234,16 @@ python3 /root/AIHackfest/scripts/carousel.py --chat-id "<label chat yang SAMA PE
 | "jadikan video tadi carousel" | `--dari-run <run_id video itu>` (boleh ditambah `--teks`) |
 | user mengirim foto untuk carousel | `--foto <path>` per foto (urut: slide pembuka dulu) |
 | "pakai foto stok" tiap slide | `--stok` (gagal -> slide tetap jadi tanpa foto) |
+| "yang ini tanpa foto stok" (gayanya memakai stok) | `--tanpa-stok` |
 | "latarnya pakai gambar ini" (satu gambar untuk semua slide) | `--latar <path gambar user>` |
 | "latarnya foto estetik yang cocok" / "kasih background" | `--latar stok` (satu foto sesuai topik) |
+| "latarnya polos saja" (gayanya memakai latar stok) | `--latar polos` |
 | untuk TikTok / dua-duanya | `--platform tiktok` / `--platform keduanya` (bawaan: `ig`) |
 | jumlah slide / gaya | `--jumlah N`, `--gaya <nama>` (tanpa flag: gaya tersimpan, lalu Klasik) |
 
-- **`ok: true`**: kirim SEMUA berkas `slide.ig` (dan/atau `slide.tiktok`) berurutan dalam SATU balasan
-  dengan kemampuan kirim bawaanmu (jadi album), lalu `caption` + `hashtags` sebagai teks siap tempel.
+- **`ok: true`**: kirim SEMUA berkas `slide.ig` (dan/atau `slide.tiktok`) berurutan dalam SATU balasan,
+  masing-masing satu baris `MEDIA:<path>` yang diambil dari `kirim` (jadi album), lalu `caption` +
+  `hashtags` sebagai teks siap tempel.
   Sebut `gaya_tampilan.label`. `catatan` berisi sesuatu -> sebut singkat (mis. "foto latar gagal").
   `--foto` = foto jadi gambar utama slide (teks menjauhi wajah); `--latar` = gambar diburamkan di
   belakang SEMUA slide. Boleh digabung: slide berfoto memakai fotonya, sisanya memakai latar.

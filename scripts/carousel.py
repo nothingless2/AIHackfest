@@ -25,7 +25,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import LLM_MODEL, PROJECT_ROOT, RAW_DIR, chat_json, write_json  # noqa: E402
+from common import LLM_MODEL, PROJECT_ROOT, RAW_DIR, chat_json, jalur_kirim, write_json  # noqa: E402
 import gaya  # noqa: E402
 
 CAROUSEL_DIR = os.path.join(PROJECT_ROOT, "workspace", "carousel")
@@ -43,6 +43,15 @@ BATAS = {
 }
 BUTIR = (2, 5)
 BUTIR_KATA = 10
+# Ikon: daftar TERTUTUP yang digambar komponen Remotion sebagai SVG inline (aturan #5 CLAUDE.md:
+# model hanya MEMILIH nomor/nama dari daftar, kode yang menggambar). Tidak ada berkas gambar yang
+# diunduh, jadi tidak ada masalah lisensi dan tidak ada permintaan jaringan saat render.
+# Harus sama dengan kunci IKON di remotion/src/Carousel.jsx (dijaga tes).
+IKON = ("lampu", "centang", "silang", "peringatan", "roket", "grafik", "jam", "uang",
+        "bintang", "api", "orang", "obrolan", "target", "gembok", "hati", "kunci")
+# Watermark: teks pendek milik user (mis. "@akunku"). Dibatasi ketat karena nilainya ikut ke render.
+WATERMARK_MAKS = 24
+_WATERMARK = re.compile(r"^[\w @.\-_&/|+']{1,%d}$" % WATERMARK_MAKS, re.UNICODE)
 HASHTAG_MAKS = 5
 CAPTION_MAKS = 2200                   # batas caption Instagram
 KONTRAS_MIN = 3.0                     # WCAG AA untuk teks besar (semua teks slide >= 24 px)
@@ -116,6 +125,11 @@ def validasi(data, sumber):
         cari = str(s.get("kata_kunci_gambar") or "").strip()
         if cari and re.fullmatch(r"[A-Za-z][A-Za-z ]{1,40}", cari) and _kata(cari) <= 4:
             bersih["cari"] = cari
+        # Ikon: nama di luar daftar DIABAIKAN diam-diam (slide tetap jadi, hanya tanpa ikon) --
+        # ikon itu hiasan, tidak boleh menggagalkan carousel yang isinya sudah benar.
+        ikon = str(s.get("ikon") or "").strip().lower()
+        if ikon in IKON:
+            bersih["ikon"] = ikon
         if salah:
             masalah.append(f"slide {i} ({jenis}): " + "; ".join(salah))
             continue
@@ -152,10 +166,12 @@ Aturan:
 - "kata_kunci_latar": 1-4 kata BAHASA INGGRIS untuk SATU foto latar estetik yang cocok dengan topik
   (suasana/benda, bukan teks), mis. "minimal desk laptop".
 - "caption": teks postingan 1-3 kalimat; "hashtags": 3-5 tagar relevan.
+- "ikon" opsional per slide: SATU nama dari daftar ini saja, yang paling cocok dengan isi slide itu —
+  {ikon}. Nama di luar daftar diabaikan. Kosongkan kalau tidak ada yang cocok; jangan dipaksakan.
 {platform}
 Balas HANYA JSON:
-{{"slide": [{{"jenis": "hook", "judul": "...", "sorot": "...", "sub": "...", "kata_kunci_gambar": "..."}},
-            {{"jenis": "isi", "judul": "...", "isi": "..."}},
+{{"slide": [{{"jenis": "hook", "judul": "...", "sorot": "...", "sub": "...", "ikon": "...", "kata_kunci_gambar": "..."}},
+            {{"jenis": "isi", "judul": "...", "isi": "...", "ikon": "..."}},
             {{"jenis": "daftar", "judul": "...", "butir": ["...", "..."]}},
             {{"jenis": "cta", "judul": "...", "sub": "...", "tombol": "..."}}],
  "kata_kunci_latar": "...", "caption": "...", "hashtags": ["#...", "#..."]}}
@@ -170,7 +186,8 @@ def minta_slide(sumber, jumlah, platform, chat=None):
     chat = chat or chat_json
     teks_platform = {"ig": "Untuk Instagram.", "tiktok": "Untuk TikTok (foto geser).",
                      "keduanya": "Untuk Instagram dan TikTok."}[platform]
-    pesan = [{"role": "user", "content": PROMPT.format(n=jumlah, platform=teks_platform, sumber=sumber[:6000])}]
+    pesan = [{"role": "user", "content": PROMPT.format(n=jumlah, platform=teks_platform, ikon=", ".join(IKON),
+                                                       sumber=sumber[:6000])}]
     data = chat(pesan, model=LLM_MODEL, label="naskah carousel")
     slides, caption, tag, masalah = validasi(data, sumber)
     if not masalah:
@@ -219,6 +236,16 @@ def _cover(im, W, H):
     im = im.resize((max(W, round(im.width * s)), max(H, round(im.height * s))), Image.LANCZOS)
     x, y = (im.width - W) // 2, (im.height - H) // 2
     return im.crop((x, y, x + W, y + H))
+
+
+def siapkan_stiker(path):
+    """(data_url PNG) untuk stiker custom, mempertahankan transparansi alpha."""
+    from PIL import Image
+    with Image.open(path) as im:
+        im = im.convert("RGBA")
+        b = io.BytesIO()
+        im.save(b, "PNG")
+        return "data:image/png;base64," + base64.b64encode(b.getvalue()).decode()
 
 
 def siapkan_gambar(path, W, H):
@@ -353,8 +380,48 @@ def periksa_slide(penuh, teks, kotak, platform, wajah=None):
 
 # ------------------------------------------------------------------ utama
 
-def buat(*, chat_id, teks="", dari_run=None, foto=(), stok=False, latar=None, nama_gaya=None, platform="ig",
-         jumlah=JUMLAH_BAWAAN, chat=None):
+def bersihkan_watermark(teks):
+    """Watermark sah, atau None kalau kosong. Tidak sah -> CarouselError (user salah ketik harus
+    tahu, bukan diam-diam dibuang). Dibatasi daftar karakter: nilainya ikut ke props render."""
+    t = re.sub(r"\s+", " ", str(teks or "")).strip()
+    if not t:
+        return None
+    if not _WATERMARK.fullmatch(t):
+        raise CarouselError("watermark_invalid",
+                            f"Watermark maks {WATERMARK_MAKS} karakter, hanya huruf, angka, spasi, "
+                            f"dan @ . - _ & / | + ' — bukan {teks!r}.")
+    return t
+
+
+def terapkan_gaya(preset, *, platform=None, jumlah=None, stok=None, latar=None, ikon=None, watermark=None):
+    """(pengaturan, dari_gaya). Yang disebut user di run ini menang; yang tidak disebut (None) diisi
+    bagian `carousel` gaya; sisanya bawaan. `latar="polos"` = tanpa latar, `watermark="off"` = tanpa
+    watermark; keduanya cara user menolak pengaturan gayanya sendiri untuk satu run."""
+    atur = preset.get("carousel") or {}
+    dari_gaya = []
+
+    def isi(nilai, kunci, bawaan):
+        if nilai is None and kunci in atur:
+            dari_gaya.append(kunci)
+            return atur[kunci]
+        return bawaan if nilai is None else nilai
+
+    hasil = {
+        "platform": isi(platform, "platform", "ig"),
+        "jumlah": isi(jumlah, "jumlah", JUMLAH_BAWAAN),
+        "stok": isi(None if stok is None else ("on" if stok else "off"), "foto_stok", "off") == "on",
+        "latar": isi(latar, "latar", None),
+        "ikon": isi(ikon, "ikon", "on") == "on",
+        "watermark": isi(watermark, "watermark", None),
+    }
+    if hasil["latar"] == "polos":
+        hasil["latar"] = None
+    hasil["watermark"] = None if hasil["watermark"] == "off" else bersihkan_watermark(hasil["watermark"])
+    return hasil, dari_gaya
+
+
+def buat(*, chat_id, teks="", dari_run=None, foto=(), stiker=(), stok=None, latar=None, nama_gaya=None, platform=None,
+         jumlah=None, ikon=None, watermark=None, chat=None):
     """Bangun carousel; kembalikan dict hasil (ok True) atau melempar CarouselError."""
     import overlay_remotion as orr
     from PIL import Image
@@ -363,11 +430,14 @@ def buat(*, chat_id, teks="", dari_run=None, foto=(), stok=False, latar=None, na
 
     if not str(chat_id or "").strip():
         raise CarouselError("chat_tidak_diketahui", "Label chat tidak diketahui.")
+    preset, sumber_gaya = gaya.pilih(nama_gaya, chat_id)
+    atur, dari_gaya = terapkan_gaya(preset, platform=platform, jumlah=jumlah, stok=stok, latar=latar,
+                                    ikon=ikon, watermark=watermark)
+    platform, jumlah, stok, latar = atur["platform"], atur["jumlah"], atur["stok"], atur["latar"]
     if platform not in ("ig", "tiktok", "keduanya"):
         raise CarouselError("argumen_invalid", "platform harus ig, tiktok, atau keduanya")
     if not SLIDE_MIN <= int(jumlah) <= SLIDE_MAX:
         raise CarouselError("argumen_invalid", f"jumlah slide harus {SLIDE_MIN}-{SLIDE_MAX}")
-    preset, sumber_gaya = gaya.pilih(nama_gaya, chat_id)
     videos = []
     sumber = (teks or "").strip()
     if dari_run:
@@ -380,11 +450,13 @@ def buat(*, chat_id, teks="", dari_run=None, foto=(), stok=False, latar=None, na
         raise CarouselError("sumber_kurang", "Bahannya terlalu sedikit untuk carousel. Tulis topik atau poinnya, "
                                              "atau sebut video yang mau didaur ulang.")
     foto_sah = []
+    stiker_sah = []
     latar_berkas = None
-    if foto or (latar and latar != "stok"):
+    if foto or stiker or (latar and latar != "stok"):
         from hermes_render import MediaPathError, _validate_media_paths
         try:
             foto_sah = _validate_media_paths(list(foto)) if foto else []
+            stiker_sah = _validate_media_paths(list(stiker)) if stiker else []
             if latar and latar != "stok":
                 (latar_berkas,) = _validate_media_paths([latar])
         except MediaPathError as e:
@@ -398,8 +470,13 @@ def buat(*, chat_id, teks="", dari_run=None, foto=(), stok=False, latar=None, na
     kerja = tempfile.mkdtemp(prefix="_carousel_", dir=keluar)
     hasil = {"ok": True, "carousel_id": cid, "slide": {}, "jumlah_slide": len(slides),
              "jenis": [s["jenis"] for s in slides], "caption": caption, "hashtags": hashtags,
-             "gaya_tampilan": {"nama": preset["nama"], "label": preset["label"], "sumber": sumber_gaya},
+             "gaya_tampilan": {"nama": preset["nama"], "label": preset["label"], "sumber": sumber_gaya,
+                               "pengaturan_carousel": dari_gaya},
+             "watermark": atur["watermark"],
+             "ikon": sorted({s["ikon"] for s in slides if s.get("ikon")}) if atur["ikon"] else [],
              "kredit_foto": [], "catatan": catatan, "qa": {}}
+    if not atur["ikon"]:
+        slides = [{k: v for k, v in s.items() if k != "ikon"} for s in slides]
     try:
         with acquire_render_lock(f"carousel_{cid}"):
             for plat in (("ig", "tiktok") if platform == "keduanya" else (platform,)):
@@ -446,9 +523,10 @@ def buat(*, chat_id, teks="", dari_run=None, foto=(), stok=False, latar=None, na
                 pakai_latar = [latar_url is not None and g is None for g in gambar]
                 gambar = [latar_url if pl else g for pl, g in zip(pakai_latar, gambar)]
                 kotak = [kotak_teks(plat, W, H, w) for w in wajah]
-                props_slide = [{**s, "gambar": g, "latar": pl} for s, g, pl in zip(slides, gambar, pakai_latar)]
+                stiker_urls = [siapkan_stiker(p) for p in stiker_sah]
+                props_slide = [{**s, "gambar": g, "latar": pl, "stiker": stiker_urls[i % len(stiker_urls)] if stiker_urls else None} for i, (s, g, pl) in enumerate(zip(slides, gambar, pakai_latar))]
                 png, png_teks = orr.render_carousel(props_slide, kotak, preset["tema"], plat, W, H,
-                                                    os.path.join(kerja, plat))
+                                                    os.path.join(kerja, plat), watermark=atur["watermark"])
                 jalur, qa = [], []
                 for i, (a, b) in enumerate(zip(png, png_teks)):
                     penuh = np.asarray(Image.open(a).convert("RGB"))
@@ -481,21 +559,28 @@ def main(argv=None):
     ap.add_argument("--teks", default="", help="Topik, poin, atau naskah dari user (apa adanya).")
     ap.add_argument("--dari-run", default=None, help="run_id video yang didaur ulang jadi carousel.")
     ap.add_argument("--foto", action="append", default=[], help="Foto user (path di cache Hermes).")
-    ap.add_argument("--stok", action="store_true", help="Isi slide tanpa foto dengan foto Pexels.")
-    ap.add_argument("--latar", default=None, help="Satu latar untuk semua slide: path gambar user, atau 'stok'.")
+    ap.add_argument("--stiker", action="append", default=[], help="Stiker custom user (path di cache Hermes).")
+    # Tanpa flag = None: diisi bagian `carousel` gaya chat ini, lalu bawaan (ig, 6 slide, tanpa stok).
+    ap.add_argument("--stok", action="store_true", default=None, help="Isi slide tanpa foto dengan foto Pexels.")
+    ap.add_argument("--tanpa-stok", dest="stok", action="store_false", help="Tanpa foto stok walau gayanya memintanya.")
+    ap.add_argument("--latar", default=None,
+                    help="Satu latar untuk semua slide: path gambar user, 'stok', atau 'polos' (tanpa latar).")
     ap.add_argument("--gaya", default=None)
-    ap.add_argument("--platform", default="ig", choices=["ig", "tiktok", "keduanya"])
-    ap.add_argument("--jumlah", type=int, default=JUMLAH_BAWAAN)
+    ap.add_argument("--platform", default=None, choices=["ig", "tiktok", "keduanya"])
+    ap.add_argument("--jumlah", type=int, default=None)
+    ap.add_argument("--watermark", default=None, help="Teks watermark pendek, misal '@username'.")
     a = ap.parse_args(argv)
     try:
-        out = buat(chat_id=a.chat_id, teks=a.teks, dari_run=a.dari_run, foto=a.foto, stok=a.stok, latar=a.latar,
-                   nama_gaya=a.gaya, platform=a.platform, jumlah=a.jumlah)
+        out = buat(chat_id=a.chat_id, teks=a.teks, dari_run=a.dari_run, foto=a.foto, stiker=a.stiker, stok=a.stok, latar=a.latar,
+                   nama_gaya=a.gaya, platform=a.platform, jumlah=a.jumlah, watermark=a.watermark)
     except CarouselError as e:
         out = {"ok": False, "kode": e.kode, "alasan": str(e)}
     except gaya.GayaError as e:
         out = {"ok": False, "kode": "gaya_invalid", "alasan": str(e)}
     except Exception as e:  # noqa: BLE001  (LLM habis kuota, dll.: dilaporkan apa adanya)
         out = {"ok": False, "kode": "gagal", "alasan": f"{type(e).__name__}: {str(e)[:300]}"}
+    if out["ok"]:
+        out["kirim"] = jalur_kirim(out.get("slide"))      # urut per platform; bentuk yang bisa dikirim gateway
     print(json.dumps(out, ensure_ascii=False))
     return 0 if out["ok"] else 1
 
